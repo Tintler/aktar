@@ -55,7 +55,7 @@ GUI_BASLAT.cmd
 
 4. Videoyu pencereye sürükleyin → altyazı akışını işaretleyin → **Çevir**.
 
-Ayrıntılı kullanım için bkz. **[KULLANIM.md](KULLANIM.md)**.
+Ayrıntılı kullanım ve .exe'nin derlenmesi için bkz. **[KULLANIM.md](KULLANIM.md)**.
 
 ### Komut satırı (isteğe bağlı)
 
