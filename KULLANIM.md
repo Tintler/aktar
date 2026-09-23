@@ -36,6 +36,9 @@ FFmpeg'i [ffmpeg.org](https://ffmpeg.org/download.html) üzerinden indirip `bin`
 2. **Developer / Local Server** sekmesinden yerel sunucuyu başlatın (varsayılan `http://127.0.0.1:1234`).
 3. Modeli **thinking/reasoning kapalı** olacak şekilde ayarlayın (aşağıda 6.2'ye bakın).
 
+### 1.4 aktar.exe derlemesi
+1. İsterseniz bin klasörüne ffmpeg.exe dosyasını yerleştirdikten sonra .exe olarak derleyebilirsiniz. FFmpeg lisansından dolayı github sayfasında derlenmiş .exe sunulmuyor.
+2. ffmpeg.ex DERLE.cmd çalıştırarak aktar.exe'yi oluşturabilirsiniz.
 ---
 
 ## 2. Yapılandırma — `config.json`
