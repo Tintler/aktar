@@ -31,7 +31,7 @@ Video dosyalarındaki **metin tabanlı altyazıları** çıkarıp, **yerel bir y
 - **Windows** veya Python 3.10+ çalışan herhangi bir masaüstü ortamı.
 - **Python 3.10+** (kaynak koddan çalıştırma için).
 - **PySide6** (arayüz).
-- **FFmpeg / ffprobe:** `bin\ffmpeg.exe` ve `bin\ffprobe.exe` olarak taşınabilir şekilde projeye konur(daha fazla bilgi için bin klasöründe README.txt'i okuyabilirsiniz).
+- **FFmpeg / ffprobe:** `bin\ffmpeg.exe` ve `bin\ffprobe.exe` olarak taşınabilir şekilde projeye konur(daha fazla bilgi için bin klasöründe  **[README.txt](bin/README.txt)** 'i okuyabilirsiniz).
 - **LM Studio:** yerel sunucu açık olmalı (varsayılan `http://127.0.0.1:1234/v1`) ve bir model yüklü olmalı.
 
 ---
