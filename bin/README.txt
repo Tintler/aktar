@@ -13,4 +13,3 @@ veya
     https://github.com/BtbN/FFmpeg-Builds/releases
 
 Arsivden cikan ffmpeg.exe ve ffprobe.exe dosyalarini bu klasore kopyalayin.
-Bu dosyalar .gitignore ile surum kontrolunden haric tutulmustur.
