@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+*.lock
+build/
+dist/
+*.spec
+
+# Kullanici verisi (seri sozlukleri uygulama dizininde uretilir)
+series/
+
+# Tasinabilir ikililer (kullanici tarafindan bin/ icine konur)
+bin/ffmpeg.exe
+bin/ffprobe.exe
+bin/ffmpeg
+bin/ffprobe
+
+# Calisma zamani uretilen veri (uygulama kendisi olusturur)
+work_files/
+config.json
+offscreen*.png

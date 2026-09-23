@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="64" viewBox="0 0 200 64">
+  <g transform="translate(-3.7 57.7) scale(0.05588)">
+    <path d="m720-120-56-56 63-64H560v-80h167l-63-64 56-56 160 160-160 160Zm-600 0v-600q0-33 23.5-56.5T200-800h480q33 0 56.5 23.5T760-720v203q-10-2-20-2.5t-20-.5q-10 0-20 .5t-20 2.5v-203H200v400h283q-2 10-2.5 20t-.5 20q0 10 .5 20t2.5 20H240L120-120Zm160-440h320v-80H280v80Zm0 160h200v-80H280v80Zm-80 80v-400 400Z" fill="#e6edee"></path>
+    <path d="m720-120-56-56 63-64H560v-80h167l-63-64 56-56 160 160-160 160Z" fill="#c8ff00"></path>
+  </g>
+  <text x="56" y="43" font-family="'Segoe UI',system-ui,-apple-system,sans-serif"
+        font-size="34" font-weight="700" fill="#e6e9ef">aktar<tspan fill="#c8ff00">.</tspan></text>
+</svg>
