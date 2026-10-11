@@ -39,23 +39,45 @@ FFmpeg'i [ffmpeg.org](https://ffmpeg.org/download.html) üzerinden indirip `bin`
 ### 1.4 aktar.exe derlemesi
 1. İsterseniz `bin` klasörüne `ffmpeg.exe` ve `ffprobe.exe` dosyalarını yerleştirdikten sonra uygulamayı .exe olarak derleyebilirsiniz. FFmpeg lisansından dolayı GitHub sayfasında derlenmiş .exe sunulmuyor.
 2. `DERLE.cmd` dosyasını çalıştırarak `dist\Aktar.exe` dosyasını oluşturabilirsiniz.
-3. Konuşmadan metin (Whisper, bkz. 1.5) .exe'ye gömülmez; bu özellik için uygulamayı kaynak koddan çalıştırın.
+3. Konuşmadan metin (Whisper) `Aktar.exe`'ye gömülmez; ayrı bir paket olarak derlenip yanına konur (bkz. 1.5 → "Derlenmiş .exe ile").
 
 ### 1.5 İsteğe bağlı: konuşmadan metin (Whisper)
-Altyazısı olmayan videolarda **Soru Sor** sekmesi konuşmayı sesten metne çevirebilir (faster-whisper). Bu bağımlılık isteğe bağlıdır; kurulu değilse uygulama bunu söyler, geri kalan her şey çalışır.
+Altyazısı olmayan videolarda **Soru Sor** sekmesi konuşmayı sesten metne çevirebilir (faster-whisper). Bu özellik isteğe bağlıdır; yoksa uygulama bunu söyler, geri kalan her şey çalışır.
+
+**Kaynak koddan çalıştırırken:**
 
 ```bat
 py -3 -m pip install -r requirements-whisper.txt
 ```
 
+**Derlenmiş .exe ile:** Whisper, `ffmpeg`'in `bin` klasöründe ayrı durması gibi ayrı bir paket olarak çalışır. `Aktar.exe` bu paketi kendi klasöründe bulursa kullanır.
+
+1. Derleme yapacağınız bilgisayarda Whisper bağımlılıklarını kurun:
+
+   ```bat
+   py -3 -m pip install -r requirements.txt -r requirements-whisper.txt
+   ```
+
+2. GPU desteği istiyorsanız aşağıdaki **NVIDIA GPU** adımını derlemeden **önce** yapın. Kütüphaneler pakete o anda eklenir.
+3. `DERLE_WHISPER.cmd` dosyasını çalıştırın. Çıktı `dist\aktar-whisper\` klasörüdür.
+4. Bu klasörü olduğu gibi `Aktar.exe`'nin yanına koyun:
+
+   ```
+   Aktar.exe
+   aktar-whisper\aktar-whisper.exe   (+ _internal\ klasörü)
+   models\whisper\                   (ilk kullanımda otomatik oluşur)
+   ```
+
+Paket boyutu yalnızca işlemci desteğiyle ~270 MB, NVIDIA GPU kütüphaneleriyle ~2.1 GB'tır. Whisper'a ihtiyaç duymayanlar paketi hiç kopyalamaz; `Aktar.exe` küçük kalır.
+
 - Model ilk kullanımda uygulama klasöründeki `models\whisper\` altına indirilir (varsayılan **large-v3-turbo**, ~1.6 GB; bir kez internet gerekir).
-- **NVIDIA GPU ile hızlandırma (önerilir):** ayrıca CUDA 12 kütüphanelerini kurun:
+- **NVIDIA GPU ile hızlandırma (önerilir):** ayrıca CUDA 12 kütüphanelerini kurun (derlenmiş paket için `DERLE_WHISPER.cmd`'den önce):
 
   ```bat
   py -3 -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12==9.*
   ```
 
-  Cihaz ayarı `auto` iken GPU varsa önce o denenir; kütüphaneler eksikse ya da GPU çalışmazsa konsola nedeni yazılır ve işlemciyle devam edilir (çok daha yavaş).
+  Cihaz ayarı `auto` iken GPU varsa önce o denenir. Konsolda önce `GPU kütüphaneleri: cublas (...), cudnn (...)` satırı görünür. Kütüphaneler eksikse ya da GPU çalışmazsa nedeni yazılır ve işlemciyle devam edilir (çok daha yavaş).
 
 ---
 
@@ -266,9 +288,16 @@ Model çoklu istekte ID'leri düşürmüş, girdileri eksik döndürmüş veya t
 Transkript modelin bağlam uzunluğuna sığmıyor. LM Studio'da modelin **Context Length** ayarını artırın (varsayılan `qa_context_chars` 24000 için en az ~12k token önerilir) veya Ayarlar → Gelişmiş → **Soru-cevap bağlam karakteri** değerini düşürün.
 
 ### 6.11 Soru Sor: Whisper GPU kullanmıyor / çok yavaş
-Konsolda `Whisper cuda ile çalışamadı: ...` görüyorsanız CUDA kütüphaneleri eksiktir. `py -3 -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12==9.*` ile kurun ve uygulamayı yeniden başlatın. Başarılı olunca konsolda `cihaz: cuda` yazar. GPU'suz bilgisayarda Ayarlar'dan daha küçük bir model (`small`) seçebilirsiniz.
+Konsolda `Whisper cuda ile çalışamadı: ...` görüyorsanız:
+- `GPU kütüphaneleri: bulunamadı` yazıyorsa CUDA kütüphaneleri eksiktir. `py -3 -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12==9.*` ile kurun. Derlenmiş .exe kullanıyorsanız ardından `DERLE_WHISPER.cmd` ile paketi yeniden derleyin.
+- `CUDA driver version is insufficient` yazıyorsa NVIDIA sürücüsünü güncelleyin.
 
-### 6.12 Soru Sor: video oynatılmıyor
+Başarılı olunca konsolda `cihaz: cuda` yazar. GPU'suz bilgisayarda Ayarlar'dan daha küçük bir model (`small`) seçebilirsiniz.
+
+### 6.12 Soru Sor: `Konuşmadan metin (Whisper) paketi bulunamadı`
+Derlenmiş `Aktar.exe` kullanıyorsunuz ve yanında `aktar-whisper` klasörü yok. 1.5'teki "Derlenmiş .exe ile" adımlarını izleyin. Paket varsa ama hata veriyorsa mesajın sonundaki ayrıntıya bakın; paketin kendi hata çıktısı oraya eklenir.
+
+### 6.13 Soru Sor: video oynatılmıyor
 Oynatıcı Qt Multimedia'nın FFmpeg altyapısını kullanır. Hata mesajı sohbet alanına yazılır. Videonun başka bir oynatıcıda açıldığını kontrol edin. Soru-cevap ve altyazı çıkarma oynatma olmadan da çalışır.
 
 ---

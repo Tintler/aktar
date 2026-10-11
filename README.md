@@ -36,7 +36,7 @@ Video dosyalarındaki **metin tabanlı altyazıları** çıkarıp, **yerel bir y
 - **PySide6** (arayüz).
 - **FFmpeg / ffprobe:** `bin\ffmpeg.exe` ve `bin\ffprobe.exe` olarak taşınabilir şekilde projeye konur(daha fazla bilgi için bin klasöründe  **[README.txt](bin/README.txt)** 'i okuyabilirsiniz).
 - **LM Studio:** yerel sunucu açık olmalı (varsayılan `http://127.0.0.1:1234/v1`) ve bir model yüklü olmalı. Soru Sor için modelin bağlam uzunluğu en az ~12k token önerilir.
-- **İsteğe bağlı — faster-whisper:** altyazısız videolarda konuşmadan metin için (`requirements-whisper.txt`; GPU için CUDA 12 kütüphaneleri, bkz. KULLANIM.md 1.5).
+- **İsteğe bağlı — faster-whisper:** altyazısız videolarda konuşmadan metin için. Kaynak koddan çalışırken `requirements-whisper.txt`; derlenmiş .exe ile `DERLE_WHISPER.cmd`'nin ürettiği ayrı `aktar-whisper` paketi. GPU için CUDA 12 kütüphaneleri; bkz. KULLANIM.md 1.5.
 
 ---
 
@@ -79,7 +79,7 @@ py -3 cevir.py translate "C:\video\Movie.ass" --series game-of-thrones --glossar
 - Satır ortasındaki karakter bazlı ASS efektleri (`C{\fs38}L...` gibi) modelden uzak tutulup çevrilmiş metindeki oransal konumlarına geri yerleştirilir. Etiketler korunur; kelime sırası değiştiğinde görsel konumları yaklaşık olabilir.
 - Çeviri kalitesi seçilen modele ve prompt'a bağlıdır; LM Studio model preset'inde "thinking" kapatılması önerilir (bkz. KULLANIM.md → Sorun giderme).
 - Otomatik konuşmacı ayrımı, karaoke zamanlaması veya altyazı zamanlaması düzeltmesi yapılmaz.
-- Soru Sor cevapları yalnızca transkripte (altyazı veya konuşma) dayanır; görüntüdeki içerik (grafikler, ekrandaki yazılar) görülmez. Whisper, derlenmiş .exe'ye gömülmez (kaynak koddan çalıştırın).
+- Soru Sor cevapları yalnızca transkripte (altyazı veya konuşma) dayanır; görüntüdeki içerik (grafikler, ekrandaki yazılar) görülmez. Whisper, `Aktar.exe`'ye gömülmez; ayrı `aktar-whisper` paketi olarak yanına konur.
 
 ---
 
