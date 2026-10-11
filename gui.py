@@ -710,6 +710,7 @@ class Toast(QFrame):
 
 # speech.MODELS ile ayni (speech modulu yuklenmeden ayarlar penceresi acilabilsin)
 WHISPER_MODELS = ('large-v3-turbo', 'large-v3', 'medium', 'small', 'base')
+CUDA_MARKERS = ('cublas64_12.dll', 'cudnn64_9.dll')  # speech._CUDA_MARKERS ile ayni
 MODE_TRANSLATE, MODE_ASK = 0, 1  # baslik seridindeki sekmeler / self.pages sirasi
 
 
@@ -1198,6 +1199,23 @@ class SettingsDialog(QDialog):
         whisper_language.setPlaceholderText('Boş: otomatik algıla (örn. en, ja, tr)')
         self.fields['whisper_language'] = whisper_language
         layout.addRow('Konuşma dili', whisper_language)
+        cuda_dir = QLineEdit(str(config.get('whisper_cuda_dir', '')))
+        cuda_dir.setPlaceholderText('Boş: pip ile kurulan veya pakete gömülü kütüphaneler')
+        cuda_dir.setToolTip('Başka programlarla ortak kullandığınız cuBLAS 12 / cuDNN 9 DLL '
+                            'klasörü (cublas64_12.dll, cudnn64_9.dll ...).')
+        self.fields['whisper_cuda_dir'] = cuda_dir
+        self.cuda_browse = QPushButton('Gözat...')
+        self.cuda_browse.clicked.connect(self.choose_cuda_dir)
+        self.cuda_hint = QLabel('')
+        self.cuda_hint.setObjectName('hint')
+        self.cuda_hint.setWordWrap(True)
+        cuda_row = QHBoxLayout()
+        cuda_row.addWidget(cuda_dir, 1)
+        cuda_row.addWidget(self.cuda_browse)
+        layout.addRow('GPU kütüphane klasörü', cuda_row)
+        layout.addRow('', self.cuda_hint)
+        cuda_dir.textChanged.connect(self._check_cuda_dir)
+        self._check_cuda_dir(cuda_dir.text())
 
         advanced_section = QLabel('Gelişmiş (deneysel)')
         advanced_section.setObjectName('settingsSection')
@@ -1251,8 +1269,27 @@ class SettingsDialog(QDialog):
                 else:
                     field.setEnabled(False)
             refresh.setEnabled(False)
+            self.cuda_browse.setEnabled(False)
             restore.setEnabled(False)
             buttons.button(QDialogButtonBox.Save).setEnabled(False)
+
+    def choose_cuda_dir(self):
+        current = self.fields['whisper_cuda_dir'].text().strip()
+        folder = QFileDialog.getExistingDirectory(self, 'cuBLAS / cuDNN klasörü', current)
+        if folder:
+            self.fields['whisper_cuda_dir'].setText(str(Path(folder)))
+
+    def _check_cuda_dir(self, text):
+        """Gosterilen klasorde gereken DLL'ler var mi (speech.check_cuda_dir ile ayni liste)."""
+        text = str(text).strip()
+        if not text:
+            self.cuda_hint.setText('')
+            return
+        folder = Path(text)
+        missing = [name for name in CUDA_MARKERS if not (folder / name).is_file()]
+        self.cuda_hint.setText('Klasör bulunamadı.' if not folder.is_dir() else
+                               ('Eksik: ' + ', '.join(missing)) if missing else
+                               'cuBLAS 12 ve cuDNN 9 bulundu.')
 
     def refresh_models(self):
         self.model_hint.setText('Sorgulanıyor...')

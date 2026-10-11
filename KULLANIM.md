@@ -58,7 +58,7 @@ py -3 -m pip install -r requirements-whisper.txt
    py -3 -m pip install -r requirements.txt -r requirements-whisper.txt
    ```
 
-2. GPU desteği istiyorsanız aşağıdaki **NVIDIA GPU** adımını derlemeden **önce** yapın. Kütüphaneler pakete o anda eklenir.
+2. GPU için aşağıdaki **NVIDIA GPU** bölümüne bakın. Kütüphaneleri zaten başka bir klasörde tutuyorsanız (A seçeneği) bu adımda bir şey yapmanız gerekmez.
 3. `DERLE_WHISPER.cmd` dosyasını çalıştırın. Çıktı `dist\aktar-whisper\` klasörüdür.
 4. Bu klasörü olduğu gibi `Aktar.exe`'nin yanına koyun:
 
@@ -68,14 +68,22 @@ py -3 -m pip install -r requirements-whisper.txt
    models\whisper\                   (ilk kullanımda otomatik oluşur)
    ```
 
-Paket boyutu yalnızca işlemci desteğiyle ~270 MB, NVIDIA GPU kütüphaneleriyle ~2.1 GB'tır. Whisper'a ihtiyaç duymayanlar paketi hiç kopyalamaz; `Aktar.exe` küçük kalır.
+Paket boyutu GPU kütüphaneleri olmadan ~270 MB, pakete gömülü NVIDIA kütüphaneleriyle ~2.1 GB'tır. Whisper'a ihtiyaç duymayanlar paketi hiç kopyalamaz; `Aktar.exe` küçük kalır.
 
 - Model ilk kullanımda uygulama klasöründeki `models\whisper\` altına indirilir (varsayılan **large-v3-turbo**, ~1.6 GB; bir kez internet gerekir).
-- **NVIDIA GPU ile hızlandırma (önerilir):** ayrıca CUDA 12 kütüphanelerini kurun (derlenmiş paket için `DERLE_WHISPER.cmd`'den önce):
+- **NVIDIA GPU ile hızlandırma (önerilir):** Whisper'ın GPU'da çalışması için **cuBLAS 12** ve **cuDNN 9** DLL'leri gerekir. İki yol var:
+  - **A) Mevcut klasörünüzü gösterin (önerilir, başka programlarla ortak):** Bu DLL'leri zaten bir klasörde tutuyorsanız tekrar indirmeyin. Klasörde örneğin `cublas64_12.dll`, `cublasLt64_12.dll`, `cudnn64_9.dll`, `cudnn_ops64_9.dll` ... bulunur.
+    1. Aktar'da **Ayarlar → Soru Sor · konuşmadan metin (Whisper) → GPU kütüphane klasörü** alanına klasörü yazın ya da **Gözat...** ile seçin.
+    2. Alanın altında `cuBLAS 12 ve cuDNN 9 bulundu.` yazmalı.
 
-  ```bat
-  py -3 -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12==9.*
-  ```
+    Kaynak koddan çalışırken de, `aktar-whisper` paketiyle de bu klasör kullanılır. Paketi NVIDIA kütüphaneleri olmadan, yani küçük haliyle (~270 MB) derlemeniz yeterlidir.
+  - **B) pip ile kurun:**
+
+    ```bat
+    py -3 -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12==9.*
+    ```
+
+    `DERLE_WHISPER.cmd` bunları bulursa pakete gömer (~2.1 GB). Bu yüzden derlenmiş paket için bu adımı `DERLE_WHISPER.cmd`'den önce yapın.
 
   Cihaz ayarı `auto` iken GPU varsa önce o denenir. Konsolda önce `GPU kütüphaneleri: cublas (...), cudnn (...)` satırı görünür. Kütüphaneler eksikse ya da GPU çalışmazsa nedeni yazılır ve işlemciyle devam edilir (çok daha yavaş).
 
@@ -120,6 +128,7 @@ Uygulama dizinindeki `config.json` dosyası ayarları tutar. Yoksa `DEFAULT_CONF
 | `whisper_model` | Konuşmadan metin modeli: `large-v3-turbo` (varsayılan), `large-v3`, `medium`, `small`, `base`. |
 | `whisper_device` | `auto` (GPU varsa GPU), `cuda` veya `cpu`. |
 | `whisper_language` | Konuşma dili kodu (örn. `en`, `ja`); boşsa otomatik algılanır. |
+| `whisper_cuda_dir` | Başka programlarla ortak kullanılan cuBLAS 12 / cuDNN 9 DLL klasörü (örn. `Z:\Ai Tools\cuBLAS and cuDNN`); boşsa pip ile kurulan veya pakete gömülü kütüphaneler aranır. |
 
 Bu ayarların hepsi **Ayarlar** penceresinden de değiştirilebilir.
 
@@ -289,7 +298,8 @@ Transkript modelin bağlam uzunluğuna sığmıyor. LM Studio'da modelin **Conte
 
 ### 6.11 Soru Sor: Whisper GPU kullanmıyor / çok yavaş
 Konsolda `Whisper cuda ile çalışamadı: ...` görüyorsanız:
-- `GPU kütüphaneleri: bulunamadı` yazıyorsa CUDA kütüphaneleri eksiktir. `py -3 -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12==9.*` ile kurun. Derlenmiş .exe kullanıyorsanız ardından `DERLE_WHISPER.cmd` ile paketi yeniden derleyin.
+- `GPU kütüphaneleri: bulunamadı` yazıyorsa CUDA kütüphaneleri eksiktir. Ayarlar'da **GPU kütüphane klasörü** alanına mevcut cuBLAS/cuDNN klasörünüzü gösterin ya da 1.5'teki B seçeneğini uygulayın.
+- `UYARI: GPU kütüphane klasöründe eksik: ...` yazıyorsa gösterdiğiniz klasörde listelenen DLL yoktur; doğru klasörü seçtiğinizi kontrol edin.
 - `CUDA driver version is insufficient` yazıyorsa NVIDIA sürücüsünü güncelleyin.
 
 Başarılı olunca konsolda `cihaz: cuda` yazar. GPU'suz bilgisayarda Ayarlar'dan daha küçük bir model (`small`) seçebilirsiniz.

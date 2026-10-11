@@ -18,12 +18,14 @@ if errorlevel 1 (
 )
 
 set "GPU_ARGS="
-py -3 -c "import nvidia.cublas, nvidia.cudnn" 2>nul
+rem Yalnizca import yetmez: pip kaldirmasindan bos klasorler kalabiliyor; DLL'ler aranir.
+py -3 -c "import sys, pathlib, nvidia.cublas as a, nvidia.cudnn as b; sys.exit(0 if all(any(pathlib.Path(p, 'bin').glob('*.dll')) for m in (a, b) for p in m.__path__) else 1)" 2>nul
 if not errorlevel 1 set "GPU_ARGS=--collect-binaries nvidia.cublas --collect-binaries nvidia.cudnn"
 if defined GPU_ARGS (
     echo NVIDIA CUDA kutuphaneleri pakete eklenecek: GPU destekli paket.
 ) else (
-    echo UYARI: nvidia-cublas-cu12 / nvidia-cudnn-cu12 kurulu degil; paket yalnizca islemciyle calisir.
+    echo Bilgi: nvidia-cublas-cu12 / nvidia-cudnn-cu12 kurulu degil; paket GPU kutuphanesi icermez.
+    echo GPU icin Aktar Ayarlar - "GPU kutuphane klasoru" ile mevcut cuBLAS 12 / cuDNN 9 klasorunuzu gosterin.
 )
 
 py -3 -m PyInstaller ^

@@ -107,9 +107,33 @@ class HelperTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             for name in ('cublas', 'cudnn'):
                 (Path(folder) / 'nvidia' / name / 'bin').mkdir(parents=True)
+                (Path(folder) / 'nvidia' / name / 'bin' / f'{name}.dll').write_bytes(b'')
             with mock.patch.object(sys, '_MEIPASS', folder, create=True),                     mock.patch.dict(sys.modules, {'nvidia.cublas': None, 'nvidia.cudnn': None}):
                 found = speech._cuda_dll_dirs()
         self.assertEqual([item.parent.name for item in found], ['cublas', 'cudnn'])
+
+    def test_shared_cuda_folder_comes_first_and_is_checked(self):
+        with tempfile.TemporaryDirectory() as folder:
+            shared = Path(folder) / 'cuBLAS and cuDNN'
+            shared.mkdir()
+            self.assertEqual(speech.check_cuda_dir(shared), ['cublas64_12.dll', 'cudnn64_9.dll'])
+            (shared / 'cublas64_12.dll').write_bytes(b'')
+            (shared / 'cudnn64_9.dll').write_bytes(b'')
+            self.assertEqual(speech.check_cuda_dir(shared), [])
+            pip_root = Path(folder) / 'site' / 'cublas'
+            (pip_root / 'bin').mkdir(parents=True)
+            empty_root = Path(folder) / 'site' / 'cudnn'   # pip kaldirmasindan kalan bos klasor
+            (empty_root / 'bin').mkdir(parents=True)
+            (pip_root / 'bin' / 'cublas64_12.dll').write_bytes(b'')
+            fake_module = types.SimpleNamespace(__path__=[str(pip_root)])
+            empty_module = types.SimpleNamespace(__path__=[str(empty_root)])
+            with mock.patch.dict(sys.modules, {'nvidia.cublas': fake_module,
+                                               'nvidia.cudnn': empty_module}):
+                found = speech._cuda_dll_dirs(str(shared))
+                self.assertEqual(found, [shared, pip_root / 'bin'])
+                self.assertEqual(speech._cuda_dll_dirs(''), [pip_root / 'bin'])
+            with mock.patch.dict(sys.modules, {'nvidia.cublas': None, 'nvidia.cudnn': None}):
+                self.assertEqual(speech._cuda_dll_dirs(str(Path(folder) / 'yok')), [])
 
     def test_available_reports_install_hint(self):
         with mock.patch.dict(sys.modules, {'faster_whisper': None}):
@@ -246,6 +270,8 @@ def emit(**m):
     print(json.dumps(m, ensure_ascii=False), flush=True)
 if mode == 'ok':
     emit(log='Whisper cpu yüklendi')
+    if '--cuda-dir' in args:
+        emit(log='cuda-dir=' + args[args.index('--cuda-dir') + 1])
     emit(progress=[3, 27])
     emit(progress=[27, 27])
     emit(result={'segments': [{'start': 0.0, 'end': 2.0, 'text': 'Merhaba.'}],
@@ -301,6 +327,12 @@ class HelperProtocolTests(unittest.TestCase):
         self.assertFalse(list((self.base / 'qa').glob('*.wav')))
         self.assertFalse(list((self.base / 'qa').glob('*.log')))
 
+    def test_helper_receives_shared_cuda_folder(self):
+        _result, logs, _progress = self.run_helper('ok', cuda_dir=r'Z:\Ai Tools\cuBLAS and cuDNN')
+        self.assertIn(r'cuda-dir=Z:\Ai Tools\cuBLAS and cuDNN', logs)
+        _result, logs, _progress = self.run_helper('ok')
+        self.assertFalse(any(line.startswith('cuda-dir=') for line in logs))
+
     def test_helper_error_message_is_reported(self):
         with self.assertRaises(RuntimeError) as context:
             self.run_helper('error')
@@ -328,14 +360,16 @@ class HelperProtocolTests(unittest.TestCase):
         import whisper_cli
         out = io.StringIO()
 
-        def fake_run(audio, model, device, language, progress, log, download_root):
+        def fake_run(audio, model, device, language, progress, log, download_root, cuda_dir):
+            self.assertEqual(cuda_dir, r'Z:\Ai Tools\cuBLAS and cuDNN')
             progress(5, 10)
             log('günlük')
             return {'segments': [], 'language': 'en', 'duration': 10.0, 'device': 'cpu'}
 
         with mock.patch.object(speech, 'run_whisper', side_effect=fake_run), \
                 mock.patch.object(sys, 'stdout', out):
-            code = whisper_cli.main(['a.wav', '--model', 'base', '--device', 'cpu'])
+            code = whisper_cli.main(['a.wav', '--model', 'base', '--device', 'cpu',
+                                     '--cuda-dir', r'Z:\Ai Tools\cuBLAS and cuDNN'])
         lines = [json.loads(line) for line in out.getvalue().splitlines()]
         self.assertEqual(code, 0)
         self.assertEqual(lines, [{'progress': [5, 10]}, {'log': 'günlük'},
@@ -358,6 +392,10 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 app_core.validate_config(dict(cfg, **{key: value}))
         app_core.validate_config(dict(cfg, whisper_language='ja', whisper_device='cpu'))
+        self.assertEqual(cfg['whisper_cuda_dir'], '')
+        app_core.validate_config(dict(cfg, whisper_cuda_dir=r'Z:\Ai Tools\cuBLAS and cuDNN'))
+        with self.assertRaises(ValueError):
+            app_core.validate_config(dict(cfg, whisper_cuda_dir=5))
 
 
 if __name__ == '__main__':

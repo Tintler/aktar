@@ -165,7 +165,8 @@ class PrepareWorker(QObject):
                     result = speech.transcribe(
                         self.video, cfg['whisper_model'], cfg['whisper_device'],
                         cfg['whisper_language'], progress=self.whisper_progress.emit,
-                        cancelled=self.cancel_event.is_set, log=self.log.emit)
+                        cancelled=self.cancel_event.is_set, log=self.log.emit,
+                        cuda_dir=cfg.get('whisper_cuda_dir', ''))
                     self.whisper_ready.emit(result)
                     data, path = qa.load_whisper_session(self.video, result, log=self.log.emit)
                 else:
@@ -202,7 +203,8 @@ class TranscribeWorker(QObject):
             cfg = load_config()
             result = speech.transcribe(self.video, cfg['whisper_model'], cfg['whisper_device'],
                                        cfg['whisper_language'], progress=self.progress.emit,
-                                       cancelled=self.cancel_event.is_set, log=self.log.emit)
+                                       cancelled=self.cancel_event.is_set, log=self.log.emit,
+                                       cuda_dir=cfg.get('whisper_cuda_dir', ''))
         except (GracefulStop, RuntimeError, ValueError, OSError) as error:
             self.finished.emit(None, str(error))
             return

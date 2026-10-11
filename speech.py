@@ -164,13 +164,21 @@ def extract_audio(video, output):
 
 
 _CUDA_LIBS = ('cublas', 'cudnn')
+_CUDA_MARKERS = ('cublas64_12.dll', 'cudnn64_9.dll')  # ctranslate2 4.x: CUDA 12 + cuDNN 9
 _cuda_dirs_added = []
 
 
-def _cuda_dll_dirs():
-    """pip'le kurulan (nvidia-cublas-cu12, nvidia-cudnn-cu12) veya aktar-whisper paketine
-    DERLE_WHISPER.cmd ile konan NVIDIA DLL klasorleri."""
-    folders = []
+def check_cuda_dir(folder):
+    """Kullanicinin gosterdigi klasorde eksik cuBLAS/cuDNN DLL'leri (bos liste: tamam)."""
+    folder = Path(folder)
+    return [name for name in _CUDA_MARKERS if not (folder / name).is_file()]
+
+
+def _cuda_dll_dirs(extra=''):
+    """NVIDIA DLL klasorleri, oncelik sirasiyla: Ayarlar'da gosterilen klasor (baska
+    programlarla ortak kullanilan cuBLAS/cuDNN), aktar-whisper paketine DERLE_WHISPER.cmd
+    ile konanlar, pip'le kurulanlar (nvidia-cublas-cu12, nvidia-cudnn-cu12)."""
+    folders = [Path(extra)] if str(extra or '').strip() else []
     frozen_root = getattr(sys, '_MEIPASS', None)
     if frozen_root:  # paket: _internal/nvidia/<kutuphane>/bin (namespace paket import edilemeyebilir)
         folders += [Path(frozen_root) / 'nvidia' / name / 'bin' for name in _CUDA_LIBS]
@@ -180,14 +188,18 @@ def _cuda_dll_dirs():
         except ImportError:
             continue
         folders += [Path(root) / 'bin' for root in getattr(module, '__path__', [])]
-    return list(dict.fromkeys(folder for folder in folders if folder.is_dir()))
+    # Bos klasorler (ornegin pip kaldirmasindan kalanlar) sayilmaz.
+    return list(dict.fromkeys(folder for folder in folders
+                              if folder.is_dir() and any(folder.glob('*.dll'))))
 
 
-def _add_cuda_dll_dirs():
-    """NVIDIA DLL klasorlerini Windows DLL arama yoluna bir kez ekler; eklenenleri dondurur."""
-    if os.name != 'nt' or _cuda_dirs_added:
-        return list(_cuda_dirs_added)
-    for folder in _cuda_dll_dirs():
+def _add_cuda_dll_dirs(extra=''):
+    """NVIDIA DLL klasorlerini Windows DLL arama yoluna ekler (her klasor bir kez)."""
+    if os.name != 'nt':
+        return []
+    for folder in _cuda_dll_dirs(extra):
+        if folder in _cuda_dirs_added:
+            continue
         os.add_dll_directory(str(folder))
         os.environ['PATH'] = str(folder) + os.pathsep + os.environ.get('PATH', '')
         _cuda_dirs_added.append(folder)
@@ -209,7 +221,7 @@ def _device_plan(device):
 
 
 def transcribe(video, model_name=DEFAULT_MODEL, device='auto', language='', base=None,
-               progress=None, cancelled=None, log=print):
+               progress=None, cancelled=None, log=print, cuda_dir=''):
     """Videonun konusmasini zaman damgali cue'lara cevirir (onbellekli).
 
     Donen: {'segments', 'language', 'model', 'duration', 'device'}.
@@ -230,7 +242,8 @@ def transcribe(video, model_name=DEFAULT_MODEL, device='auto', language='', base
     try:
         runner = run_whisper if mode == 'inprocess' else _run_helper
         result = runner(audio, model_name, device, language, progress=progress,
-                        cancelled=cancelled, log=log, download_root=str(model_dir()))
+                        cancelled=cancelled, log=log, download_root=str(model_dir()),
+                        cuda_dir=cuda_dir)
         result.update(model=model_name)
     finally:
         try:
@@ -246,7 +259,7 @@ def transcribe(video, model_name=DEFAULT_MODEL, device='auto', language='', base
 
 
 def run_whisper(audio, model_name=DEFAULT_MODEL, device='auto', language='', progress=None,
-                cancelled=None, log=print, download_root=None):
+                cancelled=None, log=print, download_root=None, cuda_dir=''):
     """WAV'i faster-whisper ile cozer; GPU calismazsa bir sonraki cihaza (CPU) duser.
 
     Hem uygulama icinde hem ayri paketin (whisper_cli.py) icinde calisir.
@@ -255,10 +268,15 @@ def run_whisper(audio, model_name=DEFAULT_MODEL, device='auto', language='', pro
     from faster_whisper import WhisperModel
 
     if device != 'cpu':
-        added = _add_cuda_dll_dirs()
-        log('GPU kütüphaneleri: ' + (', '.join(f'{f.parent.name} ({f})' for f in added) if added
-                                    else 'bulunamadı (nvidia-cublas-cu12 / nvidia-cudnn-cu12 '
-                                         'kurulu değil); GPU varsa yine de denenecek.'))
+        if str(cuda_dir or '').strip():
+            missing = check_cuda_dir(cuda_dir)
+            if missing:
+                log(f'UYARI: GPU kütüphane klasöründe eksik: {", ".join(missing)} ({cuda_dir})')
+        added = _add_cuda_dll_dirs(cuda_dir)
+        log('GPU kütüphaneleri: ' + (', '.join(str(folder) for folder in added) if added
+                                    else 'bulunamadı (Ayarlar\'da GPU kütüphane klasörü '
+                                         'gösterilmedi, nvidia-cublas-cu12 / nvidia-cudnn-cu12 '
+                                         'de kurulu değil); GPU varsa yine de denenecek.'))
     errors = []
     for target, compute_type in _device_plan(device):
         try:
@@ -277,7 +295,7 @@ def run_whisper(audio, model_name=DEFAULT_MODEL, device='auto', language='', pro
 
 
 def _run_helper(audio, model_name=DEFAULT_MODEL, device='auto', language='', progress=None,
-                cancelled=None, log=print, download_root=None):
+                cancelled=None, log=print, download_root=None, cuda_dir=''):
     """Ayri aktar-whisper paketini alt surec olarak calistirir (JSON satir protokolu).
 
     Paket stdout'a satir basina bir JSON yazar: {"progress": [i, n]}, {"log": "..."},
@@ -290,6 +308,8 @@ def _run_helper(audio, model_name=DEFAULT_MODEL, device='auto', language='', pro
     command = command + [str(audio), '--model', model_name, '--device', device,
                          '--language', language or '', '--models-dir',
                          str(download_root or model_dir())]
+    if str(cuda_dir or '').strip():
+        command += ['--cuda-dir', str(cuda_dir)]
     log_path = Path(audio).with_suffix('.whisper.log')
     kwargs = {}
     if os.name == 'nt':

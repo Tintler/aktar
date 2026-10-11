@@ -51,6 +51,8 @@ DEFAULT_CONFIG = {
     'whisper_model': 'large-v3-turbo',
     'whisper_device': 'auto',
     'whisper_language': '',
+    # Baska programlarla ortak cuBLAS 12 / cuDNN 9 DLL klasoru (bos: pip/paket icinden).
+    'whisper_cuda_dir': '',
     # Reasoning/thinking ureten modellerde dusunmeyi kapatma denemesi
     # (LM Studio chat_template_kwargs desteklerse). Desteklenmezse yok sayilir;
     # o durumda LM Studio model preset'inden thinking kapatilmalidir.
@@ -192,6 +194,8 @@ def validate_config(cfg):
         raise ValueError('whisper_device auto, cuda veya cpu olmalı.')
     if not re.fullmatch(r'[a-z]{0,3}', str(cfg.get('whisper_language', '')).strip().lower()):
         raise ValueError('whisper_language boş (otomatik) veya dil kodu (örn. en) olmalı.')
+    if not isinstance(cfg.get('whisper_cuda_dir', ''), str):
+        raise ValueError('whisper_cuda_dir klasör yolu (metin) olmalı.')
     if not 1 <= int(cfg['auto_retry_count']) <= 100:
         raise ValueError('auto_retry_count 1 ile 100 arasında olmalı.')
     if not 0 <= float(cfg['temperature']) <= 2:

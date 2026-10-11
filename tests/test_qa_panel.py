@@ -160,10 +160,15 @@ class QaWindowContractTests(unittest.TestCase):
     def test_settings_dialog_has_whisper_and_qa_fields(self):
         init = ast.get_source_segment(
             self.gui_source, _method(_class(self.gui, 'SettingsDialog'), '__init__'))
-        for key in ('whisper_model', 'whisper_device', 'whisper_language', 'qa_context_chars'):
+        for key in ('whisper_model', 'whisper_device', 'whisper_language', 'qa_context_chars',
+                    'whisper_cuda_dir'):
             self.assertIn(f"self.fields['{key}']", init)
+        self.assertIn('self.cuda_browse.clicked.connect(self.choose_cuda_dir)', init)
+        self.assertIn('self.cuda_browse.setEnabled(False)', init)
         import speech
         self.assertIn(f'WHISPER_MODELS = {speech.MODELS!r}', self.gui_source)
+        self.assertIn(f'CUDA_MARKERS = {speech._CUDA_MARKERS!r}', self.gui_source)
+        self.assertEqual(self.window_source.count("cuda_dir=cfg.get('whisper_cuda_dir', '')"), 2)
 
     def test_window_icons_exist(self):
         for name in ('ask', 'send', 'volume', 'mute', 'play', 'pause', 'subtitles', 'translate'):

@@ -2,8 +2,10 @@
 # Kurulum: py -3 -m pip install -r requirements-whisper.txt
 faster-whisper==1.2.1
 
-# NVIDIA GPU (CUDA 12) ile hizlandirma icin ayrica (Windows):
-#   py -3 -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12==9.*
+# NVIDIA GPU (CUDA 12) ile hizlandirma:
+#   - cuBLAS 12 / cuDNN 9 DLL'leri zaten bir klasorde varsa (baska programlarla ortak)
+#     Aktar Ayarlar -> "GPU kutuphane klasoru" ile o klasoru gosterin; kurulum gerekmez.
+#   - Yoksa: py -3 -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12==9.*
 # Kurulu degilse ya da GPU calismazsa Whisper otomatik olarak islemciyi kullanir.
 #
 # Derlenmis Aktar.exe icin: bu paketleri kurduktan sonra DERLE_WHISPER.cmd ile

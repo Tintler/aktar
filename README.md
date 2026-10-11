@@ -36,7 +36,7 @@ Video dosyalarındaki **metin tabanlı altyazıları** çıkarıp, **yerel bir y
 - **PySide6** (arayüz).
 - **FFmpeg / ffprobe:** `bin\ffmpeg.exe` ve `bin\ffprobe.exe` olarak taşınabilir şekilde projeye konur(daha fazla bilgi için bin klasöründe  **[README.txt](bin/README.txt)** 'i okuyabilirsiniz).
 - **LM Studio:** yerel sunucu açık olmalı (varsayılan `http://127.0.0.1:1234/v1`) ve bir model yüklü olmalı. Soru Sor için modelin bağlam uzunluğu en az ~12k token önerilir.
-- **İsteğe bağlı — faster-whisper:** altyazısız videolarda konuşmadan metin için. Kaynak koddan çalışırken `requirements-whisper.txt`; derlenmiş .exe ile `DERLE_WHISPER.cmd`'nin ürettiği ayrı `aktar-whisper` paketi. GPU için CUDA 12 kütüphaneleri; bkz. KULLANIM.md 1.5.
+- **İsteğe bağlı — faster-whisper:** altyazısız videolarda konuşmadan metin için. Kaynak koddan çalışırken `requirements-whisper.txt`; derlenmiş .exe ile `DERLE_WHISPER.cmd`'nin ürettiği ayrı `aktar-whisper` paketi. GPU için cuBLAS 12 / cuDNN 9; başka programlarla ortak kullandığınız bir klasör varsa Ayarlar'dan gösterilebilir. Bkz. KULLANIM.md 1.5.
 
 ---
 

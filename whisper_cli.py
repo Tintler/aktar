@@ -7,7 +7,7 @@ basina bir JSON yazar (speech._run_helper protokolu). Kaynak koddan calisirken
 gerekmez: faster-whisper kuruluysa Aktar onu dogrudan kullanir.
 
 Kullanim: aktar-whisper.exe <ses.wav> --model large-v3-turbo --device auto
-          [--language en] [--models-dir <klasor>]
+          [--language en] [--models-dir <klasor>] [--cuda-dir <cuBLAS/cuDNN klasoru>]
 """
 from __future__ import annotations
 
@@ -29,13 +29,15 @@ def main(argv=None):
     parser.add_argument('--device', default='auto', choices=('auto', 'cuda', 'cpu'))
     parser.add_argument('--language', default='')
     parser.add_argument('--models-dir', default=None)
+    parser.add_argument('--cuda-dir', default='')
     args = parser.parse_args(argv)
     import speech
     try:
         result = speech.run_whisper(
             args.audio, args.model, args.device, args.language,
             progress=lambda done, total: emit(progress=[done, total]),
-            log=lambda message: emit(log=message), download_root=args.models_dir)
+            log=lambda message: emit(log=message), download_root=args.models_dir,
+            cuda_dir=args.cuda_dir)
     except Exception as error:  # her hata Aktar'a anlamli mesaj olarak donmeli
         emit(error=str(error))
         return 1
