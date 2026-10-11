@@ -81,7 +81,10 @@ class QaWindowContractTests(unittest.TestCase):
         self.assertIn('panel.shutdown()', close)
         panel = _class(self.window, 'VideoQAPanel')
         retire = ast.get_source_segment(self.window_source, _method(panel, 'retire'))
-        self.assertIn('cancel_event.set()', retire)
+        self.assertIn('self._cancel_jobs()', retire)
+        cancel = ast.get_source_segment(self.window_source, _method(panel, '_cancel_jobs'))
+        self.assertIn('self._prepare_worker, self._transcribe_worker', cancel)
+        self.assertIn('cancel_event.set()', cancel)
         done = ast.get_source_segment(self.window_source, _method(panel, '_job_done'))
         self.assertIn('self.deleteLater()', done)
         hide = ast.get_source_segment(self.window_source, _method(panel, 'hideEvent'))
@@ -133,6 +136,34 @@ class QaWindowContractTests(unittest.TestCase):
         self.assertIn('self._start_job(SubtitleLoadWorker(', select)
         setup = ast.get_source_segment(self.window_source, _method(panel, '_setup_player'))
         self.assertIn('setActiveSubtitleTrack(-1)', setup)
+
+    def test_whisper_is_offered_without_subtitles_and_in_cc_menu(self):
+        panel = _class(self.window, 'VideoQAPanel')
+        finished = ast.get_source_segment(self.window_source, _method(panel, 'prepare_finished'))
+        self.assertIn('self._show_chips([], whisper=True)', finished)
+        chips = ast.get_source_segment(self.window_source, _method(panel, '_show_chips'))
+        self.assertIn('Sesten transkript çıkar (Whisper)', chips)
+        self.assertIn('self.start_prepare(whisper=True)', chips)
+        streams = ast.get_source_segment(self.window_source, _method(panel, 'on_streams'))
+        self.assertIn("addItem('Sesten (Whisper)', WHISPER_KEY)", streams)
+        menu = ast.get_source_segment(self.window_source, _method(panel, 'show_subtitle_menu'))
+        self.assertIn("'Sesten (Whisper)'", menu)
+        self.assertIn('self.generate_whisper()', menu)
+        start = ast.get_source_segment(self.window_source, _method(panel, 'start_prepare'))
+        self.assertIn('speech.available()', start)
+        worker = ast.get_source_segment(self.window_source,
+                                        _method(_class(self.window, 'PrepareWorker'), 'run'))
+        self.assertIn('speech.transcribe(', worker)
+        self.assertIn('qa.load_whisper_session(', worker)
+        self.assertIn('speech.load_cached(', worker)
+
+    def test_settings_dialog_has_whisper_and_qa_fields(self):
+        init = ast.get_source_segment(
+            self.gui_source, _method(_class(self.gui, 'SettingsDialog'), '__init__'))
+        for key in ('whisper_model', 'whisper_device', 'whisper_language', 'qa_context_chars'):
+            self.assertIn(f"self.fields['{key}']", init)
+        import speech
+        self.assertIn(f'WHISPER_MODELS = {speech.MODELS!r}', self.gui_source)
 
     def test_window_icons_exist(self):
         for name in ('ask', 'send', 'volume', 'mute', 'play', 'pause', 'subtitles', 'translate'):

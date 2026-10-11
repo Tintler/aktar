@@ -46,6 +46,11 @@ DEFAULT_CONFIG = {
     # Videoya Soru Sor: modele tek istekte gidecek en fazla transkript karakteri.
     # Asilirsa video haritasi + soruyla ilgili bolumler gider (qa.VideoQA.build_context).
     'qa_context_chars': 24000,
+    # Konusmadan metin (F48, istege bagli faster-whisper). Model ilk kullanimda
+    # APP_DIR/models/whisper altina iner; dil bos ise otomatik algilanir.
+    'whisper_model': 'large-v3-turbo',
+    'whisper_device': 'auto',
+    'whisper_language': '',
     # Reasoning/thinking ureten modellerde dusunmeyi kapatma denemesi
     # (LM Studio chat_template_kwargs desteklerse). Desteklenmezse yok sayilir;
     # o durumda LM Studio model preset'inden thinking kapatilmalidir.
@@ -181,6 +186,12 @@ def validate_config(cfg):
             raise ValueError(f'{key} sıfırdan büyük olmalı.')
     if int(cfg.get('qa_context_chars', DEFAULT_CONFIG['qa_context_chars'])) < 1000:
         raise ValueError('qa_context_chars en az 1000 olmalı.')
+    if not str(cfg.get('whisper_model', DEFAULT_CONFIG['whisper_model'])).strip():
+        raise ValueError('whisper_model boş olamaz.')
+    if cfg.get('whisper_device', 'auto') not in ('auto', 'cuda', 'cpu'):
+        raise ValueError('whisper_device auto, cuda veya cpu olmalı.')
+    if not re.fullmatch(r'[a-z]{0,3}', str(cfg.get('whisper_language', '')).strip().lower()):
+        raise ValueError('whisper_language boş (otomatik) veya dil kodu (örn. en) olmalı.')
     if not 1 <= int(cfg['auto_retry_count']) <= 100:
         raise ValueError('auto_retry_count 1 ile 100 arasında olmalı.')
     if not 0 <= float(cfg['temperature']) <= 2:

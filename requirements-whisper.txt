@@ -1,0 +1,7 @@
+# Istege bagli: Soru Sor sekmesinde altyazisiz videolar icin konusmadan metin (Whisper).
+# Kurulum: py -3 -m pip install -r requirements-whisper.txt
+faster-whisper==1.2.1
+
+# NVIDIA GPU (CUDA 12) ile hizlandirma icin ayrica (Windows):
+#   py -3 -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12==9.*
+# Kurulu degilse ya da GPU calismazsa Whisper otomatik olarak islemciyi kullanir.

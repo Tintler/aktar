@@ -708,6 +708,8 @@ class Toast(QFrame):
         self.move(parent.width() - self.width() - 24, parent.height() - self.height() - 24)
 
 
+# speech.MODELS ile ayni (speech modulu yuklenmeden ayarlar penceresi acilabilsin)
+WHISPER_MODELS = ('large-v3-turbo', 'large-v3', 'medium', 'small', 'base')
 MODE_TRANSLATE, MODE_ASK = 0, 1  # baslik seridindeki sekmeler / self.pages sirasi
 
 
@@ -1172,6 +1174,31 @@ class SettingsDialog(QDialog):
         self.fields['disable_thinking'] = thinking
         layout.addRow('Thinking kapat', thinking)
 
+        speech_section = QLabel('Soru Sor · konuşmadan metin (Whisper)')
+        speech_section.setObjectName('settingsSection')
+        layout.addRow(speech_section)
+        whisper_model = DropdownCombo()
+        whisper_model.setEditable(False)
+        current = str(config.get('whisper_model', DEFAULT_CONFIG['whisper_model']))
+        whisper_model.addItems(list(dict.fromkeys(WHISPER_MODELS + (current,))))
+        whisper_model.setCurrentIndex(max(0, whisper_model.findText(current)))
+        whisper_model.setToolTip('İlk kullanımda uygulama klasöründeki models/whisper altına '
+                                 'indirilir (large-v3-turbo ~1.6 GB).')
+        self.fields['whisper_model'] = whisper_model
+        layout.addRow('Whisper modeli', whisper_model)
+        whisper_device = DropdownCombo()
+        whisper_device.setEditable(False)
+        whisper_device.addItems(['auto', 'cuda', 'cpu'])
+        whisper_device.setCurrentIndex(max(0, whisper_device.findText(
+            str(config.get('whisper_device', 'auto')))))
+        whisper_device.setToolTip('auto: NVIDIA GPU (CUDA) varsa onu, yoksa işlemciyi kullanır.')
+        self.fields['whisper_device'] = whisper_device
+        layout.addRow('Cihaz', whisper_device)
+        whisper_language = QLineEdit(str(config.get('whisper_language', '')))
+        whisper_language.setPlaceholderText('Boş: otomatik algıla (örn. en, ja, tr)')
+        self.fields['whisper_language'] = whisper_language
+        layout.addRow('Konuşma dili', whisper_language)
+
         advanced_section = QLabel('Gelişmiş (deneysel)')
         advanced_section.setObjectName('settingsSection')
         layout.addRow(advanced_section)
@@ -1193,6 +1220,14 @@ class SettingsDialog(QDialog):
         temperature.setValue(float(config['temperature']))
         self.fields['temperature'] = temperature
         layout.addRow('Temperature', temperature)
+        qa_chars = QSpinBox()
+        qa_chars.setRange(1000, 1000000)
+        qa_chars.setSingleStep(1000)
+        qa_chars.setValue(int(config.get('qa_context_chars', DEFAULT_CONFIG['qa_context_chars'])))
+        qa_chars.setToolTip('Soru Sor: modele tek istekte giden en fazla transkript karakteri. '
+                            'Aşılırsa video haritası kullanılır. LM Studio bağlam uzunluğuna göre ayarlayın.')
+        self.fields['qa_context_chars'] = qa_chars
+        layout.addRow('Soru-cevap bağlam karakteri', qa_chars)
 
         restore = QPushButton('Varsayılan ayarlara dön')
         restore.clicked.connect(self.reset_defaults)

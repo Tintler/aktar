@@ -276,12 +276,25 @@ def load_subtitle_session(video, stream, base=None, log=print):
     """Altyazi stream'inden oturum verisi: onbellekte varsa oradan, yoksa cikarir."""
     source = {'kind': 'subtitle', 'stream': int(stream['index']),
               'language': stream.get('language', ''), 'title': stream.get('title', '')}
-    path = cache_path(video, f'subtitle:{int(stream["index"])}', base)
+    return _load_session(video, f'subtitle:{int(stream["index"])}', source,
+                         lambda: subtitle_segments(video, stream, base), base, log)
+
+
+def load_whisper_session(video, result, base=None, log=print):
+    """speech.transcribe sonucundan (konusmadan metin) oturum verisi."""
+    source = {'kind': 'whisper', 'model': result.get('model', ''),
+              'language': result.get('language', '')}
+    return _load_session(video, f'whisper:{source["model"]}:{source["language"]}', source,
+                         lambda: [dict(item) for item in result['segments']], base, log)
+
+
+def _load_session(video, source_key, source, make_segments, base, log):
+    path = cache_path(video, source_key, base)
     cached = load_cache(path)
     if cached:
         log('Transkript önbellekten yüklendi.')
         return cached, path
-    segments = subtitle_segments(video, stream, base)
+    segments = make_segments()
     try:
         info = media.video_info(video)
     except (RuntimeError, ValueError) as error:

@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QP
                                QTextBrowser, QToolTip, QVBoxLayout, QWidget)
 
 import qa
+import speech
 from app_core import GracefulStop, load_config, save_json
 from gui import (THEME, ClickableLabel, DropdownCombo, HoverIconButton, card, section_label,
                  tinted_icon)
@@ -36,8 +37,9 @@ from media import sidecar_subtitles, subtitle_streams
 
 GREETING = ('Merhaba! İzlediğiniz videoyla ilgili sorularınız mı var? '
             'Size yardımcı olmaktan memnuniyet duyarım.')
-NO_SUBTITLE = ('Bu videoda metin tabanlı altyazı yok; soru-cevap için transkript '
-               'çıkarılamadı. Video yine de oynatılabilir.')
+NO_SUBTITLE = ('Bu videoda metin tabanlı altyazı yok. Soru sormak için konuşmayı sesten '
+               'metne çevirebilirsiniz (Whisper; ilk kullanımda model indirilir).')
+WHISPER_KEY = 'whisper'  # transkript secicisi ve CC menusu icin kaynak anahtari
 SEEK_STEP_MS = 5000
 SUBTITLE_TICK_MS = 120  # oynarken altyazi metninin yenilenme araligi
 
@@ -51,7 +53,7 @@ QTextBrowser#qaChat {{ background:transparent; border:0; color:{text}; padding:4
 QLabel#qaChip {{ background:transparent; border:1px solid {drop_border}; border-radius:15px;
                  color:{text}; padding:6px 14px; }}
 QLabel#qaChip:hover {{ background:{panel_alt}; color:{accent}; border-color:{accent_edge}; }}
-QWidget#qaChips {{ background:transparent; }}
+QWidget#qaChips, QWidget#qaSource {{ background:transparent; }}
 QLabel#qaFoot {{ color:{muted}; font-size:11px; }}
 QSlider::groove:horizontal {{ height:4px; background:{drop_border}; border-radius:2px; }}
 QSlider::sub-page:horizontal {{ height:4px; background:{secondary}; border-radius:2px; }}
@@ -125,20 +127,23 @@ def parse_seek_link(url):
 
 # --- arka plan isleri -------------------------------------------------------
 class PrepareWorker(QObject):
-    """Akis tespiti -> transkript (onbellekli) -> video haritasi/ozet."""
+    """Akis tespiti -> transkript (altyazi veya Whisper, onbellekli) -> video haritasi/ozet."""
 
-    streams_ready = Signal(object, object)  # (akislar, secilen akis)
+    streams_ready = Signal(object, object)  # (akislar, secilen akis; Whisper ise None)
+    whisper_progress = Signal(int, int)     # (islenen saniye, toplam saniye)
+    whisper_ready = Signal(object)          # speech.transcribe sonucu
     loaded = Signal(object)                 # qa.VideoQA
     progress = Signal(int, int)
     log = Signal(str)
     finished = Signal(object, str)          # (genel ozet, hata)
 
-    def __init__(self, video, stream=None, streams=None, session=None):
+    def __init__(self, video, stream=None, streams=None, session=None, whisper=False):
         super().__init__()
         self.video = video
         self.stream = stream
         self.streams = streams
         self.session = session
+        self.whisper = whisper
         self.cancel_event = threading.Event()
 
     @Slot()
@@ -146,12 +151,25 @@ class PrepareWorker(QObject):
         try:
             if self.session is None:
                 streams = self.streams if self.streams is not None else subtitle_streams(self.video)
-                stream = self.stream or qa.pick_subtitle_stream(streams)
+                stream = None if self.whisper else (self.stream or qa.pick_subtitle_stream(streams))
+                cfg = load_config()
+                if stream is None and not self.whisper:
+                    # Altyazi yok: daha once cikarilmis Whisper transkripti varsa onu kullan.
+                    self.whisper = speech.load_cached(self.video, cfg['whisper_model'],
+                                                      cfg['whisper_language']) is not None
                 self.streams_ready.emit(streams, stream)
-                if stream is None:
+                if stream is None and not self.whisper:
                     self.finished.emit(None, NO_SUBTITLE)
                     return
-                data, path = qa.load_subtitle_session(self.video, stream, log=self.log.emit)
+                if self.whisper:
+                    result = speech.transcribe(
+                        self.video, cfg['whisper_model'], cfg['whisper_device'],
+                        cfg['whisper_language'], progress=self.whisper_progress.emit,
+                        cancelled=self.cancel_event.is_set, log=self.log.emit)
+                    self.whisper_ready.emit(result)
+                    data, path = qa.load_whisper_session(self.video, result, log=self.log.emit)
+                else:
+                    data, path = qa.load_subtitle_session(self.video, stream, log=self.log.emit)
                 self.session = qa.VideoQA(data, config_provider=load_config, log=self.log.emit,
                                           save=lambda value: save_json(path, value))
                 self.loaded.emit(self.session)
@@ -164,6 +182,31 @@ class PrepareWorker(QObject):
             self.finished.emit(None, str(error))
             return
         self.finished.emit(overview, '')
+
+
+class TranscribeWorker(QObject):
+    """Yalnizca konusmadan metin (CC menusunden 'Sesten olustur')."""
+
+    progress = Signal(int, int)
+    log = Signal(str)
+    finished = Signal(object, str)  # (speech.transcribe sonucu, hata)
+
+    def __init__(self, video):
+        super().__init__()
+        self.video = video
+        self.cancel_event = threading.Event()
+
+    @Slot()
+    def run(self):
+        try:
+            cfg = load_config()
+            result = speech.transcribe(self.video, cfg['whisper_model'], cfg['whisper_device'],
+                                       cfg['whisper_language'], progress=self.progress.emit,
+                                       cancelled=self.cancel_event.is_set, log=self.log.emit)
+        except (GracefulStop, RuntimeError, ValueError, OSError) as error:
+            self.finished.emit(None, str(error))
+            return
+        self.finished.emit(result, '')
 
 
 class AskWorker(QObject):
@@ -360,6 +403,13 @@ class VideoQAPanel(QWidget):
         self._subtitle_key = None   # None: altyazi kapali
         self._timelines = {}        # kaynak anahtari -> qa.SubtitleTimeline
         self._subtitle_text = ''
+        self._transcribe_worker = None
+        try:
+            cfg = load_config()
+            self._whisper = speech.load_cached(self.video, cfg['whisper_model'],
+                                               cfg['whisper_language'])
+        except (OSError, ValueError):
+            self._whisper = None
         theme = dict(THEME)
         try:
             from gui import _MONO_FAMILY
@@ -469,6 +519,7 @@ class VideoQAPanel(QWidget):
         self.source_combo.currentIndexChanged.connect(self.on_source_changed)
         source.addWidget(self.source_combo, 1)
         self.source_row = QWidget()
+        self.source_row.setObjectName('qaSource')
         self.source_row.setLayout(source)
         self.source_row.hide()
         column.addWidget(self.source_row)
@@ -558,6 +609,11 @@ class VideoQAPanel(QWidget):
     def busy(self):
         return bool(self._jobs)
 
+    def _cancel_jobs(self):
+        for worker in (self._prepare_worker, self._transcribe_worker):
+            if worker is not None:
+                worker.cancel_event.set()
+
     def hideEvent(self, event):
         """Ceviri sekmesine gecilince video duraklar (YouTube'da sekme degisimi gibi)."""
         self.player.pause()
@@ -568,8 +624,7 @@ class VideoQAPanel(QWidget):
         bitince panel kendini siler (calisan thread'in alicisi silinmesin diye)."""
         self._retired = True
         self.player.stop()
-        if self._prepare_worker is not None:
-            self._prepare_worker.cancel_event.set()
+        self._cancel_jobs()
         self.hide()
         if not self._jobs:
             self.deleteLater()
@@ -577,8 +632,7 @@ class VideoQAPanel(QWidget):
     def shutdown(self, wait_ms=3000):
         """Uygulama kapanirken: isleri durdur ve thread'leri kisa sure bekle."""
         self.player.stop()
-        if self._prepare_worker is not None:
-            self._prepare_worker.cancel_event.set()
+        self._cancel_jobs()
         for thread, _worker in list(self._jobs):
             thread.quit()
             thread.wait(wait_ms)
@@ -676,12 +730,20 @@ class VideoQAPanel(QWidget):
             menu.addAction(title).setEnabled(False)
             for item in items:
                 add(item['label'], item, item['key'] == self._subtitle_key)
+        menu.addSeparator()
+        menu.addAction('Sesten (Whisper)').setEnabled(False)
+        if self._whisper:
+            label = 'Whisper · ' + speech.language_label(self._whisper.get('language'))
+            add(label, {'key': WHISPER_KEY, 'kind': WHISPER_KEY, 'label': label},
+                self._subtitle_key == WHISPER_KEY)
+        elif self._transcribe_worker is not None:
+            menu.addAction('Konuşmadan metin çıkarılıyor...').setEnabled(False)
+        else:
+            menu.addAction('Sesten oluştur...').triggered.connect(
+                lambda _checked=False: self.generate_whisper())
         if self._streams is None:
             menu.addSeparator()
             menu.addAction('Altyazı akışları okunuyor...').setEnabled(False)
-        elif not sources:
-            menu.addSeparator()
-            menu.addAction('Bu video için metin altyazı bulunamadı').setEnabled(False)
         point = self.cc_button.mapToGlobal(QPoint(0, 0))
         menu.exec(QPoint(point.x() + self.cc_button.width() - menu.sizeHint().width(),
                          point.y() - menu.sizeHint().height() - 4))
@@ -691,6 +753,9 @@ class VideoQAPanel(QWidget):
         self._subtitle_key = None if source is None else source['key']
         self.cc_button.setTintedIcon('subtitles', THEME['text'] if source is None
                                      else THEME['accent'], 18)
+        if source is not None and source['key'] == WHISPER_KEY and self._whisper:
+            self._timelines.setdefault(WHISPER_KEY, qa.SubtitleTimeline(
+                speech.display_segments(self._whisper['segments'])))
         if source is not None and source['key'] not in self._timelines:
             self._log('Altyazı yükleniyor: ' + source['label'])
             self._start_job(SubtitleLoadWorker(self.video, source), self.subtitle_loaded)
@@ -700,6 +765,36 @@ class VideoQAPanel(QWidget):
         else:
             self._subtitle_timer.stop()
         self._refresh_subtitle()
+
+    def generate_whisper(self):
+        """CC menusunden: konusmadan metin cikar, bitince altyazi olarak goster."""
+        ok, message = speech.available()
+        if not ok:
+            self._note('error', message)
+            return
+        if self._transcribe_worker is not None or self._prepare_worker is not None:
+            self._note('note', 'Önceki iş bitince tekrar deneyin.')
+            return
+        worker = TranscribeWorker(self.video)
+        worker.progress.connect(self.on_whisper_progress)
+        worker.log.connect(self._log)
+        self._transcribe_worker = worker
+        self.prepare_progress.setRange(0, 0)
+        self.prepare_progress.show()
+        self.status_label.setText('Konuşmadan metin çıkarılıyor...')
+        self._start_job(worker, self.transcribe_finished)
+
+    @Slot(object, str)
+    def transcribe_finished(self, result, error):
+        self._transcribe_worker = None
+        self.prepare_progress.hide()
+        self.status_label.setText('Hazır' if self._ready else self.status_label.text())
+        if error:
+            self._note('error', 'Konuşmadan metin çıkarılamadı: ' + error)
+            return
+        self.on_whisper_ready(result)
+        label = 'Whisper · ' + speech.language_label(result.get('language'))
+        self.select_subtitle({'key': WHISPER_KEY, 'kind': WHISPER_KEY, 'label': label})
 
     @Slot(str, object, str)
     def subtitle_loaded(self, key, timeline, error):
@@ -765,19 +860,27 @@ class VideoQAPanel(QWidget):
         self._external_log('[Soru] ' + str(message))
 
     # --- hazirlik -----------------------------------------------------------
-    def start_prepare(self, stream=None):
+    def start_prepare(self, stream=None, whisper=False):
         if self.busy():
             return
+        if whisper:
+            ok, message = speech.available()
+            if not ok:
+                self._note('error', message)
+                return
         self._ready = False
         self._set_input_enabled(False)
         self.chips.hide()
         self.prepare_progress.setRange(0, 0)
         self.prepare_progress.show()
-        self.status_label.setText('Transkript hazırlanıyor...' if self.session is None
+        self.status_label.setText(('Konuşmadan metin çıkarılıyor...' if whisper
+                                   else 'Transkript hazırlanıyor...') if self.session is None
                                   else 'Video hazırlanıyor...')
         worker = PrepareWorker(self.video, stream=stream or self._initial_stream,
-                               streams=self._streams, session=self.session)
+                               streams=self._streams, session=self.session, whisper=whisper)
         worker.streams_ready.connect(self.on_streams)
+        worker.whisper_progress.connect(self.on_whisper_progress)
+        worker.whisper_ready.connect(self.on_whisper_ready)
         worker.loaded.connect(self.on_loaded)
         worker.progress.connect(self.on_prepare_progress)
         worker.log.connect(self._log)
@@ -794,11 +897,23 @@ class VideoQAPanel(QWidget):
             label = ' · '.join(part for part in (item.get('language') or '', item.get('title') or '',
                                                  item.get('codec', '')) if part)
             self.source_combo.addItem(label or ('Akış ' + str(item['index'])), item['index'])
-        if chosen is not None:
-            index = self.source_combo.findData(chosen['index'])
-            self.source_combo.setCurrentIndex(max(0, index))
+        self.source_combo.addItem('Sesten (Whisper)', WHISPER_KEY)
+        index = self.source_combo.findData(WHISPER_KEY if chosen is None else chosen['index'])
+        self.source_combo.setCurrentIndex(max(0, index))
         self.source_combo.blockSignals(False)
-        self.source_row.setVisible(len(usable) > 1)
+        self.source_row.show()
+
+    @Slot(int, int)
+    def on_whisper_progress(self, done, total):
+        self.prepare_progress.setRange(0, max(1, total))
+        self.prepare_progress.setValue(done)
+        self.status_label.setText(f'Konuşmadan metin: {qa.format_time(done)} / '
+                                  f'{qa.format_time(total)}')
+
+    @Slot(object)
+    def on_whisper_ready(self, result):
+        self._whisper = result
+        self._timelines.pop(WHISPER_KEY, None)
 
     @Slot(object)
     def on_loaded(self, session):
@@ -823,9 +938,12 @@ class VideoQAPanel(QWidget):
             self._update_marks()
         if error:
             self._log(error)
-            self.status_label.setText('Hazırlık tamamlanamadı.')
+            self.status_label.setText('Altyazı yok · video oynatılabilir' if error == NO_SUBTITLE
+                                      else 'Hazırlık tamamlanamadı.')
             self._note('error', error)
-            if self.session is not None:
+            if error == NO_SUBTITLE:
+                self._show_chips([], whisper=True)
+            elif self.session is not None:
                 self._show_chips([], retry=True)
             return
         data = self.session.data
@@ -840,15 +958,21 @@ class VideoQAPanel(QWidget):
         index = self.source_combo.currentData()
         if index is None or self.busy():
             return
-        if self.session is not None and self.session.data['source'].get('stream') == index:
-            return
-        stream = next((item for item in self._streams or [] if item['index'] == index), None)
-        if stream is None:
-            return
+        source = self.session.data['source'] if self.session is not None else {}
+        if index == WHISPER_KEY:
+            if source.get('kind') == 'whisper':
+                return
+            stream = None
+        else:
+            if source.get('stream') == index:
+                return
+            stream = next((item for item in self._streams or [] if item['index'] == index), None)
+            if stream is None:
+                return
         self.session = None
         self._entries = [('note', GREETING)]
         self._render_chat()
-        self.start_prepare(stream)
+        self.start_prepare(stream, whisper=stream is None)
 
     # --- sohbet -------------------------------------------------------------
     def _set_input_enabled(self, enabled):
@@ -860,12 +984,20 @@ class VideoQAPanel(QWidget):
         if enabled:
             self.input.setFocus()
 
-    def _show_chips(self, questions, retry=False):
+    def _show_chips(self, questions, retry=False, whisper=False):
+        # Her oneri bir satir layout'u icinde; layout kaldirilinca icindeki etiket
+        # silinmez ve eski oneri yenilerin ustunde kaliyordu.
         while self.chips_box.count():
-            item = self.chips_box.takeAt(0)
-            if item.widget() is not None:
-                item.widget().deleteLater()
-        if retry:
+            line = self.chips_box.takeAt(0).layout()
+            while line is not None and line.count():
+                widget = line.takeAt(0).widget()
+                if widget is not None:
+                    widget.deleteLater()
+        if whisper:
+            self.chips_title.setText('Altyazı olmadan da soru sorabilirsiniz:')
+            labels = [('Sesten transkript çıkar (Whisper)',
+                       lambda _checked=False: self.start_prepare(whisper=True))]
+        elif retry:
             self.chips_title.setText('LM Studio açık ve model yüklü olduğunda tekrar deneyin:')
             labels = [('Tekrar dene', lambda _checked=False: self.start_prepare())]
         else:
