@@ -1,7 +1,10 @@
 """PySide6 masaustu arayuzu.
 
 Duzen (mockup-2 "Ust Arac Cubugu" v2):
-  - Üst özel başlık şeridi (frameless): [marka] [Video Seç] [Seri: dropdown / Terim / Süreklilik] [durum rozeti] [Ayarlar] [─ ▢ ✕]
+  - Üst özel başlık şeridi (frameless): [marka] [Çeviri | Soru Sor] [Video Seç] [Seri: dropdown / Terim / Süreklilik*] [durum rozeti] [Ayarlar] [─ ▢ ✕]
+    (* seri kontrolleri yalnizca Ceviri sekmesinde gorunur)
+  - Sayfalar (QStackedWidget): Ceviri (asagidaki duzen) | Soru Sor (qa_panel.VideoQAPanel:
+    oynatici + atifli sohbet; ilk acilista lazy import)
   - Orta alan (kart yuzeyleri): bos durum birakma alani / dosya karti + akis tablosu
   - Islem karti: [Bolum terimleri...] [On analiz yap (anahtar)] [ilerleme] [Duraklat] [Cevir]
   - Alt panel (QSplitter + QTabWidget): [Konsol] [On Analiz]
@@ -29,7 +32,8 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame,
     QGraphicsDropShadowEffect, QGraphicsOpacityEffect, QHBoxLayout, QHeaderView,
     QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit,
-    QProgressBar, QPushButton, QSizePolicy, QSpinBox, QSplitter, QStyle,
+    QButtonGroup, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QSplitter, QStackedWidget,
+    QStyle,
     QStyledItemDelegate, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout,
     QWidget,
 )
@@ -101,6 +105,14 @@ QFrame#customTitleBar QPushButton {{ background:transparent; border:0; color:{se
                                      padding:6px 11px; border-radius:{radius_small}px; }}
 QFrame#customTitleBar QPushButton:hover {{ background:{panel_alt}; color:{accent}; }}
 QFrame#customTitleBar QPushButton:pressed {{ background:{border}; color:{accent}; }}
+/* Ceviri | Soru Sor sekme secicisi (segment). Ata seciciyle yazilir: genel
+   'QFrame#customTitleBar QPushButton' kuralindan guclu olmali. */
+QFrame#customTitleBar QFrame#modeSwitch {{ background:{panel}; border:1px solid {border};
+                                          border-radius:{radius_small}px; }}
+QFrame#customTitleBar QFrame#modeSwitch QPushButton#modeTab {{ background:transparent; color:{secondary};
+    padding:5px 14px; border-radius:7px; font-weight:600; }}
+QFrame#customTitleBar QFrame#modeSwitch QPushButton#modeTab:hover {{ background:{panel_alt}; color:{accent}; }}
+QFrame#customTitleBar QFrame#modeSwitch QPushButton#modeTab:checked {{ background:{panel_alt}; color:{accent}; }}
 QFrame#customTitleBar QComboBox {{ background:{panel}; border:1px solid {border}; color:{text}; padding:5px 9px; }}
 /* Pencere dugmeleri. DIKKAT: Qt QSS ozgullugu CSS2 gibidir; "QFrame#customTitleBar
    QPushButton" (1 ID + 2 element) kurali "QPushButton#winButton" (1 ID + 1 element)
@@ -694,6 +706,18 @@ class Toast(QFrame):
         if parent is None:
             return
         self.move(parent.width() - self.width() - 24, parent.height() - self.height() - 24)
+
+
+MODE_TRANSLATE, MODE_ASK = 0, 1  # baslik seridindeki sekmeler / self.pages sirasi
+
+
+def _alive(widget):
+    """deleteLater ile silinmis Qt nesnesine erisimi onler."""
+    try:
+        from shiboken6 import isValid
+    except ImportError:
+        return True
+    return isValid(widget)
 
 
 VIDEO_FILTER = 'Video (' + ' '.join('*' + item for item in VIDEO_EXTENSIONS) + ')'
@@ -1500,8 +1524,8 @@ class MainWindow(QMainWindow):
         self._worker = None
         self._run_worker = None
         self._running = False
-        self._qa_window = None
-        self._qa_retired = []  # isi suren eski soru pencereleri (thread bitene dek tutulur)
+        self.qa_panel = None
+        self._qa_retired = []  # video degisince durdurulan, isi suren eski paneller
         self.loaded_models = []
         self._progress_animation = QVariantAnimation(self)
         self._progress_animation.setDuration(280)
@@ -1526,10 +1550,13 @@ class MainWindow(QMainWindow):
 
         self._build_title_bar()
 
+        self.pages = QStackedWidget()
+        outer.addWidget(self.pages, 1)
+
         self.splitter = QSplitter(Qt.Vertical)
         self.splitter.setChildrenCollapsible(False)
         self.splitter.setHandleWidth(12)
-        outer.addWidget(self.splitter, 1)
+        self.pages.addWidget(self.splitter)
 
         top = QWidget()
         layout = QVBoxLayout(top)
@@ -1557,6 +1584,20 @@ class MainWindow(QMainWindow):
         self.splitter.setStretchFactor(1, 1)
         self.splitter.setSizes([520, 220])
 
+        # Soru Sor sayfasi: video yokken kendi birakma alani; panel ilk acilista kurulur.
+        self.qa_page = QWidget()
+        self.qa_layout = QVBoxLayout(self.qa_page)
+        self.qa_layout.setContentsMargins(0, 0, 0, 0)
+        self.qa_empty = QWidget()
+        qa_empty_layout = QVBoxLayout(self.qa_empty)
+        qa_empty_layout.setContentsMargins(16, 16, 16, 16)
+        self.qa_drop = DropArea()
+        self.qa_drop.dropped.connect(self.open_video)
+        self.qa_drop.select_requested.connect(self.choose_video)
+        qa_empty_layout.addWidget(self.qa_drop)
+        self.qa_layout.addWidget(self.qa_empty, 1)
+        self.pages.addWidget(self.qa_page)
+
         self.toast = Toast(central)
         self._show_empty_state(True)
 
@@ -1582,12 +1623,6 @@ class MainWindow(QMainWindow):
         column.addWidget(self.file_name)
         column.addWidget(self.drop_path)
         row.addLayout(column, 1)
-
-        self.qa_button = HoverIconButton('Videoya Soru Sor')
-        self.qa_button.setTintedIcon('ask', THEME['secondary'])
-        self.qa_button.setToolTip('Oynatıcı ve atıflı sohbetle bu video hakkında soru sorun')
-        self.qa_button.clicked.connect(self.open_qa)
-        row.addWidget(self.qa_button)
 
         change = QPushButton('Değiştir')
         change.setObjectName('ghost')
@@ -1732,29 +1767,58 @@ class MainWindow(QMainWindow):
         brand_row.addWidget(brand_text)
         row.addWidget(brand)
 
+        switch = QFrame()
+        switch.setObjectName('modeSwitch')
+        switch_row = QHBoxLayout(switch)
+        switch_row.setContentsMargins(3, 3, 3, 3)
+        switch_row.setSpacing(2)
+        self.mode_group = QButtonGroup(self)
+        self.mode_group.setExclusive(True)
+        for mode, (text, icon, tip) in enumerate((
+                ('Çeviri', 'translate', 'Altyazı çıkarma ve Türkçeye çeviri'),
+                ('Soru Sor', 'ask', 'Oynatıcı ve atıflı sohbetle videoya soru sorun'))):
+            button = HoverIconButton(text)
+            button.setObjectName('modeTab')
+            button.setCheckable(True)
+            button.setTintedIcon(icon, THEME['secondary'])
+            button.setToolTip(tip)
+            button.setCursor(Qt.PointingHandCursor)
+            self.mode_group.addButton(button, mode)
+            switch_row.addWidget(button)
+        self.mode_group.button(MODE_TRANSLATE).setChecked(True)
+        self.mode_group.idClicked.connect(self.set_mode)
+        row.addWidget(switch)
+
         self.open_button = HoverIconButton('Video Seç')
         self.open_button.setTintedIcon('upload', THEME['secondary'], 18)
         self.open_button.clicked.connect(self.choose_video)
         row.addWidget(self.open_button)
 
+        # Seri kontrolleri yalnizca Ceviri sekmesinde anlamlidir (set_mode gizler).
+        self.series_group = QWidget()
+        self.series_group.setStyleSheet('background:transparent;')
+        series_row = QHBoxLayout(self.series_group)
+        series_row.setContentsMargins(0, 0, 0, 0)
+        series_row.setSpacing(9)
         label = QLabel('SERİ')
         label.setObjectName('groupLabel')
-        row.addWidget(label)
+        series_row.addWidget(label)
         self.series_combo = DropdownCombo()
         self.series_combo.setMinimumWidth(210)
         self.series_combo.setMaximumWidth(260)
         self.series_combo.currentIndexChanged.connect(self.on_series_changed)
-        row.addWidget(self.series_combo)
+        series_row.addWidget(self.series_combo)
         self.term_button = HoverIconButton('Terim')
         self.term_button.setTintedIcon('terms', THEME['secondary'])
         self.term_button.setToolTip('Seri terim sözlüğünü düzenle')
         self.term_button.clicked.connect(self.edit_series_glossary)
-        row.addWidget(self.term_button)
+        series_row.addWidget(self.term_button)
         self.continuity_button = HoverIconButton('Süreklilik')
         self.continuity_button.setTintedIcon('continuity', THEME['secondary'])
         self.continuity_button.setToolTip('Seri süreklilik kararlarını düzenle')
         self.continuity_button.clicked.connect(self.edit_series_decisions)
-        row.addWidget(self.continuity_button)
+        series_row.addWidget(self.continuity_button)
+        row.addWidget(self.series_group)
 
         spacer = QWidget()
         spacer.setStyleSheet('background:transparent;')
@@ -1969,6 +2033,10 @@ class MainWindow(QMainWindow):
         self.progress.setValue(0)
         self.progress_value.setText('0 / 0')
         self.append('Video açıldı: ' + str(path))
+        self._retire_qa_panel()
+        self.qa_empty.show()
+        if self.pages.currentIndex() == MODE_ASK:
+            self.set_mode(MODE_ASK)
         if not self.series_slug:
             matches = series.matching_series(path)
             if len(matches) == 1:
@@ -2047,33 +2115,47 @@ class MainWindow(QMainWindow):
                 return self.streams[row]
         return None
 
-    # --- videoya soru sor -------------------------------------------------
-    def open_qa(self):
-        """Oynatici + atifli sohbet penceresini acar (ayni video icin mevcut pencereyi one getirir)."""
-        if self.video is None:
-            self.warn('Önce bir video açın.')
-            return
-        window = self._qa_window
-        if window is not None and window.video == self.video:
-            window.bring_to_front()
-            return
+    # --- sekmeler: Ceviri | Soru Sor ---------------------------------------
+    def set_mode(self, mode):
+        """Ceviri / Soru Sor sayfasi arasinda gecer (baslik seridindeki secici)."""
+        if mode == MODE_ASK and self.video is not None and not self._ensure_qa_panel():
+            mode = MODE_TRANSLATE
+        self.mode_group.button(mode).setChecked(True)
+        self.series_group.setVisible(mode == MODE_TRANSLATE)
+        self.pages.setCurrentIndex(mode)
+
+    def _ensure_qa_panel(self):
+        """Acik video icin Soru Sor panelini (yoksa) kurar. Basarisizsa False."""
+        if self.qa_panel is not None and self.qa_panel.video == self.video:
+            return True
         try:
-            # Lazy import: QtMultimedia yalnizca bu ozellik kullanilinca yuklenir.
-            from qa_window import VideoQAWindow
+            # Lazy import: QtMultimedia yalnizca Soru Sor sekmesi kullanilinca yuklenir.
+            from qa_panel import VideoQAPanel
         except ImportError as error:
             self.warn('Video oynatıcı bileşeni yüklenemedi (QtMultimedia): ' + str(error))
-            return
-        if window is not None:
-            window.close()
-            self._qa_retired.append(window)
-        self._qa_retired = [item for item in self._qa_retired if item.busy()]
+            return False
+        self._retire_qa_panel()
         stream = self.selected_stream()
         if stream is not None and not stream['supported']:
             stream = None
-        self._qa_window = VideoQAWindow(self.video, stream=stream, streams=self.streams or None,
-                                        log=self.append)
-        self._qa_window.show()
-        self.append('Videoya Soru Sor açıldı: ' + self.video.name)
+        self.qa_panel = VideoQAPanel(self.video, stream=stream, streams=self.streams or None,
+                                     log=self.append)
+        self.qa_layout.addWidget(self.qa_panel, 1)
+        self.qa_empty.hide()
+        self.append('Soru Sor hazırlanıyor: ' + self.video.name)
+        return True
+
+    def _retire_qa_panel(self):
+        """Eski videonun panelini durdurur; isi bitince panel kendini siler."""
+        panel = self.qa_panel
+        if panel is None:
+            return
+        self.qa_panel = None
+        self.qa_layout.removeWidget(panel)
+        self._qa_retired = [item for item in self._qa_retired if _alive(item) and item.busy()]
+        if panel.busy():
+            self._qa_retired.append(panel)
+        panel.retire()
 
     # --- ceviri -----------------------------------------------------------
     def edit_chapter_glossary(self):
@@ -2277,10 +2359,9 @@ class MainWindow(QMainWindow):
             self._run_worker.request_cancel()
             self._thread.quit()
             self._thread.wait(5000)
-        for window in [self._qa_window] + self._qa_retired:
-            if window is not None:
-                window.close()
-                window.shutdown()
+        for panel in [self.qa_panel] + self._qa_retired:
+            if panel is not None and _alive(panel):
+                panel.shutdown()
         event.accept()
 
     def warn(self, message):

@@ -1,15 +1,16 @@
-"""Videoya Soru Sor penceresi (F45): solda oynatici, sagda atifli sohbet.
+"""Soru Sor sekmesi paneli (F45/F46): solda oynatici, sagda atifli sohbet.
 
+Ana penceredeki "Soru Sor" sekmesinin icerigidir (F46'dan once ayri pencereydi).
 Duzen (YouTube "Bu video hakkinda soru sorun" paneli):
-  - Ozel baslik seridi (frameless, ana pencereyle ayni): [marka] Videoya Soru Sor · <video> [─ ▢ ✕]
   - Sol kart: QVideoWidget + bolum isaretli arama cubugu + [oynat] [ses] 0:03 / 20:29 [bolum]
   - Sag kart: baslik, transkript kaynagi, hazirlik durumu, sohbet (QTextBrowser),
     onerilen soru dugmeleri, soru alani.
 
 Is mantigi qa.py'dedir (Qt'siz); burada yalnizca oynatici, sohbet gorunumu ve
 arka plan worker'lari vardir. Cevaptaki zaman atiflari "t:<saniye>" baglantisidir;
-tiklaninca oynatici o ana gider. QtMultimedia yalnizca bu pencere acilinca
-yuklenir (gui.MainWindow.open_qa lazy import eder).
+tiklaninca oynatici o ana gider. QtMultimedia yalnizca Soru Sor sekmesi ilk kez
+acilinca yuklenir (gui.MainWindow._ensure_qa_panel lazy import eder). Her video
+icin yeni panel kurulur; video degisince eski panel `retire()` ile durdurulur.
 """
 from __future__ import annotations
 
@@ -22,14 +23,14 @@ from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QThread, QUrl, 
 from PySide6.QtGui import QColor, QKeySequence, QPainter, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
-                               QProgressBar, QPushButton, QSizePolicy, QSlider, QSplitter,
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QProgressBar,
+                               QSlider, QSplitter,
                                QTextBrowser, QToolTip, QVBoxLayout, QWidget)
 
 import qa
 from app_core import GracefulStop, load_config, save_json
-from gui import (THEME, CaptionButton, ClickableLabel, DropdownCombo, HoverIconButton, ResizeEdges, TitleBar,
-                 _brand_pixmap, card, section_label, tinted_icon, window_icon)
+from gui import (THEME, ClickableLabel, DropdownCombo, HoverIconButton, card, section_label,
+                 tinted_icon)
 from media import subtitle_streams
 
 GREETING = ('Merhaba! İzlediğiniz videoyla ilgili sorularınız mı var? '
@@ -292,9 +293,9 @@ class SeekBar(QWidget):
         super().leaveEvent(event)
 
 
-# --- pencere ----------------------------------------------------------------
-class VideoQAWindow(QMainWindow):
-    """Tek video icin oynatici + atifli sohbet penceresi."""
+# --- panel ------------------------------------------------------------------
+class VideoQAPanel(QWidget):
+    """Tek video icin oynatici + atifli sohbet (Soru Sor sekmesi icerigi)."""
 
     def __init__(self, video, stream=None, streams=None, log=None, parent=None):
         super().__init__(parent)
@@ -309,10 +310,7 @@ class VideoQAWindow(QMainWindow):
         self._asking = False
         self._ready = False
         self._muted_volume = None
-        self.setWindowTitle('Aktar - Videoya Soru Sor - ' + self.video.name)
-        self.setWindowIcon(window_icon())
-        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
-        self.resize(1360, 800)
+        self._retired = False
         theme = dict(THEME)
         try:
             from gui import _MONO_FAMILY
@@ -327,54 +325,18 @@ class VideoQAWindow(QMainWindow):
 
     # --- kurulum -----------------------------------------------------------
     def _build(self):
-        root = QFrame()
-        root.setObjectName('appRoot')
-        self.setCentralWidget(root)
-        outer = QVBoxLayout(root)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
-
-        self.title_bar = TitleBar(self)
-        row = self.title_bar.row
-        logo = QLabel()
-        logo.setPixmap(_brand_pixmap(22))
-        row.addWidget(logo)
-        title = QLabel('Videoya Soru Sor')
-        title.setObjectName('brandText')
-        row.addWidget(title)
-        name = QLabel(self.video.name)
-        name.setObjectName('hint')
-        name.setToolTip(str(self.video))
-        name.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        row.addWidget(name, 1)
-        for kind, tip, slot, object_name in (
-                ('min', 'Küçült', self.showMinimized, 'winButton'),
-                ('max', 'Büyüt', self.toggle_maximize, 'winButton'),
-                ('close', 'Kapat', self.close, 'winClose')):
-            button = CaptionButton(kind)
-            button.setObjectName(object_name)
-            button.setToolTip(tip)
-            button.clicked.connect(slot)
-            row.addWidget(button)
-            if kind == 'max':
-                self.max_button = button
-        outer.addWidget(self.title_bar)
-
         splitter = QSplitter(Qt.Horizontal)
         splitter.setChildrenCollapsible(False)
         splitter.setHandleWidth(12)
-        body = QWidget()
-        body_layout = QHBoxLayout(body)
+        body_layout = QHBoxLayout(self)
         body_layout.setContentsMargins(16, 16, 16, 16)
         body_layout.addWidget(splitter)
-        outer.addWidget(body, 1)
 
         splitter.addWidget(self._build_player())
         splitter.addWidget(self._build_chat())
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
         splitter.setSizes([860, 460])
-        self._edges = ResizeEdges(self)
 
     def _build_player(self):
         frame, column = card(spacing=0, margins=(0, 0, 0, 0))
@@ -525,34 +487,6 @@ class VideoQAWindow(QMainWindow):
         self.volume.valueChanged.connect(self.on_volume)
         self.player.setSource(QUrl.fromLocalFile(str(self.video)))
 
-    # --- pencere (frameless) -------------------------------------------------
-    def toggle_maximize(self):
-        if self.isMaximized():
-            self.showNormal()
-        else:
-            self.showMaximized()
-        self._sync_window_state()
-
-    def _sync_window_state(self):
-        maximized = self.isMaximized()
-        self.max_button.set_kind('restore' if maximized else 'max')
-        self.max_button.setToolTip('Geri Yükle' if maximized else 'Büyüt')
-        self._edges.reposition()
-
-    def changeEvent(self, event):
-        super().changeEvent(event)
-        if event.type() == QEvent.WindowStateChange and hasattr(self, '_edges'):
-            self._sync_window_state()
-
-    def showEvent(self, event):
-        super().showEvent(event)
-        self._sync_window_state()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if hasattr(self, '_edges'):
-            self._edges.reposition()
-
     def eventFilter(self, obj, event):
         if obj is self.video_widget and event.type() == QEvent.MouseButtonPress \
                 and event.button() == Qt.LeftButton:
@@ -560,22 +494,24 @@ class VideoQAWindow(QMainWindow):
             return True
         return super().eventFilter(obj, event)
 
-    def bring_to_front(self):
-        if self.isMinimized():
-            self.showNormal()
-        self.show()
-        self.raise_()
-        self.activateWindow()
-
     def busy(self):
         return bool(self._jobs)
 
-    def closeEvent(self, event):
-        """Oynaticiyi durdurur, hazirligi bir sonraki adimda durdurur (pencere gizlenir)."""
+    def hideEvent(self, event):
+        """Ceviri sekmesine gecilince video duraklar (YouTube'da sekme degisimi gibi)."""
         self.player.pause()
+        super().hideEvent(event)
+
+    def retire(self):
+        """Video degisince: oynatici durur, hazirlik bir sonraki adimda durur; is
+        bitince panel kendini siler (calisan thread'in alicisi silinmesin diye)."""
+        self._retired = True
+        self.player.stop()
         if self._prepare_worker is not None:
             self._prepare_worker.cancel_event.set()
-        event.accept()
+        self.hide()
+        if not self._jobs:
+            self.deleteLater()
 
     def shutdown(self, wait_ms=3000):
         """Uygulama kapanirken: isleri durdur ve thread'leri kisa sure bekle."""
@@ -689,6 +625,8 @@ class VideoQAWindow(QMainWindow):
             self._jobs.remove(entry)
         entry[0].deleteLater()
         self.source_combo.setEnabled(not self._jobs)
+        if self._retired and not self._jobs:
+            self.deleteLater()
 
     def _log(self, message):
         self._external_log('[Soru] ' + str(message))
@@ -805,7 +743,8 @@ class VideoQAWindow(QMainWindow):
             # QPushButton metni kaydirmaz; uzun sorular iki yandan kesiliyordu.
             button = ClickableLabel(text)
             button.setObjectName('qaChip')
-            button.setWordWrap(True)
+            # Kisa sorular tek satirda kalsin; yalnizca sigmayacak kadar uzunlar kaydirilir.
+            button.setWordWrap(button.fontMetrics().horizontalAdvance(text) > 380)
             button.setCursor(Qt.PointingHandCursor)
             button.clicked.connect(slot)
             line = QHBoxLayout()

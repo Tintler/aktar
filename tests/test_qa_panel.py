@@ -1,4 +1,4 @@
-"""Videoya Soru Sor penceresi sozlesme testleri (F45).
+"""Soru Sor sekmesi (qa_panel) ve ana penceredeki sekme sozlesme testleri (F45/F46).
 
 AST testleri PySide6 olmadan calisir; HTML/baglanti yardimcilarinin davranis
 testleri PySide6 (QtMultimedia) kuruluysa calisir.
@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 GUI_PATH = ROOT / 'gui.py'
-WINDOW_PATH = ROOT / 'qa_window.py'
+WINDOW_PATH = ROOT / 'qa_panel.py'
 
 
 def _class(tree, name):
@@ -40,36 +40,58 @@ class QaWindowContractTests(unittest.TestCase):
         cls.gui = ast.parse(cls.gui_source)
         cls.window = ast.parse(cls.window_source)
 
-    def test_main_window_opens_qa_lazily_from_file_card(self):
+    def test_title_bar_switches_between_translate_and_ask_tabs(self):
         main = _class(self.gui, 'MainWindow')
-        open_qa = _method(main, 'open_qa')
-        imports = [node for node in ast.walk(open_qa) if isinstance(node, ast.ImportFrom)]
-        self.assertEqual([node.module for node in imports], ['qa_window'])
-        top_level = {node.module for node in self.gui.body if isinstance(node, ast.ImportFrom)}
-        self.assertNotIn('qa_window', top_level, 'QtMultimedia yalnizca gerektiginde yuklenmeli')
-        card = ast.get_source_segment(self.gui_source, _method(main, '_build_file_card'))
-        self.assertIn("HoverIconButton('Videoya Soru Sor')", card)
-        self.assertIn('clicked.connect(self.open_qa)', card)
+        bar = ast.get_source_segment(self.gui_source, _method(main, '_build_title_bar'))
+        self.assertIn("('Çeviri', 'translate'", bar)
+        self.assertIn("('Soru Sor', 'ask'", bar)
+        self.assertIn("setObjectName('modeSwitch')", bar)
+        self.assertIn('self.mode_group.idClicked.connect(self.set_mode)', bar)
+        self.assertIn('self.series_group', bar)
+        mode = ast.get_source_segment(self.gui_source, _method(main, 'set_mode'))
+        self.assertIn('self.series_group.setVisible(mode == MODE_TRANSLATE)', mode)
+        self.assertIn('self.pages.setCurrentIndex(mode)', mode)
+        build = ast.get_source_segment(self.gui_source, _method(main, '_build'))
+        self.assertIn('QStackedWidget()', build)
+        self.assertIn('self.qa_drop.select_requested.connect(self.choose_video)', build)
+        self.assertIn('QFrame#modeSwitch QPushButton#modeTab:checked', self.gui_source)
 
-    def test_main_window_close_shuts_down_qa_windows(self):
-        close = ast.get_source_segment(self.gui_source,
-                                       _method(_class(self.gui, 'MainWindow'), 'closeEvent'))
-        self.assertIn('window.shutdown()', close)
+    def test_separate_qa_window_and_file_card_button_are_gone(self):
+        self.assertFalse((ROOT / 'qa_window.py').exists())
+        self.assertNotIn('qa_button', self.gui_source)
+        self.assertNotIn('def open_qa', self.gui_source)
+        self.assertNotIn('QMainWindow', self.window_source)
+        self.assertNotIn('FramelessWindowHint', self.window_source)
+
+    def test_qa_panel_is_imported_lazily(self):
+        main = _class(self.gui, 'MainWindow')
+        ensure = _method(main, '_ensure_qa_panel')
+        imports = [node for node in ast.walk(ensure) if isinstance(node, ast.ImportFrom)]
+        self.assertEqual([node.module for node in imports], ['qa_panel'])
+        top_level = {node.module for node in self.gui.body if isinstance(node, ast.ImportFrom)}
+        self.assertNotIn('qa_panel', top_level, 'QtMultimedia yalnizca gerektiginde yuklenmeli')
+
+    def test_video_change_retires_old_panel_and_close_shuts_down(self):
+        main = _class(self.gui, 'MainWindow')
+        opened = ast.get_source_segment(self.gui_source, _method(main, 'open_video'))
+        self.assertIn('self._retire_qa_panel()', opened)
+        retire = ast.get_source_segment(self.gui_source, _method(main, '_retire_qa_panel'))
+        self.assertIn('panel.retire()', retire)
+        close = ast.get_source_segment(self.gui_source, _method(main, 'closeEvent'))
+        self.assertIn('panel.shutdown()', close)
+        panel = _class(self.window, 'VideoQAPanel')
+        retire = ast.get_source_segment(self.window_source, _method(panel, 'retire'))
+        self.assertIn('cancel_event.set()', retire)
+        done = ast.get_source_segment(self.window_source, _method(panel, '_job_done'))
+        self.assertIn('self.deleteLater()', done)
+        hide = ast.get_source_segment(self.window_source, _method(panel, 'hideEvent'))
+        self.assertIn('self.player.pause()', hide)
 
     def test_gui_registers_itself_when_run_as_script(self):
         self.assertIn("sys.modules.setdefault('gui', sys.modules[__name__])", self.gui_source)
 
-    def test_window_is_frameless_and_reuses_title_bar(self):
-        window = _class(self.window, 'VideoQAWindow')
-        init = ast.get_source_segment(self.window_source, _method(window, '__init__'))
-        self.assertIn('Qt.FramelessWindowHint', init)
-        build = ast.get_source_segment(self.window_source, _method(window, '_build'))
-        self.assertIn('TitleBar(self)', build)
-        self.assertIn('ResizeEdges(self)', build)
-        self.assertIn("setObjectName('appRoot')", build)
-
     def test_citation_links_seek_the_player(self):
-        window = _class(self.window, 'VideoQAWindow')
+        window = _class(self.window, 'VideoQAPanel')
         chat = ast.get_source_segment(self.window_source, _method(window, '_build_chat'))
         self.assertIn('setOpenLinks(False)', chat)
         self.assertIn('anchorClicked.connect(self.on_anchor)', chat)
@@ -77,7 +99,7 @@ class QaWindowContractTests(unittest.TestCase):
         self.assertTrue(_attr_calls(_method(window, 'seek_to'), 'setPosition'))
 
     def test_model_work_runs_in_threads(self):
-        window = _class(self.window, 'VideoQAWindow')
+        window = _class(self.window, 'VideoQAPanel')
         start = ast.get_source_segment(self.window_source, _method(window, '_start_job'))
         self.assertIn('moveToThread(thread)', start)
         for name in ('PrepareWorker', 'AskWorker'):
@@ -85,7 +107,7 @@ class QaWindowContractTests(unittest.TestCase):
             self.assertIn('self.finished.emit', run)
 
     def test_chip_lambdas_ignore_clicked_argument(self):
-        chips = _method(_class(self.window, 'VideoQAWindow'), '_show_chips')
+        chips = _method(_class(self.window, 'VideoQAPanel'), '_show_chips')
         lambdas = [node for node in ast.walk(chips) if isinstance(node, ast.Lambda)]
         self.assertTrue(lambdas)
         for node in lambdas:
@@ -97,7 +119,7 @@ class QaWindowContractTests(unittest.TestCase):
 
 
 try:
-    import qa_window
+    import qa_panel as qa_window
 except ImportError:  # PySide6/QtMultimedia yok (CI)
     qa_window = None
 
