@@ -19,11 +19,12 @@ import re
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QThread, QUrl, Signal, Slot
-from PySide6.QtGui import QColor, QKeySequence, QPainter, QShortcut
+from PySide6.QtCore import (QEvent, QObject, QPoint, QPointF, QRectF, Qt, QThread, QTimer, QUrl,
+                            Signal, Slot)
+from PySide6.QtGui import QActionGroup, QColor, QKeySequence, QPainter, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QProgressBar,
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QProgressBar,
                                QSlider, QSplitter,
                                QTextBrowser, QToolTip, QVBoxLayout, QWidget)
 
@@ -31,13 +32,14 @@ import qa
 from app_core import GracefulStop, load_config, save_json
 from gui import (THEME, ClickableLabel, DropdownCombo, HoverIconButton, card, section_label,
                  tinted_icon)
-from media import subtitle_streams
+from media import sidecar_subtitles, subtitle_streams
 
 GREETING = ('Merhaba! İzlediğiniz videoyla ilgili sorularınız mı var? '
             'Size yardımcı olmaktan memnuniyet duyarım.')
 NO_SUBTITLE = ('Bu videoda metin tabanlı altyazı yok; soru-cevap için transkript '
                'çıkarılamadı. Video yine de oynatılabilir.')
 SEEK_STEP_MS = 5000
+SUBTITLE_TICK_MS = 120  # oynarken altyazi metninin yenilenme araligi
 
 QA_STYLE = """
 QFrame#videoSurface {{ background:#000; border:0; border-top-left-radius:{radius}px;
@@ -54,6 +56,11 @@ QLabel#qaFoot {{ color:{muted}; font-size:11px; }}
 QSlider::groove:horizontal {{ height:4px; background:{drop_border}; border-radius:2px; }}
 QSlider::sub-page:horizontal {{ height:4px; background:{secondary}; border-radius:2px; }}
 QSlider::handle:horizontal {{ width:12px; margin:-4px 0; background:{text}; border-radius:6px; }}
+QMenu {{ background:{panel}; border:1px solid {drop_border}; padding:6px; }}
+QMenu::item {{ padding:7px 26px 7px 26px; border-radius:6px; color:{text}; }}
+QMenu::item:selected {{ background:{panel_alt}; color:{accent}; }}
+QMenu::item:disabled {{ color:{muted}; background:transparent; }}
+QMenu::separator {{ height:1px; background:{border}; margin:5px 8px; }}
 """
 
 
@@ -175,6 +182,45 @@ class AskWorker(QObject):
             self.finished.emit(None, str(error))
             return
         self.finished.emit(turn, '')
+
+
+class SubtitleLoadWorker(QObject):
+    """Secilen altyazi kaynagini (video akisi veya dosya) gosterim icin yukler."""
+
+    finished = Signal(str, object, str)  # (kaynak anahtari, qa.SubtitleTimeline, hata)
+
+    def __init__(self, video, source):
+        super().__init__()
+        self.video = video
+        self.source = source
+
+    @Slot()
+    def run(self):
+        try:
+            if self.source['kind'] == 'stream':
+                segments = qa.subtitle_segments(self.video, self.source['stream'], keep_lines=True)
+            else:
+                segments = qa.file_segments(self.source['path'])
+        except (RuntimeError, ValueError, OSError) as error:
+            self.finished.emit(self.source['key'], None, str(error))
+            return
+        self.finished.emit(self.source['key'], qa.SubtitleTimeline(segments), '')
+
+
+def subtitle_sources(video, streams):
+    """CC menusu kaynaklari: videodaki metin akislari + videonun yanindaki dosyalar."""
+    sources = []
+    for item in streams or []:
+        if not item.get('supported'):
+            continue
+        label = ' · '.join(part for part in (item.get('language') or '', item.get('title') or '',
+                                             (item.get('extension') or '').upper()) if part)
+        sources.append({'key': f'stream:{item["index"]}', 'kind': 'stream', 'stream': item,
+                        'label': label or ('Akış ' + str(item['index']))})
+    for path in sidecar_subtitles(video):
+        sources.append({'key': 'file:' + str(path), 'kind': 'file', 'path': path,
+                        'label': path.name})
+    return sources
 
 
 # --- oynatici parcalari -----------------------------------------------------
@@ -311,6 +357,9 @@ class VideoQAPanel(QWidget):
         self._ready = False
         self._muted_volume = None
         self._retired = False
+        self._subtitle_key = None   # None: altyazi kapali
+        self._timelines = {}        # kaynak anahtari -> qa.SubtitleTimeline
+        self._subtitle_text = ''
         theme = dict(THEME)
         try:
             from gui import _MONO_FAMILY
@@ -384,6 +433,12 @@ class VideoQAPanel(QWidget):
         self.chapter_label.hide()
         row.addWidget(self.chapter_label)
         row.addStretch(1)
+        self.cc_button = HoverIconButton('')
+        self.cc_button.setObjectName('iconFlat')
+        self.cc_button.setTintedIcon('subtitles', THEME['text'], 18)
+        self.cc_button.setToolTip('Altyazılar')
+        self.cc_button.clicked.connect(self.show_subtitle_menu)
+        row.addWidget(self.cc_button)
         controls.addLayout(row)
         column.addLayout(controls)
 
@@ -483,6 +538,12 @@ class VideoQAPanel(QWidget):
         self.player.positionChanged.connect(self.on_position)
         self.player.playbackStateChanged.connect(self.on_playback_state)
         self.player.errorOccurred.connect(self.on_player_error)
+        # Altyazi metnini Aktar cizer (tum kaynaklar ayni yoldan); Qt'nin kendi
+        # gomulu altyazi secimi kapali tutulur.
+        self.player.tracksChanged.connect(lambda: self.player.setActiveSubtitleTrack(-1))
+        self._subtitle_timer = QTimer(self)
+        self._subtitle_timer.setInterval(SUBTITLE_TICK_MS)
+        self._subtitle_timer.timeout.connect(self._refresh_subtitle)
         self.seek_bar.seek_requested.connect(self.player.setPosition)
         self.volume.valueChanged.connect(self.on_volume)
         self.player.setSource(QUrl.fromLocalFile(str(self.video)))
@@ -569,6 +630,7 @@ class VideoQAPanel(QWidget):
     def on_position(self, ms):
         self.seek_bar.set_position(ms)
         self._update_time(ms)
+        self._refresh_subtitle()
 
     def _update_time(self, ms):
         self.time_label.setText(qa.format_time(ms / 1000) + ' / '
@@ -584,6 +646,77 @@ class VideoQAPanel(QWidget):
         self.play_button.setIcon(tinted_icon(name, THEME['text'], 18))
         self.play_button.setHoverIcon(tinted_icon(name, THEME['accent'], 18))
         self.play_button.setToolTip(('Duraklat' if playing else 'Oynat') + ' (Boşluk)')
+        if playing and self._subtitle_key is not None:
+            self._subtitle_timer.start()
+        else:
+            self._subtitle_timer.stop()
+
+    # --- altyazi (CC) ---------------------------------------------------------
+    def show_subtitle_menu(self):
+        """YouTube CC menusu gibi: Kapali / videodaki akislar / yan dosyalar."""
+        menu = QMenu(self)
+        group = QActionGroup(menu)
+        group.setExclusive(True)
+
+        def add(label, source, checked):
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(checked)
+            group.addAction(action)
+            action.triggered.connect(lambda _checked=False, value=source: self.select_subtitle(value))
+
+        add('Kapalı', None, self._subtitle_key is None)
+        sources = subtitle_sources(self.video, self._streams)
+        streams = [item for item in sources if item['kind'] == 'stream']
+        files = [item for item in sources if item['kind'] == 'file']
+        for title, items in (('Videodaki altyazılar', streams), ('Video klasöründeki dosyalar', files)):
+            if not items:
+                continue
+            menu.addSeparator()
+            menu.addAction(title).setEnabled(False)
+            for item in items:
+                add(item['label'], item, item['key'] == self._subtitle_key)
+        if self._streams is None:
+            menu.addSeparator()
+            menu.addAction('Altyazı akışları okunuyor...').setEnabled(False)
+        elif not sources:
+            menu.addSeparator()
+            menu.addAction('Bu video için metin altyazı bulunamadı').setEnabled(False)
+        point = self.cc_button.mapToGlobal(QPoint(0, 0))
+        menu.exec(QPoint(point.x() + self.cc_button.width() - menu.sizeHint().width(),
+                         point.y() - menu.sizeHint().height() - 4))
+
+    def select_subtitle(self, source):
+        """Gosterilecek altyaziyi secer; ilk secimde arka planda yuklenir."""
+        self._subtitle_key = None if source is None else source['key']
+        self.cc_button.setTintedIcon('subtitles', THEME['text'] if source is None
+                                     else THEME['accent'], 18)
+        if source is not None and source['key'] not in self._timelines:
+            self._log('Altyazı yükleniyor: ' + source['label'])
+            self._start_job(SubtitleLoadWorker(self.video, source), self.subtitle_loaded)
+        if self._subtitle_key is not None and \
+                self.player.playbackState() == QMediaPlayer.PlayingState:
+            self._subtitle_timer.start()
+        else:
+            self._subtitle_timer.stop()
+        self._refresh_subtitle()
+
+    @Slot(str, object, str)
+    def subtitle_loaded(self, key, timeline, error):
+        if error:
+            self._note('error', 'Altyazı yüklenemedi: ' + error)
+            if key == self._subtitle_key:
+                self.select_subtitle(None)
+            return
+        self._timelines[key] = timeline
+        self._refresh_subtitle()
+
+    def _refresh_subtitle(self):
+        timeline = self._timelines.get(self._subtitle_key)
+        text = timeline.text_at(self.player.position() / 1000) if timeline is not None else ''
+        if text != self._subtitle_text:
+            self._subtitle_text = text
+            self.video_widget.videoSink().setSubtitleText(text)
 
     @Slot(object, str)
     def on_player_error(self, _error, message):

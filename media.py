@@ -29,6 +29,7 @@ IMAGE_SUBTITLE_CODECS = {
     'pgssub', 'vobsub',
 }
 
+SUBTITLE_FILE_EXTENSIONS = ('.srt', '.ass', '.ssa', '.vtt')
 VIDEO_EXTENSIONS = ('.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.ts', '.wmv', '.flv')
 
 
@@ -201,6 +202,24 @@ def _unique_path(video, stem, extension):
         candidate = directory / f'{stem} ({index}).{extension}'
         index += 1
     return candidate
+
+
+def sidecar_subtitles(video):
+    """Videonun yanindaki ayni adla baslayan altyazi dosyalari (Aktar'in _TR ciktisi dahil).
+
+    `Film.mkv` icin `Film.srt`, `Film_TR.srt`, `Film.en.ass` ... ; ad karsilastirmasi
+    buyuk/kucuk harf duyarsizdir. Donen liste ada gore siralidir.
+    """
+    video = Path(video)
+    stem = video.stem.casefold()
+    try:
+        items = list(video.parent.iterdir())
+    except OSError:
+        return []
+    return sorted((item for item in items
+                   if item.is_file() and item.suffix.lower() in SUBTITLE_FILE_EXTENSIONS
+                   and item.name.casefold().startswith(stem)),
+                  key=lambda item: item.name.casefold())
 
 
 def find_videos(folder):

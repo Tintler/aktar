@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import re
+from bisect import bisect_right
 from pathlib import Path
 
 import media
@@ -77,15 +78,20 @@ def _cue_times(cue):
     return cue.start, cue.end
 
 
-def transcript_from_cues(cues):
+def transcript_from_cues(cues, keep_lines=False):
     """Altyazi cue'larini zamana gore sirali gorunur metin segmentlerine cevirir.
 
     ASS etiketleri atilir; ayni metnin birbirine degen tekrarlari (ASS
-    animasyon kareleri) tek segmentte birlestirilir.
+    animasyon kareleri) tek segmentte birlestirilir. `keep_lines` oynaticida
+    gosterim icindir: cue'nun satir yapisi korunur (transkriptte tek satir).
     """
     segments = []
     for cue in cues:
-        text = ' '.join(visible_cue_text(cue).split())
+        visible = visible_cue_text(cue)
+        if keep_lines:
+            text = '\n'.join(' '.join(line.split()) for line in visible.split('\n') if line.strip())
+        else:
+            text = ' '.join(visible.split())
         if not text:
             continue
         start, end = _cue_times(cue)
@@ -206,14 +212,45 @@ def pick_subtitle_stream(streams):
     return (clean or usable)[0]
 
 
-def subtitle_segments(video, stream, base=None):
-    """Secilen altyazi stream'ini work_files/qa altina cikarip segmentlere cevirir."""
+def subtitle_segments(video, stream, base=None, keep_lines=False):
+    """Secilen altyazi stream'ini work_files/qa altina cikarip segmentlere cevirir.
+
+    Gosterim (`keep_lines`) ayri dosyaya cikarilir; soru-cevap hazirligi ayni
+    anda ayni akisi cikarirken dosya yarismasi olmasin.
+    """
     folder = Path(base or work_dir()) / 'qa'
     stem = re.sub(r'[^\w.-]+', '_', Path(video).stem)[:40] or 'video'
-    output = folder / f'{stem}.s{int(stream["index"])}.{stream["extension"]}'
+    view = '.view' if keep_lines else ''
+    output = folder / f'{stem}.s{int(stream["index"])}{view}.{stream["extension"]}'
     media.extract_subtitle(video, stream['index'], output, codec=stream.get('codec', ''))
-    kind, payload = subtitle.parse_by_extension(read(output), output.suffix)
-    return transcript_from_cues(subtitle.cues_of(kind, payload))
+    return file_segments(output, keep_lines=keep_lines)
+
+
+def file_segments(path, keep_lines=True):
+    """Diskteki .srt/.ass/.ssa/.vtt dosyasini zaman segmentlerine cevirir."""
+    path = Path(path)
+    kind, payload = subtitle.parse_by_extension(read(path), path.suffix)
+    return transcript_from_cues(subtitle.cues_of(kind, payload), keep_lines=keep_lines)
+
+
+class SubtitleTimeline:
+    """Oynaticida gosterilecek altyazi: verilen andaki metin (cakisan cue'lar birlikte)."""
+
+    LOOKBACK = 60.0  # bu kadar once baslayip hala suren cue'lar da aranir
+
+    def __init__(self, segments):
+        self.segments = sorted(segments, key=lambda item: item['start'])
+        self.starts = [item['start'] for item in self.segments]
+
+    def text_at(self, seconds):
+        index = bisect_right(self.starts, seconds)
+        active = []
+        for segment in reversed(self.segments[:index]):
+            if segment['start'] < seconds - self.LOOKBACK:
+                break
+            if seconds < segment['end']:
+                active.append(segment['text'])
+        return '\n'.join(dict.fromkeys(reversed(active)))
 
 
 def build_data(video, segments, source, info=None):

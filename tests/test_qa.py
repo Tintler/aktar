@@ -111,6 +111,61 @@ class TranscriptTests(unittest.TestCase):
         self.assertEqual(qa.format_lines(lines), '[0:00] a b\n[0:30] c')
 
 
+class DisplaySubtitleTests(unittest.TestCase):
+    """F47: oynaticida altyazi gosterimi (satir yapisi korunur, cakisanlar birlikte)."""
+
+    def test_keep_lines_preserves_cue_line_breaks(self):
+        cue = subtitle.Cue(['{\\an8}Birinci  satır\\Nikinci satır'],
+                           ass_fields={'start': '0:00:01.00', 'end': '0:00:03.00'})
+        self.assertEqual(qa.transcript_from_cues([cue], keep_lines=True)[0]['text'],
+                         'Birinci satır\nikinci satır')
+        self.assertEqual(qa.transcript_from_cues([cue])[0]['text'], 'Birinci satır ikinci satır')
+
+    def test_timeline_returns_active_and_overlapping_text(self):
+        timeline = qa.SubtitleTimeline([
+            {'start': 10.0, 'end': 14.0, 'text': 'b'},
+            {'start': 1.0, 'end': 4.0, 'text': 'a'},
+            {'start': 12.0, 'end': 13.0, 'text': 'üst yazı'},
+            {'start': 12.5, 'end': 13.0, 'text': 'b'},
+        ])
+        self.assertEqual(timeline.text_at(0.5), '')
+        self.assertEqual(timeline.text_at(2.0), 'a')
+        self.assertEqual(timeline.text_at(4.0), '')
+        self.assertEqual(timeline.text_at(12.7), 'b\nüst yazı')
+        self.assertEqual(timeline.text_at(100.0), '')
+
+    def test_file_segments_reads_fixture_with_lines(self):
+        segments = qa.file_segments(FIXTURES / 'turning-point-3.ass')
+        self.assertTrue(segments)
+        self.assertFalse(any('{' in item['text'] for item in segments))
+
+    def test_sidecar_subtitles_match_video_name(self):
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            video = folder / 'Film.mkv'
+            for name in ('Film.mkv', 'Film_TR.srt', 'film.en.ASS', 'Film.txt',
+                         'Başka.srt', 'Film.vtt'):
+                (folder / name).write_text('x', encoding='utf-8')
+            names = [item.name for item in media.sidecar_subtitles(video)]
+        self.assertEqual(names, ['film.en.ASS', 'Film.vtt', 'Film_TR.srt'])
+
+    def test_display_extraction_uses_separate_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            outputs = []
+
+            def extract(_video, _index, output, codec=''):
+                outputs.append(Path(output).name)
+                Path(output).parent.mkdir(parents=True, exist_ok=True)
+                Path(output).write_text(app_core.read(FIXTURES / 'sakamoto-12.srt'), encoding='utf-8')
+
+            stream = {'index': 3, 'extension': 'srt', 'codec': 'subrip'}
+            with mock.patch.object(media, 'extract_subtitle', side_effect=extract):
+                qa.subtitle_segments('Ep.mkv', stream, folder)
+                shown = qa.subtitle_segments('Ep.mkv', stream, folder, keep_lines=True)
+        self.assertEqual(outputs, ['Ep.s3.srt', 'Ep.s3.view.srt'])
+        self.assertTrue(any('\n' in item['text'] for item in shown))
+
+
 class SectionTests(unittest.TestCase):
     def test_time_based_sections_cover_every_line_once(self):
         lines = qa.compact_lines(synthetic_segments(20))

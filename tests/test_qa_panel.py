@@ -113,8 +113,29 @@ class QaWindowContractTests(unittest.TestCase):
         for node in lambdas:
             self.assertEqual(node.args.args[0].arg, '_checked')
 
+    def test_cc_menu_lists_streams_and_sidecar_files_and_renders_text(self):
+        panel = _class(self.window, 'VideoQAPanel')
+        player = ast.get_source_segment(self.window_source, _method(panel, '_build_player'))
+        self.assertIn('self.cc_button.clicked.connect(self.show_subtitle_menu)', player)
+        menu = ast.get_source_segment(self.window_source, _method(panel, 'show_subtitle_menu'))
+        for text in ("'Kapalı'", "'Videodaki altyazılar'", "'Video klasöründeki dosyalar'",
+                     'subtitle_sources(self.video, self._streams)'):
+            self.assertIn(text, menu)
+        sources = ast.get_source_segment(
+            self.window_source, next(node for node in self.window.body
+                                     if isinstance(node, ast.FunctionDef)
+                                     and node.name == 'subtitle_sources'))
+        self.assertIn("item.get('supported')", sources)
+        self.assertIn('sidecar_subtitles(video)', sources)
+        refresh = ast.get_source_segment(self.window_source, _method(panel, '_refresh_subtitle'))
+        self.assertIn('videoSink().setSubtitleText(text)', refresh)
+        select = ast.get_source_segment(self.window_source, _method(panel, 'select_subtitle'))
+        self.assertIn('self._start_job(SubtitleLoadWorker(', select)
+        setup = ast.get_source_segment(self.window_source, _method(panel, '_setup_player'))
+        self.assertIn('setActiveSubtitleTrack(-1)', setup)
+
     def test_window_icons_exist(self):
-        for name in ('ask', 'send', 'volume', 'mute', 'play', 'pause'):
+        for name in ('ask', 'send', 'volume', 'mute', 'play', 'pause', 'subtitles', 'translate'):
             self.assertTrue((ROOT / 'assets' / 'icons' / f'{name}.svg').exists(), name)
 
 
