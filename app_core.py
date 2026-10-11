@@ -43,6 +43,9 @@ DEFAULT_CONFIG = {
     'auto_retry_count': 2,
     'glossary_strict': False,
     'analysis_chunk_chars': 12000,
+    # Videoya Soru Sor: modele tek istekte gidecek en fazla transkript karakteri.
+    # Asilirsa video haritasi + soruyla ilgili bolumler gider (qa.VideoQA.build_context).
+    'qa_context_chars': 24000,
     # Reasoning/thinking ureten modellerde dusunmeyi kapatma denemesi
     # (LM Studio chat_template_kwargs desteklerse). Desteklenmezse yok sayilir;
     # o durumda LM Studio model preset'inden thinking kapatilmalidir.
@@ -176,6 +179,8 @@ def validate_config(cfg):
     for key in ('batch_cues', 'max_tokens', 'timeout_seconds', 'analysis_chunk_chars'):
         if int(cfg[key]) <= 0:
             raise ValueError(f'{key} sıfırdan büyük olmalı.')
+    if int(cfg.get('qa_context_chars', DEFAULT_CONFIG['qa_context_chars'])) < 1000:
+        raise ValueError('qa_context_chars en az 1000 olmalı.')
     if not 1 <= int(cfg['auto_retry_count']) <= 100:
         raise ValueError('auto_retry_count 1 ile 100 arasında olmalı.')
     if not 0 <= float(cfg['temperature']) <= 2:
@@ -511,9 +516,14 @@ class Client:
         return [item['id'] for item in value.get('data', []) if item.get('id')]
 
     def generate(self, system, user, temperature=None, max_tokens=None):
+        return self.chat([{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
+                         temperature=temperature, max_tokens=max_tokens)
+
+    def chat(self, messages, temperature=None, max_tokens=None):
+        """Cok mesajli sohbet istegi; `generate` bunun tek turlu kisayoludur."""
         payload = {
             'model': self.cfg['model'],
-            'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
+            'messages': list(messages),
             'temperature': self.cfg['temperature'] if temperature is None else temperature,
             'max_tokens': self.cfg['max_tokens'] if max_tokens is None else max_tokens,
             'stream': False,
