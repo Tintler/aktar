@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
 import media
@@ -31,8 +32,14 @@ INSTALL_HINT = ('Konuşmadan metin için faster-whisper kurulu değil. Kurmak i�
 _SENTENCE_END = re.compile(r'[.?!…]["\')\]]*$')
 
 
+FROZEN_HINT = ('Konuşmadan metin (Whisper) derlenmiş .exe sürümünde bulunmuyor. Bu özellik için '
+               'uygulamayı kaynak koddan çalıştırın (KULLANIM.md 1.5).')
+
+
 def available():
     """(kurulu mu, kurulu degilse kullaniciya gosterilecek mesaj)."""
+    if getattr(sys, 'frozen', False):
+        return False, FROZEN_HINT  # DERLE.cmd faster-whisper'i bilerek disarida birakir
     try:
         import faster_whisper  # noqa: F401
     except ImportError:

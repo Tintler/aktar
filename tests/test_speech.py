@@ -109,6 +109,14 @@ class HelperTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn('requirements-whisper.txt', message)
 
+    def test_frozen_exe_explains_whisper_is_not_bundled(self):
+        with mock.patch.object(sys, 'frozen', True, create=True):
+            ok, message = speech.available()
+        self.assertFalse(ok)
+        self.assertIn('kaynak koddan', message)
+        derle = (Path(__file__).resolve().parent.parent / 'DERLE.cmd').read_text(encoding='utf-8')
+        self.assertIn('--exclude-module faster_whisper', derle)
+
     def test_read_wav(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'a.wav'
