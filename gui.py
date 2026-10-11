@@ -42,6 +42,11 @@ from media import (VIDEO_EXTENSIONS, extract_subtitle, subtitle_streams,
 import series
 import subtitle
 
+if __name__ == '__main__':
+    # qa_window "from gui import ..." yaptiginda bu modul ikinci kez yuklenmesin
+    # (py -3 gui.py ve PyInstaller giris betigi __main__ olarak calisir).
+    sys.modules.setdefault('gui', sys.modules[__name__])
+
 # ---------------------------------------------------------------------------
 # Tema: renkler tek bir sozlukte tutulur, QSS sablonuna .format() ile enjekte edilir.
 # Boylece tema degistirmek icin yalnizca THEME guncellenir (QSS tekrar tekrar yazilmaz).
@@ -1495,6 +1500,8 @@ class MainWindow(QMainWindow):
         self._worker = None
         self._run_worker = None
         self._running = False
+        self._qa_window = None
+        self._qa_retired = []  # isi suren eski soru pencereleri (thread bitene dek tutulur)
         self.loaded_models = []
         self._progress_animation = QVariantAnimation(self)
         self._progress_animation.setDuration(280)
@@ -1575,6 +1582,12 @@ class MainWindow(QMainWindow):
         column.addWidget(self.file_name)
         column.addWidget(self.drop_path)
         row.addLayout(column, 1)
+
+        self.qa_button = HoverIconButton('Videoya Soru Sor')
+        self.qa_button.setTintedIcon('ask', THEME['secondary'])
+        self.qa_button.setToolTip('Oynatıcı ve atıflı sohbetle bu video hakkında soru sorun')
+        self.qa_button.clicked.connect(self.open_qa)
+        row.addWidget(self.qa_button)
 
         change = QPushButton('Değiştir')
         change.setObjectName('ghost')
@@ -2034,6 +2047,34 @@ class MainWindow(QMainWindow):
                 return self.streams[row]
         return None
 
+    # --- videoya soru sor -------------------------------------------------
+    def open_qa(self):
+        """Oynatici + atifli sohbet penceresini acar (ayni video icin mevcut pencereyi one getirir)."""
+        if self.video is None:
+            self.warn('Önce bir video açın.')
+            return
+        window = self._qa_window
+        if window is not None and window.video == self.video:
+            window.bring_to_front()
+            return
+        try:
+            # Lazy import: QtMultimedia yalnizca bu ozellik kullanilinca yuklenir.
+            from qa_window import VideoQAWindow
+        except ImportError as error:
+            self.warn('Video oynatıcı bileşeni yüklenemedi (QtMultimedia): ' + str(error))
+            return
+        if window is not None:
+            window.close()
+            self._qa_retired.append(window)
+        self._qa_retired = [item for item in self._qa_retired if item.busy()]
+        stream = self.selected_stream()
+        if stream is not None and not stream['supported']:
+            stream = None
+        self._qa_window = VideoQAWindow(self.video, stream=stream, streams=self.streams or None,
+                                        log=self.append)
+        self._qa_window.show()
+        self.append('Videoya Soru Sor açıldı: ' + self.video.name)
+
     # --- ceviri -----------------------------------------------------------
     def edit_chapter_glossary(self):
         dialog = GlossaryDialog(self, self._chapter_glossary, title='Bölüme Özel Terimler')
@@ -2236,6 +2277,10 @@ class MainWindow(QMainWindow):
             self._run_worker.request_cancel()
             self._thread.quit()
             self._thread.wait(5000)
+        for window in [self._qa_window] + self._qa_retired:
+            if window is not None:
+                window.close()
+                window.shutdown()
         event.accept()
 
     def warn(self, message):
