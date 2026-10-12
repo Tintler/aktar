@@ -26,6 +26,7 @@ py -3 -m PyInstaller ^
     --add-data "bin;bin" ^
     --add-data "assets;assets" ^
     --add-data "translation_prompt.txt;." ^
+    --exclude-module faster_whisper --exclude-module ctranslate2 ^
     gui.py
 
 if errorlevel 1 (

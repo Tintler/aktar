@@ -7,11 +7,11 @@
 
 ![aktar arayüzü](preview.png)
 
-Video dosyalarındaki **metin tabanlı altyazıları** çıkarıp, **yerel bir yapay zeka modeliyle Türkçeye çeviren** masaüstü uygulaması.
+Video dosyalarındaki **metin tabanlı altyazıları** çıkarıp, **yerel bir yapay zeka modeliyle Türkçeye çeviren** ve videolarınız hakkında **soru sorabildiğiniz** masaüstü uygulaması.
 
-> **Gizlilik:** Hiçbir veri internet üzerinden gönderilmez. Çeviri tamamen yerel ağdaki LM Studio sunucusunda (`127.0.0.1`) yapılır. Kaynak video dosyası **salt-okunur** kabul edilir; kopyalanmaz, taşınmaz, değiştirilmez veya yeniden encode edilmez.
+> **Gizlilik:** Hiçbir veri internet üzerinden gönderilmez. Çeviri ve soru-cevap tamamen yerel ağdaki LM Studio sunucusunda (`127.0.0.1`) yapılır. Kaynak video dosyası **salt-okunur** kabul edilir; kopyalanmaz, taşınmaz, değiştirilmez veya yeniden encode edilmez.
 
-> **English:** Aktar is a PySide6 desktop app (with a companion CLI) that extracts text subtitles from video files and translates them to Turkish with a local LLM served by LM Studio. Everything runs locally and the source video is treated as read-only. The program preserves subtitle structure, timings, order and ASS tags — while the model only ever sees plain text, and it enforces a glossary for consistent terminology across episodes.
+> **English:** Aktar is a PySide6 desktop app (with a companion CLI) that extracts text subtitles from video files and translates them to Turkish with a local LLM served by LM Studio. Everything runs locally and the source video is treated as read-only. The program preserves subtitle structure, timings, order and ASS tags — while the model only ever sees plain text, and it enforces a glossary for consistent terminology across episodes. An **Ask** tab works like YouTube's "Ask about this video": a built-in player plus a chat that answers questions about your own videos with clickable timestamp citations, using embedded subtitles or optional local speech-to-text (faster-whisper).
 
 ---
 
@@ -22,6 +22,9 @@ Video dosyalarındaki **metin tabanlı altyazıları** çıkarıp, **yerel bir y
 - **Yapay zekâ ön analizi:** Kaynak altyazıdan çevrilebilir kurgu terimleri, unvanlar, yerler ve kalıcı süreklilik kararları için Türkçe öneriler üretir; kullanıcı karşılığı düzenleyip yalnız bölüm veya seri kapsamıyla onaylayabilir.
 - **Çeviri sonrası öğrenme:** Ön analiz kapalı olsa bile çevirinin sonunda sonraki bölümlerde kullanılabilecek terimler ve süreklilik kararları çıkarılır; kullanıcı onayı olmadan seri terimlerine yazılmaz.
 - **Format korunur:** SRT→SRT, ASS→ASS, SSA→SSA, VTT→VTT. Yalnızca `mov_text` SRT'ye dönüştürülür.
+- **Videoya soru sor (Soru Sor sekmesi):** YouTube'daki "Bu video hakkında soru sorun" özelliğinin yerel karşılığı. Yerleşik oynatıcının yanında sohbet eder; özet gibi genel sorular da belirli ayrıntılar da cevaplanır. Cevaptaki `12:34` atıflarına tıklayınca video o ana gider. Uzun videolarda bölüm bölüm "video haritası" çıkarılır.
+- **Altyazısız videolar için konuşmadan metin (isteğe bağlı):** faster-whisper ile ses yerelde metne çevrilir; sonuç hem soru-cevapta hem oynatıcıda altyazı olarak kullanılır. NVIDIA GPU varsa hızlandırılır.
+- **Oynatıcıda altyazı seçimi:** Videodaki akışlar, video klasöründeki altyazı dosyaları (Aktar'ın `_TR` çevirisi dahil) ve Whisper transkripti CC menüsünden seçilip izlenebilir.
 - **Türkçe karakter güvenliği:** Kaynak ASS/SSA fontu Türkçe harfleri (`ç ğ ı İ ö ş ü`) çizemiyorsa çıktıda o font otomatik olarak **Calibri** ile değiştirilir.
 
 ---
@@ -32,7 +35,8 @@ Video dosyalarındaki **metin tabanlı altyazıları** çıkarıp, **yerel bir y
 - **Python 3.10+** (kaynak koddan çalıştırma için).
 - **PySide6** (arayüz).
 - **FFmpeg / ffprobe:** `bin\ffmpeg.exe` ve `bin\ffprobe.exe` olarak taşınabilir şekilde projeye konur(daha fazla bilgi için bin klasöründe  **[README.txt](bin/README.txt)** 'i okuyabilirsiniz).
-- **LM Studio:** yerel sunucu açık olmalı (varsayılan `http://127.0.0.1:1234/v1`) ve bir model yüklü olmalı.
+- **LM Studio:** yerel sunucu açık olmalı (varsayılan `http://127.0.0.1:1234/v1`) ve bir model yüklü olmalı. Soru Sor için modelin bağlam uzunluğu en az ~12k token önerilir.
+- **İsteğe bağlı — faster-whisper:** altyazısız videolarda konuşmadan metin için. Kaynak koddan çalışırken `requirements-whisper.txt`; derlenmiş .exe ile `DERLE_WHISPER.cmd`'nin ürettiği ayrı `aktar-whisper` paketi. GPU için cuBLAS 12 / cuDNN 9; başka programlarla ortak kullandığınız bir klasör varsa Ayarlar'dan gösterilebilir. Bkz. KULLANIM.md 1.5.
 
 ---
 
@@ -54,6 +58,7 @@ GUI_BASLAT.cmd
 ```
 
 4. Videoyu pencereye sürükleyin → altyazı akışını işaretleyin → **Çevir**.
+5. Videoya soru sormak için başlık şeridinden **Soru Sor** sekmesine geçin.
 
 Ayrıntılı kullanım ve .exe'nin derlenmesi için bkz. **[KULLANIM.md](KULLANIM.md)**.
 
@@ -74,6 +79,7 @@ py -3 cevir.py translate "C:\video\Movie.ass" --series game-of-thrones --glossar
 - Satır ortasındaki karakter bazlı ASS efektleri (`C{\fs38}L...` gibi) modelden uzak tutulup çevrilmiş metindeki oransal konumlarına geri yerleştirilir. Etiketler korunur; kelime sırası değiştiğinde görsel konumları yaklaşık olabilir.
 - Çeviri kalitesi seçilen modele ve prompt'a bağlıdır; LM Studio model preset'inde "thinking" kapatılması önerilir (bkz. KULLANIM.md → Sorun giderme).
 - Otomatik konuşmacı ayrımı, karaoke zamanlaması veya altyazı zamanlaması düzeltmesi yapılmaz.
+- Soru Sor cevapları yalnızca transkripte (altyazı veya konuşma) dayanır; görüntüdeki içerik (grafikler, ekrandaki yazılar) görülmez. Whisper, `Aktar.exe`'ye gömülmez; ayrı `aktar-whisper` paketi olarak yanına konur.
 
 ---
 

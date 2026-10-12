@@ -1,6 +1,6 @@
 # Aktar — Kullanım Kılavuzu
 
-Bu kılavuz son kullanıcı içindir: kurulum, LM Studio ayarı, bütün akışlar, terim sözlüğü (glossary), seri ayarları ve sorun giderme.
+Bu kılavuz son kullanıcı içindir: kurulum, LM Studio ayarı, bütün akışlar (Çeviri ve Soru Sor sekmeleri), terim sözlüğü (glossary), seri ayarları ve sorun giderme.
 
 ---
 
@@ -37,8 +37,56 @@ FFmpeg'i [ffmpeg.org](https://ffmpeg.org/download.html) üzerinden indirip `bin`
 3. Modeli **thinking/reasoning kapalı** olacak şekilde ayarlayın (aşağıda 6.2'ye bakın).
 
 ### 1.4 aktar.exe derlemesi
-1. İsterseniz bin klasörüne ffmpeg.exe dosyasını yerleştirdikten sonra .exe olarak derleyebilirsiniz. FFmpeg lisansından dolayı github sayfasında derlenmiş .exe sunulmuyor.
-2. ffmpeg.ex DERLE.cmd çalıştırarak aktar.exe'yi oluşturabilirsiniz.
+1. İsterseniz `bin` klasörüne `ffmpeg.exe` ve `ffprobe.exe` dosyalarını yerleştirdikten sonra uygulamayı .exe olarak derleyebilirsiniz. FFmpeg lisansından dolayı GitHub sayfasında derlenmiş .exe sunulmuyor.
+2. `DERLE.cmd` dosyasını çalıştırarak `dist\Aktar.exe` dosyasını oluşturabilirsiniz.
+3. Konuşmadan metin (Whisper) `Aktar.exe`'ye gömülmez; ayrı bir paket olarak derlenip yanına konur (bkz. 1.5 → "Derlenmiş .exe ile").
+
+### 1.5 İsteğe bağlı: konuşmadan metin (Whisper)
+Altyazısı olmayan videolarda **Soru Sor** sekmesi konuşmayı sesten metne çevirebilir (faster-whisper). Bu özellik isteğe bağlıdır; yoksa uygulama bunu söyler, geri kalan her şey çalışır.
+
+**Kaynak koddan çalıştırırken:**
+
+```bat
+py -3 -m pip install -r requirements-whisper.txt
+```
+
+**Derlenmiş .exe ile:** Whisper, `ffmpeg`'in `bin` klasöründe ayrı durması gibi ayrı bir paket olarak çalışır. `Aktar.exe` bu paketi kendi klasöründe bulursa kullanır.
+
+1. Derleme yapacağınız bilgisayarda Whisper bağımlılıklarını kurun:
+
+   ```bat
+   py -3 -m pip install -r requirements.txt -r requirements-whisper.txt
+   ```
+
+2. GPU için aşağıdaki **NVIDIA GPU** bölümüne bakın. Kütüphaneleri zaten başka bir klasörde tutuyorsanız (A seçeneği) bu adımda bir şey yapmanız gerekmez.
+3. `DERLE_WHISPER.cmd` dosyasını çalıştırın. Çıktı `dist\aktar-whisper\` klasörüdür.
+4. Bu klasörü olduğu gibi `Aktar.exe`'nin yanına koyun:
+
+   ```
+   Aktar.exe
+   aktar-whisper\aktar-whisper.exe   (+ _internal\ klasörü)
+   models\whisper\                   (ilk kullanımda otomatik oluşur)
+   ```
+
+Paket boyutu GPU kütüphaneleri olmadan ~270 MB, pakete gömülü NVIDIA kütüphaneleriyle ~2.1 GB'tır. Whisper'a ihtiyaç duymayanlar paketi hiç kopyalamaz; `Aktar.exe` küçük kalır.
+
+- Model ilk kullanımda uygulama klasöründeki `models\whisper\` altına indirilir (varsayılan **large-v3-turbo**, ~1.6 GB; bir kez internet gerekir).
+- **NVIDIA GPU ile hızlandırma (önerilir):** Whisper'ın GPU'da çalışması için **cuBLAS 12** ve **cuDNN 9** DLL'leri gerekir. İki yol var:
+  - **A) Mevcut klasörünüzü gösterin (önerilir, başka programlarla ortak):** Bu DLL'leri zaten bir klasörde tutuyorsanız tekrar indirmeyin. Klasörde örneğin `cublas64_12.dll`, `cublasLt64_12.dll`, `cudnn64_9.dll`, `cudnn_ops64_9.dll` ... bulunur.
+    1. Aktar'da **Ayarlar → Soru Sor · konuşmadan metin (Whisper) → GPU kütüphane klasörü** alanına klasörü yazın ya da **Gözat...** ile seçin.
+    2. Alanın altında `cuBLAS 12 ve cuDNN 9 bulundu.` yazmalı.
+
+    Kaynak koddan çalışırken de, `aktar-whisper` paketiyle de bu klasör kullanılır. Paketi NVIDIA kütüphaneleri olmadan, yani küçük haliyle (~270 MB) derlemeniz yeterlidir.
+  - **B) pip ile kurun:**
+
+    ```bat
+    py -3 -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12==9.*
+    ```
+
+    `DERLE_WHISPER.cmd` bunları bulursa pakete gömer (~2.1 GB). Bu yüzden derlenmiş paket için bu adımı `DERLE_WHISPER.cmd`'den önce yapın.
+
+  Cihaz ayarı `auto` iken GPU varsa önce o denenir. Konsolda önce `GPU kütüphaneleri: cublas (...), cudnn (...)` satırı görünür. Kütüphaneler eksikse ya da GPU çalışmazsa nedeni yazılır ve işlemciyle devam edilir (çok daha yavaş).
+
 ---
 
 ## 2. Yapılandırma — `config.json`
@@ -56,7 +104,11 @@ Uygulama dizinindeki `config.json` dosyası ayarları tutar. Yoksa `DEFAULT_CONF
   "auto_retry_count": 2,
   "glossary_strict": false,
   "analysis_chunk_chars": 12000,
-  "disable_thinking": true
+  "disable_thinking": true,
+  "qa_context_chars": 24000,
+  "whisper_model": "large-v3-turbo",
+  "whisper_device": "auto",
+  "whisper_language": ""
 }
 ```
 
@@ -72,12 +124,21 @@ Uygulama dizinindeki `config.json` dosyası ayarları tutar. Yoksa `DEFAULT_CONF
 | `glossary_strict` | Zorunlu terim denetimi katılığı. |
 | `analysis_chunk_chars` | Ön/son analizde tek model isteğine gönderilecek yaklaşık görünür karakter sayısı. |
 | `disable_thinking` | `true` ise istek gövdesine `chat_template_kwargs: {enable_thinking: false}` eklenir (LM Studio destekliyorsa). Desteklenmezse yok sayılır. |
+| `qa_context_chars` | Soru Sor: modele tek istekte gidecek en fazla transkript karakteri (≥1000). Transkript sığmazsa video haritası kullanılır (bkz. 3.6). LM Studio'daki model bağlam uzunluğuna göre ayarlayın. |
+| `whisper_model` | Konuşmadan metin modeli: `large-v3-turbo` (varsayılan), `large-v3`, `medium`, `small`, `base`. |
+| `whisper_device` | `auto` (GPU varsa GPU), `cuda` veya `cpu`. |
+| `whisper_language` | Konuşma dili kodu (örn. `en`, `ja`); boşsa otomatik algılanır. |
+| `whisper_cuda_dir` | Başka programlarla ortak kullanılan cuBLAS 12 / cuDNN 9 DLL klasörü (örn. `Z:\Ai Tools\cuBLAS and cuDNN`); boşsa pip ile kurulan veya pakete gömülü kütüphaneler aranır. |
+
+Bu ayarların hepsi **Ayarlar** penceresinden de değiştirilebilir.
 
 > `base_url` **yalnızca yerel** olabilir; uzak adres reddedilir (gizlilik ilkesi).
 
 ---
 
 ## 3. Arayüz akışı
+
+Başlık şeridindeki **Çeviri | Soru Sor** seçicisiyle iki sekme arasında geçilir. Açılan video iki sekmede ortaktır. Seri, Terim ve Süreklilik düğmeleri yalnızca Çeviri sekmesinde görünür. 3.1–3.5 Çeviri sekmesini, 3.6 Soru Sor sekmesini anlatır.
 
 ```
 Video (sürükle-bırak veya Video Seç)
@@ -128,6 +189,33 @@ Türkçe'ye özgü harfler (`ç ğ ı İ ö ş ü` ve büyükleri) her fontta bu
 SRT/VTT font taşımadığı için bu işlem yalnızca ASS/SSA çıktısında uygulanır. Türkçe karakterleri destekleyen fontlara (örn. Arial) dokunulmaz.
 
 Çeviri sürerken düğme **İptal** olur; duraklatma desteği kod tarafında mevcuttur.
+
+### 3.6 Soru Sor sekmesi (videoya soru sorma)
+YouTube'daki "Bu video hakkında soru sorun" özelliğinin yerel karşılığıdır: solda video oynatıcı, sağda yerel modelle sohbet.
+
+**Hazırlık.** Sekmeye ilk geçişte videonun transkripti çıkarılır ve model videoya genel bir bakış hazırlar. Bu sırada videoya özel önerilen sorular da üretilir. Sonuç `work_files\qa\` altında saklanır, aynı video tekrar açıldığında hesaplanmaz.
+- Transkript kaynağı varsayılan olarak videodaki metin altyazısıdır. Birden fazla altyazı varsa **Transkript** seçicisinden değiştirilebilir. Seçicideki **Sesten (Whisper)** seçeneği konuşmayı sesten metne çevirir (bkz. 1.5).
+- Altyazısı olmayan videoda **Sesten transkript çıkar (Whisper)** önerisi çıkar. Model büyük olduğu için işlem otomatik başlamaz.
+- Kısa videolarda modele transkriptin tamamı gider. Transkript `qa_context_chars` sınırını aşarsa video bölümlere ayrılır (videoda gömülü bölüm/chapter varsa onlar, yoksa ~4 dakikalık parçalar) ve her bölüm özetlenir. Böylece uzun videolarda da genel sorular cevaplanabilir.
+
+**Soru sorma.** Önerilen sorulardan birine tıklayın ya da kendi sorunuzu yazın. "Videoyu özetle", "Sonunda ne oluyor?" gibi genel sorular da, belirli ayrıntılar da sorulabilir. Önceki konuşma hatırlanır, yani "peki neden?" gibi devam soruları çalışır.
+- Cevaplar Türkçedir. İddialar zaman damgasıyla desteklenir: tek an için `12:34`, bir aralık için `3:10-7:45`.
+- Zaman damgasına tıklayınca video o ana gider ve oynamaya başlar.
+- Transkriptte karşılığı olmayan (uydurma) zaman damgaları cevaptan çıkarılır.
+- Model videoda geçmeyen genel bilgi eklerse bunu "videoda geçmiyor" diye belirtir.
+
+**Oynatıcı.**
+- Videoya tıklamak veya **Boşluk** tuşu oynatır/duraklatır. **←/→** 5 saniye geri/ileri sarar.
+- Arama çubuğu videonun bölümlerine göre parçalıdır. Üzerine gelince zaman ve bölüm adı görünür.
+- Çeviri sekmesine geçince video duraklar. Sohbet ve video konumu korunur.
+
+**Altyazılar (CC düğmesi).** Oynatıcının sağ altındaki CC düğmesi şunları listeler:
+- **Kapalı**
+- **Videodaki altyazılar** (metin tabanlı akışlar)
+- **Video klasöründeki dosyalar:** videoyla aynı adla başlayan `.srt`/`.ass`/`.ssa`/`.vtt` dosyaları. Aktar'ın `<video>_TR` çevirisi de burada çıkar, yani çeviriyi oynatıcıda doğrudan izleyebilirsiniz.
+- **Sesten (Whisper):** Whisper transkripti varsa seçilebilir; yoksa **Sesten oluştur...** ile çıkarılır.
+
+ASS altyazılarda stil ve konum gösterilmez, yalnızca metin görünür. Ekranda gösterilen altyazı ile soru-cevabın kullandığı transkript birbirinden bağımsızdır.
 
 ---
 
@@ -202,6 +290,26 @@ Uygulama korumalı bir klasörde (örn. `C:\Program Files`) çalışıyor olabil
 ### 6.8 Çeviride Türkçe harfler görünmüyor (kutu/boş kare)
 Kaynak ASS/SSA fontu Türkçe karakterleri desteklemiyor olabilir. Aktar bu durumda çıktıdaki fontu **Calibri** ile değiştirir; konsolda `Font uyarısı: ... Calibri kullanıldı (...)` mesajını görürsünüz. Türkçe harfler hâlâ görünmüyorsa oynatıcıda Calibri kurulu değil ya da gömülü font (attached fonts) kullanılıyor olabilir; oynatıcının font ayarını kontrol edin.
 
+### 6.9 `Yanıt doğrulanamadı; ... parti ... bölünüyor`
+Model çoklu istekte ID'leri düşürmüş, girdileri eksik döndürmüş veya token sınırına ulaşmış olabilir. Program aynı partiyi daha küçük parçalara ayırıp tekrar dener; gerekirse tek girdiye iner. Başarılı alt partiler kaydedilir. Tek girdide de hata sürerse işlem durur; konsoldaki hatayı ve LM Studio'nun ham yanıtını inceleyin. Bu mekanizma yanlış sıralanmış cevapları sessizce kabul etmez; çevirinin anlamsal doğruluğunu otomatik olarak garanti etmez.
+
+### 6.10 Soru Sor: `HTTP 400: LM Studio istegi reddedildi`
+Transkript modelin bağlam uzunluğuna sığmıyor. LM Studio'da modelin **Context Length** ayarını artırın (varsayılan `qa_context_chars` 24000 için en az ~12k token önerilir) veya Ayarlar → Gelişmiş → **Soru-cevap bağlam karakteri** değerini düşürün.
+
+### 6.11 Soru Sor: Whisper GPU kullanmıyor / çok yavaş
+Konsolda `Whisper cuda ile çalışamadı: ...` görüyorsanız:
+- `GPU kütüphaneleri: bulunamadı` yazıyorsa CUDA kütüphaneleri eksiktir. Ayarlar'da **GPU kütüphane klasörü** alanına mevcut cuBLAS/cuDNN klasörünüzü gösterin ya da 1.5'teki B seçeneğini uygulayın.
+- `UYARI: GPU kütüphane klasöründe eksik: ...` yazıyorsa gösterdiğiniz klasörde listelenen DLL yoktur; doğru klasörü seçtiğinizi kontrol edin.
+- `CUDA driver version is insufficient` yazıyorsa NVIDIA sürücüsünü güncelleyin.
+
+Başarılı olunca konsolda `cihaz: cuda` yazar. GPU'suz bilgisayarda Ayarlar'dan daha küçük bir model (`small`) seçebilirsiniz.
+
+### 6.12 Soru Sor: `Konuşmadan metin (Whisper) paketi bulunamadı`
+Derlenmiş `Aktar.exe` kullanıyorsunuz ve yanında `aktar-whisper` klasörü yok. 1.5'teki "Derlenmiş .exe ile" adımlarını izleyin. Paket varsa ama hata veriyorsa mesajın sonundaki ayrıntıya bakın; paketin kendi hata çıktısı oraya eklenir.
+
+### 6.13 Soru Sor: video oynatılmıyor
+Oynatıcı Qt Multimedia'nın FFmpeg altyapısını kullanır. Hata mesajı sohbet alanına yazılır. Videonun başka bir oynatıcıda açıldığını kontrol edin. Soru-cevap ve altyazı çıkarma oynatma olmadan da çalışır.
+
 ---
 
 ## 7. Komut satırı
@@ -224,10 +332,9 @@ py -3 cevir.py translate "C:\video\Movie.ass" --series game-of-thrones --glossar
 
 ## 8. Gizlilik ve veri
 
-- Tüm çeviri yerel LM Studio sunucusunda yapılır; **internete veri gitmez**.
+- Tüm çeviri ve soru-cevap yerel LM Studio sunucusunda yapılır; **internete veri gitmez**.
+- Konuşmadan metin (Whisper) tamamen bilgisayarınızda çalışır. Yalnızca modelin kendisi ilk kullanımda Hugging Face'ten indirilir; video, ses veya metin gönderilmez.
 - `base_url` yalnızca yerel adres olabilir.
 - Kaynak video **salt-okunur**: kopyalanmaz, taşınmaz, değiştirilmez, yeniden encode edilmez.
 - Seri sözlükleri uygulama dizinindeki `series\` klasöründe tutulur (kullanıcı verisi; sürüm kontrolüne girmez).
-
-### 6.7 `Yanıt doğrulanamadı; ... parti ... bölünüyor`
-Model çoklu istekte ID'leri düşürmüş, girdileri eksik döndürmüş veya token sınırına ulaşmış olabilir. Program aynı partiyi daha küçük parçalara ayırıp tekrar dener; gerekirse tek girdiye iner. Başarılı alt partiler kaydedilir. Tek girdide de hata sürerse işlem durur; konsoldaki hatayı ve LM Studio'nun ham yanıtını inceleyin. Bu mekanizma yanlış sıralanmış cevapları sessizce kabul etmez; çevirinin anlamsal doğruluğunu otomatik olarak garanti etmez.
+- Soru Sor transkriptleri, video haritası ve Whisper sonuçları `work_files\qa\` altında önbelleğe alınır. Silmek güvenlidir; gerekirse yeniden üretilir.

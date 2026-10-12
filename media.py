@@ -29,6 +29,7 @@ IMAGE_SUBTITLE_CODECS = {
     'pgssub', 'vobsub',
 }
 
+SUBTITLE_FILE_EXTENSIONS = ('.srt', '.ass', '.ssa', '.vtt')
 VIDEO_EXTENSIONS = ('.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.ts', '.wmv', '.flv')
 
 
@@ -112,6 +113,42 @@ def subtitle_streams(video):
     return streams
 
 
+def video_info(video):
+    """Videonun suresini (saniye) ve gomulu bolumlerini (chapters) dondurur.
+
+    Donen: {'duration': float, 'chapters': [{'start', 'end', 'title'}]}.
+    Bolum yoksa liste bostur; sure okunamazsa 0.0 doner.
+    """
+    video = Path(video)
+    if not video.exists():
+        raise ValueError('Video bulunamadı: ' + str(video))
+    command = [ffprobe_path(), '-v', 'error', '-show_chapters', '-show_format',
+               '-of', 'json', str(video)]
+    result = _run(command)
+    if result.returncode != 0:
+        raise RuntimeError('ffprobe videoyu okuyamadı: ' + (result.stderr or '').strip())
+    try:
+        value = json.loads(result.stdout or '{}')
+    except json.JSONDecodeError as error:
+        raise RuntimeError('ffprobe çıktısı okunamadı.') from error
+    try:
+        duration = float((value.get('format') or {}).get('duration') or 0.0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    chapters = []
+    for item in value.get('chapters', []) or []:
+        try:
+            start, end = float(item['start_time']), float(item['end_time'])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if end <= start:
+            continue
+        title = str((item.get('tags') or {}).get('title', '')).strip()
+        chapters.append({'start': start, 'end': end, 'title': title})
+    chapters.sort(key=lambda item: item['start'])
+    return {'duration': duration, 'chapters': chapters}
+
+
 def extract_subtitle(video, stream_index, output, codec=''):
     """Secilen metin tabanli altyazi stream'ini `output` dosyasina cikarir.
 
@@ -165,6 +202,24 @@ def _unique_path(video, stem, extension):
         candidate = directory / f'{stem} ({index}).{extension}'
         index += 1
     return candidate
+
+
+def sidecar_subtitles(video):
+    """Videonun yanindaki ayni adla baslayan altyazi dosyalari (Aktar'in _TR ciktisi dahil).
+
+    `Film.mkv` icin `Film.srt`, `Film_TR.srt`, `Film.en.ass` ... ; ad karsilastirmasi
+    buyuk/kucuk harf duyarsizdir. Donen liste ada gore siralidir.
+    """
+    video = Path(video)
+    stem = video.stem.casefold()
+    try:
+        items = list(video.parent.iterdir())
+    except OSError:
+        return []
+    return sorted((item for item in items
+                   if item.is_file() and item.suffix.lower() in SUBTITLE_FILE_EXTENSIONS
+                   and item.name.casefold().startswith(stem)),
+                  key=lambda item: item.name.casefold())
 
 
 def find_videos(folder):
