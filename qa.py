@@ -282,9 +282,11 @@ def load_subtitle_session(video, stream, base=None, log=print):
 
 def load_whisper_session(video, result, base=None, log=print):
     """speech.transcribe sonucundan (konusmadan metin) oturum verisi."""
+    track = result.get('audio_track')
     source = {'kind': 'whisper', 'model': result.get('model', ''),
-              'language': result.get('language', '')}
-    return _load_session(video, f'whisper:{source["model"]}:{source["language"]}', source,
+              'language': result.get('language', ''), 'audio_track': track}
+    suffix = '' if track is None else f':a{int(track)}'
+    return _load_session(video, f'whisper:{source["model"]}:{source["language"]}{suffix}', source,
                          lambda: [dict(item) for item in result['segments']], base, log)
 
 

@@ -46,6 +46,8 @@ class QaWindowContractTests(unittest.TestCase):
         self.assertIn("('Çeviri', 'translate'", bar)
         self.assertIn("('Soru Sor', 'ask'", bar)
         self.assertIn("setObjectName('modeSwitch')", bar)
+        self.assertLess(bar.index("HoverIconButton('Video Seç')"), bar.index("setObjectName('modeSwitch')"),
+                        'Video Seç, Çeviri | Soru Sor seçicisinin solunda olmalı')
         self.assertIn('self.mode_group.idClicked.connect(self.set_mode)', bar)
         self.assertIn('self.series_group', bar)
         mode = ast.get_source_segment(self.gui_source, _method(main, 'set_mode'))
@@ -156,6 +158,23 @@ class QaWindowContractTests(unittest.TestCase):
         self.assertIn('speech.transcribe(', worker)
         self.assertIn('qa.load_whisper_session(', worker)
         self.assertIn('speech.load_cached(', worker)
+
+    def test_audio_track_menu_and_whisper_track_choice(self):
+        panel = _class(self.window, 'VideoQAPanel')
+        player = ast.get_source_segment(self.window_source, _method(panel, '_build_player'))
+        self.assertIn('self.audio_button.clicked.connect(self.show_audio_menu)', player)
+        setup = ast.get_source_segment(self.window_source, _method(panel, '_setup_player'))
+        self.assertIn('tracksChanged.connect(self._update_audio_button)', setup)
+        select = ast.get_source_segment(self.window_source, _method(panel, 'select_audio'))
+        self.assertIn('setActiveAudioTrack(order)', select)
+        menu = ast.get_source_segment(self.window_source, _method(panel, 'show_subtitle_menu'))
+        self.assertIn('self.generate_whisper(value)', menu)
+        generate = ast.get_source_segment(self.window_source, _method(panel, 'generate_whisper'))
+        self.assertIn('TranscribeWorker(self.video, self._audio_track_arg(stream))', generate)
+        for name in ('PrepareWorker', 'TranscribeWorker'):
+            run = ast.get_source_segment(self.window_source, _method(_class(self.window, name), 'run'))
+            self.assertIn('audio_track=self.audio_track', run)
+        self.assertTrue((ROOT / 'assets' / 'icons' / 'audio.svg').exists())
 
     def test_settings_dialog_has_whisper_and_qa_fields(self):
         init = ast.get_source_segment(

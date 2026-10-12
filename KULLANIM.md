@@ -223,7 +223,7 @@ SRT/VTT font taşımadığı için bu işlem yalnızca ASS/SSA çıktısında uy
 YouTube'daki "Bu video hakkında soru sorun" özelliğinin yerel karşılığıdır: solda video oynatıcı, sağda yerel modelle sohbet.
 
 **Hazırlık.** Sekmeye ilk geçişte videonun transkripti çıkarılır ve model videoya genel bir bakış hazırlar. Bu sırada videoya özel önerilen sorular da üretilir. Sonuç `work_files\qa\` altında saklanır, aynı video tekrar açıldığında hesaplanmaz.
-- Transkript kaynağı varsayılan olarak videodaki metin altyazısıdır. Birden fazla altyazı varsa **Transkript** seçicisinden değiştirilebilir. Seçicideki **Sesten (Whisper)** seçeneği konuşmayı sesten metne çevirir (bkz. 1.5).
+- Transkript kaynağı varsayılan olarak videodaki metin altyazısıdır. Birden fazla altyazı varsa **Transkript** seçicisinden değiştirilebilir. Seçicideki **Sesten (Whisper)** seçeneği konuşmayı sesten metne çevirir (bkz. 1.5). Videoda birden fazla ses parçası varsa (örneğin `.mkv` içinde Japonca ve İngilizce) her parça ayrı **Sesten (Whisper) · <parça>** seçeneği olarak listelenir; Whisper'a hangi sesin gideceğini buradan seçersiniz. Her parçanın transkripti ayrı önbelleğe alınır.
 - Altyazısı olmayan videoda **Sesten transkript çıkar (Whisper)** önerisi çıkar. Model büyük olduğu için işlem otomatik başlamaz.
 - Kısa videolarda modele transkriptin tamamı gider. Transkript `qa_context_chars` sınırını aşarsa video bölümlere ayrılır (videoda gömülü bölüm/chapter varsa onlar, yoksa ~4 dakikalık parçalar) ve her bölüm özetlenir. Böylece uzun videolarda da genel sorular cevaplanabilir.
 
@@ -237,12 +237,13 @@ YouTube'daki "Bu video hakkında soru sorun" özelliğinin yerel karşılığıd
 - Videoya tıklamak veya **Boşluk** tuşu oynatır/duraklatır. **←/→** 5 saniye geri/ileri sarar.
 - Arama çubuğu videonun bölümlerine göre parçalıdır. Üzerine gelince zaman ve bölüm adı görünür.
 - Çeviri sekmesine geçince video duraklar. Sohbet ve video konumu korunur.
+- **Ses parçası (kulaklık düğmesi):** Videoda birden fazla ses parçası varsa CC düğmesinin solunda görünür. Oynatılan sesi buradan değiştirirsiniz; video konumu korunur.
 
 **Altyazılar (CC düğmesi).** Oynatıcının sağ altındaki CC düğmesi şunları listeler:
 - **Kapalı**
 - **Videodaki altyazılar** (metin tabanlı akışlar)
 - **Video klasöründeki dosyalar:** videoyla aynı adla başlayan `.srt`/`.ass`/`.ssa`/`.vtt` dosyaları. Aktar'ın `<video>_TR` çevirisi de burada çıkar, yani çeviriyi oynatıcıda doğrudan izleyebilirsiniz.
-- **Sesten (Whisper):** Whisper transkripti varsa seçilebilir; yoksa **Sesten oluştur...** ile çıkarılır.
+- **Sesten (Whisper):** Whisper transkripti varsa seçilebilir; yoksa **Sesten oluştur...** ile çıkarılır. Birden fazla ses parçası varsa **Sesten oluştur** alt menüsünden Whisper'a gidecek parça seçilir.
 
 ASS altyazılarda stil ve konum gösterilmez, yalnızca metin görünür. Ekranda gösterilen altyazı ile soru-cevabın kullandığı transkript birbirinden bağımsızdır.
 

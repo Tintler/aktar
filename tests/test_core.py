@@ -865,6 +865,28 @@ class MediaProbeTests(unittest.TestCase):
         self.assertFalse(streams[2]['supported'])
         self.assertTrue(streams[2]['image'])
 
+    def test_audio_streams_lists_tracks_in_player_order(self):
+        probe = json.dumps({'streams': [
+            {'index': 0, 'codec_type': 'video', 'codec_name': 'h264'},
+            {'index': 1, 'codec_type': 'audio', 'codec_name': 'aac', 'channels': 2,
+             'tags': {'language': 'jpn'}, 'disposition': {'default': 1}},
+            {'index': 2, 'codec_type': 'subtitle', 'codec_name': 'ass'},
+            {'index': 3, 'codec_type': 'audio', 'codec_name': 'eac3', 'channels': 6,
+             'tags': {'language': 'eng', 'title': 'English'}},
+        ]})
+        with tempfile.TemporaryDirectory() as folder:
+            video = self._video(folder)
+            result = mock.Mock(returncode=0, stdout=probe, stderr='')
+            with mock.patch.object(media, 'ffprobe_path', return_value='ffprobe'), \
+                 mock.patch.object(media, '_run', return_value=result):
+                streams = media.audio_streams(video)
+        self.assertEqual([(item['index'], item['order']) for item in streams], [(1, 0), (3, 1)])
+        self.assertTrue(streams[0]['default'])
+        self.assertFalse(streams[1]['default'])
+        self.assertEqual(media.audio_label(streams[0]), 'jpn · Stereo · aac')
+        self.assertEqual(media.audio_label(streams[1]), 'eng · English · 5.1 · eac3')
+        self.assertEqual(media.audio_label({'order': 2}), 'Ses 3')
+
     def test_subtitle_streams_reports_probe_failure(self):
         with tempfile.TemporaryDirectory() as folder:
             video = self._video(folder)

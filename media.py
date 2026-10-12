@@ -79,14 +79,7 @@ def _no_window():
     return getattr(subprocess, 'CREATE_NO_WINDOW', 0) if os.name == 'nt' else 0
 
 
-def subtitle_streams(video):
-    """Videodaki altyazi stream'lerini listeler.
-
-    Donen her kayit: index (GLOBAL stream index), codec, language, title,
-    supported (metin tabanli mi), extension (cikti uzantisi), image (goruntu
-    tabanli mi). `-map 0:s:N` subtitle SIRASINA gore indeksledigi icin cikarma
-    isleminde GLOBAL index kullanilir.
-    """
+def _probe_streams(video):
     video = Path(video)
     if not video.exists():
         raise ValueError('Video bulunamadı: ' + str(video))
@@ -99,8 +92,51 @@ def subtitle_streams(video):
         value = json.loads(result.stdout or '{}')
     except json.JSONDecodeError as error:
         raise RuntimeError('ffprobe çıktısı okunamadı.') from error
+    return value.get('streams', []) or []
+
+
+def audio_streams(video):
+    """Videodaki ses stream'lerini listeler (oynaticinin ses parcalariyla ayni sirada).
+
+    Donen her kayit: index (GLOBAL stream index), order (ses akislari arasindaki sira),
+    codec, language, title, channels, default (varsayilan parca mi).
+    """
     streams = []
-    for stream in value.get('streams', []):
+    for stream in _probe_streams(video):
+        if stream.get('codec_type') != 'audio':
+            continue
+        tags = stream.get('tags', {}) or {}
+        streams.append({
+            'index': stream.get('index'),
+            'order': len(streams),
+            'codec': str(stream.get('codec_name', '')).lower(),
+            'language': str(tags.get('language', '')).strip(),
+            'title': str(tags.get('title', '')).strip(),
+            'channels': int(stream.get('channels') or 0),
+            'default': bool((stream.get('disposition') or {}).get('default')),
+        })
+    return streams
+
+
+def audio_label(stream):
+    """Ses parcasi icin menu etiketi: 'jpn · Japanese · 2.0 · aac'."""
+    channels = {1: 'Mono', 2: 'Stereo', 6: '5.1', 8: '7.1'}.get(stream.get('channels') or 0, '')
+    parts = (stream.get('language') or '', stream.get('title') or '', channels,
+             stream.get('codec') or '')
+    label = ' · '.join(part for part in parts if part)
+    return label or 'Ses ' + str(int(stream.get('order', 0)) + 1)
+
+
+def subtitle_streams(video):
+    """Videodaki altyazi stream'lerini listeler.
+
+    Donen her kayit: index (GLOBAL stream index), codec, language, title,
+    supported (metin tabanli mi), extension (cikti uzantisi), image (goruntu
+    tabanli mi). `-map 0:s:N` subtitle SIRASINA gore indeksledigi icin cikarma
+    isleminde GLOBAL index kullanilir.
+    """
+    streams = []
+    for stream in _probe_streams(video):
         if stream.get('codec_type') != 'subtitle':
             continue
         codec = str(stream.get('codec_name', '')).lower()

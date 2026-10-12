@@ -1,7 +1,7 @@
 """PySide6 masaustu arayuzu.
 
 Duzen (mockup-2 "Ust Arac Cubugu" v2):
-  - Üst özel başlık şeridi (frameless): [marka] [Çeviri | Soru Sor] [Video Seç] [Seri: dropdown / Terim / Süreklilik*] [durum rozeti] [Ayarlar] [─ ▢ ✕]
+  - Üst özel başlık şeridi (frameless): [marka] [Video Seç] [Çeviri | Soru Sor] [Seri: dropdown / Terim / Süreklilik*] [durum rozeti] [Ayarlar] [─ ▢ ✕]
     (* seri kontrolleri yalnizca Ceviri sekmesinde gorunur)
   - Sayfalar (QStackedWidget): Ceviri (asagidaki duzen) | Soru Sor (qa_panel.VideoQAPanel:
     oynatici + atifli sohbet; ilk acilista lazy import)
@@ -189,6 +189,13 @@ QTableWidget::indicator {{ width:18px; height:18px; border:1px solid {drop_borde
                            background:{panel}; border-radius:5px; }}
 QTableWidget::indicator:disabled {{ border-color:{border}; }}
 QTableWidget::indicator:checked {{ background:{accent}; border:1px solid {accent};{check_image} }}
+/* Ayarlar'daki onay kutulari: secili degilken de kutu gorunsun. */
+QCheckBox {{ spacing:9px; background:transparent; }}
+QCheckBox::indicator {{ width:18px; height:18px; border:1px solid {drop_border};
+                        background:{chrome}; border-radius:5px; }}
+QCheckBox::indicator:hover {{ border-color:{accent}; }}
+QCheckBox::indicator:checked {{ background:{accent}; border:1px solid {accent};{check_image} }}
+QCheckBox::indicator:disabled {{ border-color:{border}; background:{panel_alt}; }}
 
 QTabWidget::pane {{ border:0; }}
 QTabBar::tab {{ background:transparent; color:{muted}; padding:10px 15px; border:0;
@@ -1847,6 +1854,11 @@ class MainWindow(QMainWindow):
         brand_row.addWidget(brand_text)
         row.addWidget(brand)
 
+        self.open_button = HoverIconButton('Video Seç')
+        self.open_button.setTintedIcon('upload', THEME['secondary'], 18)
+        self.open_button.clicked.connect(self.choose_video)
+        row.addWidget(self.open_button)
+
         switch = QFrame()
         switch.setObjectName('modeSwitch')
         switch_row = QHBoxLayout(switch)
@@ -1868,11 +1880,6 @@ class MainWindow(QMainWindow):
         self.mode_group.button(MODE_TRANSLATE).setChecked(True)
         self.mode_group.idClicked.connect(self.set_mode)
         row.addWidget(switch)
-
-        self.open_button = HoverIconButton('Video Seç')
-        self.open_button.setTintedIcon('upload', THEME['secondary'], 18)
-        self.open_button.clicked.connect(self.choose_video)
-        row.addWidget(self.open_button)
 
         # Seri kontrolleri yalnizca Ceviri sekmesinde anlamlidir (set_mode gizler).
         self.series_group = QWidget()

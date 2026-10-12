@@ -136,14 +136,20 @@ def language_label(code):
 
 
 # --- onbellek ----------------------------------------------------------------
-def cache_path(video, model_name=DEFAULT_MODEL, language='', base=None):
-    return qa.cache_path(video, f'whisper-segments:{model_name}:{language or "auto"}', base)
+def track_suffix(audio_track=None):
+    """Onbellek anahtari eki: ilk ses akisi (None) icin bos, digerleri ':a<global index>'."""
+    return '' if audio_track is None else f':a{int(audio_track)}'
 
 
-def load_cached(video, model_name=DEFAULT_MODEL, language='', base=None):
+def cache_path(video, model_name=DEFAULT_MODEL, language='', base=None, audio_track=None):
+    return qa.cache_path(video, f'whisper-segments:{model_name}:{language or "auto"}'
+                                f'{track_suffix(audio_track)}', base)
+
+
+def load_cached(video, model_name=DEFAULT_MODEL, language='', base=None, audio_track=None):
     """Daha once cikarilmis transkript varsa dondurur, yoksa None."""
     try:
-        path = cache_path(video, model_name, language, base)
+        path = cache_path(video, model_name, language, base, audio_track)
         value = json.loads(read(path))
     except (OSError, ValueError):
         return None
@@ -153,11 +159,14 @@ def load_cached(video, model_name=DEFAULT_MODEL, language='', base=None):
 
 
 # --- ses + transkript ---------------------------------------------------------
-def extract_audio(video, output):
-    """Ilk ses akisini 16 kHz mono WAV olarak cikarir (video degismez)."""
+def extract_audio(video, output, audio_track=None):
+    """Ses akisini 16 kHz mono WAV olarak cikarir (video degismez).
+
+    `audio_track`: ffprobe GLOBAL stream index'i; None ise ilk ses akisi."""
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    command = [media.ffmpeg_path(), '-v', 'error', '-y', '-i', str(video), '-map', '0:a:0',
+    track = '0:a:0' if audio_track is None else f'0:{int(audio_track)}'
+    command = [media.ffmpeg_path(), '-v', 'error', '-y', '-i', str(video), '-map', track,
                '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', str(output)]
     result = media._run(command)
     if result.returncode != 0 or not output.exists():
@@ -259,13 +268,14 @@ def _device_plan(device):
 
 
 def transcribe(video, model_name=DEFAULT_MODEL, device='auto', language='', base=None,
-               progress=None, cancelled=None, log=print, cuda_dir=''):
+               progress=None, cancelled=None, log=print, cuda_dir='', audio_track=None):
     """Videonun konusmasini zaman damgali cue'lara cevirir (onbellekli).
 
-    Donen: {'segments', 'language', 'model', 'duration', 'device'}.
+    Donen: {'segments', 'language', 'model', 'duration', 'device', 'audio_track'}.
     `progress(islenen_saniye, toplam_saniye)`; `cancelled()` True ise GracefulStop.
+    `audio_track`: Whisper'a gidecek ses akisinin GLOBAL index'i (None: ilk ses akisi).
     """
-    cached = load_cached(video, model_name, language, base)
+    cached = load_cached(video, model_name, language, base, audio_track)
     if cached:
         log('Konuşmadan metin önbellekten yüklendi.')
         return cached
@@ -275,14 +285,14 @@ def transcribe(video, model_name=DEFAULT_MODEL, device='auto', language='', base
 
     folder = Path(base or qa.work_dir()) / 'qa'
     stem = re.sub(r'[^\w.-]+', '_', Path(video).stem)[:40] or 'video'
-    audio = extract_audio(video, folder / f'{stem}.audio.wav')
+    audio = extract_audio(video, folder / f'{stem}.audio.wav', audio_track)
     log('Ses çıkarıldı; Whisper modeli yükleniyor (ilk kullanımda indirilir): ' + model_name)
     try:
         runner = run_whisper if mode == 'inprocess' else _run_helper
         result = runner(audio, model_name, device, language, progress=progress,
                         cancelled=cancelled, log=log, download_root=str(model_dir()),
                         cuda_dir=cuda_dir)
-        result.update(model=model_name)
+        result.update(model=model_name, audio_track=audio_track)
     finally:
         try:
             audio.unlink()
@@ -290,7 +300,7 @@ def transcribe(video, model_name=DEFAULT_MODEL, device='auto', language='', base
             pass
     if not result['segments']:
         raise ValueError('Seste konuşma bulunamadı.')
-    save_json(cache_path(video, model_name, language, base), result)
+    save_json(cache_path(video, model_name, language, base, audio_track), result)
     log(f'Konuşmadan metin hazır: {len(result["segments"])} satır, dil: '
         f'{language_label(result["language"])}, cihaz: {result["device"]}.')
     return result

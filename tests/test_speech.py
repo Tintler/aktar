@@ -224,7 +224,7 @@ class TranscribeTests(unittest.TestCase):
     def tearDown(self):
         self.folder.cleanup()
 
-    def extract(self, _video, output):
+    def extract(self, _video, output, _audio_track=None):
         Path(output).parent.mkdir(parents=True, exist_ok=True)
         write_wav(output)
         return Path(output)
@@ -286,6 +286,34 @@ class TranscribeTests(unittest.TestCase):
                 speech.extract_audio(self.video, self.base / 'a.wav')
         self.assertIn('ses akışı yok', str(context.exception))
 
+    def test_extract_audio_maps_selected_track(self):
+        commands = []
+
+        def fake_run(command):
+            commands.append(command)
+            Path(command[-1]).write_bytes(b'wav')
+            return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+
+        with mock.patch.object(media, '_run', side_effect=fake_run), \
+                mock.patch.object(media, 'ffmpeg_path', return_value='ffmpeg'):
+            speech.extract_audio(self.video, self.base / 'a.wav')
+            speech.extract_audio(self.video, self.base / 'b.wav', audio_track=3)
+        self.assertEqual(commands[0][commands[0].index('-map') + 1], '0:a:0')
+        self.assertEqual(commands[1][commands[1].index('-map') + 1], '0:3')
+
+    def test_selected_audio_track_has_its_own_cache(self):
+        module, _calls = fake_whisper_module()
+        first, _ = self.run_transcribe(module, device='cpu')
+        self.assertIsNone(first['audio_track'])
+        self.assertIsNone(speech.load_cached(self.video, base=self.base, audio_track=3))
+        module2, calls2 = fake_whisper_module()
+        other, _ = self.run_transcribe(module2, device='cpu', audio_track=3)
+        self.assertTrue(calls2, 'baska ses parcasi onbellekten gelmemeli')
+        self.assertEqual(other['audio_track'], 3)
+        self.assertIsNotNone(speech.load_cached(self.video, base=self.base, audio_track=3))
+        self.assertNotEqual(speech.cache_path(self.video, base=self.base),
+                            speech.cache_path(self.video, base=self.base, audio_track=3))
+
     def test_whisper_session_uses_segments_as_transcript(self):
         result = {'segments': [{'start': 0.0, 'end': 2.0, 'text': 'Welcome.'},
                                {'start': 3.0, 'end': 5.0, 'text': 'Bye.'}],
@@ -294,7 +322,7 @@ class TranscribeTests(unittest.TestCase):
             data, path = qa.load_whisper_session(self.video, result, self.base, log=lambda _m: None)
             again, _ = qa.load_whisper_session(self.video, result, self.base, log=lambda _m: None)
         self.assertEqual(data['source'], {'kind': 'whisper', 'model': 'large-v3-turbo',
-                                          'language': 'en'})
+                                          'language': 'en', 'audio_track': None})
         self.assertEqual(again['segments'], data['segments'])
         self.assertTrue(path.exists())
         self.assertEqual(data['duration'], 27.0)
@@ -341,7 +369,7 @@ class HelperProtocolTests(unittest.TestCase):
     def tearDown(self):
         self.folder.cleanup()
 
-    def extract(self, _video, output):
+    def extract(self, _video, output, _audio_track=None):
         Path(output).parent.mkdir(parents=True, exist_ok=True)
         write_wav(output)
         return Path(output)
