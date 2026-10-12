@@ -167,7 +167,8 @@ class QaWindowContractTests(unittest.TestCase):
         self.assertIn('self.cuda_browse.setEnabled(False)', init)
         import speech
         self.assertIn(f'WHISPER_MODELS = {speech.MODELS!r}', self.gui_source)
-        self.assertIn(f'CUDA_MARKERS = {speech._CUDA_MARKERS!r}', self.gui_source)
+        self.assertIn(repr(speech.CUDA_MARKERS_WINDOWS), self.gui_source)
+        self.assertIn(repr(speech.CUDA_MARKERS_LINUX), self.gui_source)
         self.assertEqual(self.window_source.count("cuda_dir=cfg.get('whisper_cuda_dir', '')"), 2)
 
     def test_window_icons_exist(self):

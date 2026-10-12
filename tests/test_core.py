@@ -591,6 +591,28 @@ class FontFallbackTests(unittest.TestCase):
         self.assertEqual(replacements, {})
         self.assertEqual(text, '1\n00:00:01,000 --> 00:00:02,000\nHello.\n')
 
+    def test_parse_fontconfig_charset(self):
+        self.assertEqual(fonts._parse_charset('20-7e a0-17f 192 x'),
+                         [(0x20, 0x7e), (0xa0, 0x17f), (0x192, 0x192)])
+        self.assertEqual(fonts._fontconfig_escape('A-B:C'), 'A\\-B\\:C')
+
+    def test_fontconfig_check_uses_best_face_and_missing_font(self):
+        def run(output):
+            result = mock.Mock(returncode=0, stdout=output, stderr='')
+            with mock.patch.object(fonts.shutil, 'which', return_value='/usr/bin/fc-list'), \
+                    mock.patch.object(fonts.subprocess, 'run', return_value=result):
+                return fonts._fontconfig_missing('Any')
+        # Latin-1 tek basina ç/ö/ü'yu kapsar ama ğ/ı/ş'yi kapsamaz.
+        self.assertEqual(run('20-7e a0-ff\n'), list('ğĞıİşŞ'))
+        self.assertEqual(run('20-7e a0-ff\n20-7e a0-17f\n'), [])
+        self.assertEqual(run(''), list(fonts.TURKISH_CHARS))  # kurulu degil
+
+    def test_supports_turkish_assumes_yes_without_fontconfig(self):
+        with mock.patch.object(fonts.os, 'name', 'posix'), \
+                mock.patch.dict(fonts._support_cache, clear=True), \
+                mock.patch.object(fonts.shutil, 'which', return_value=None):
+            self.assertTrue(fonts.supports_turkish('Gandhi Sans'))
+
 
 class EngineTests(unittest.TestCase):
     """TranslationEngine: ID/TEXT kontrollu ceviri, glossary zorunlulugu, checkpoint."""
@@ -893,6 +915,31 @@ class MediaProbeTests(unittest.TestCase):
 
 
 class MediaPathTests(unittest.TestCase):
+    def test_find_binary_skips_foreign_platform_binary(self):
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / 'bin').mkdir()
+            (Path(folder) / 'bin' / 'ffmpeg.exe').write_bytes(b'')
+            with mock.patch.object(media, 'APP_DIR', Path(folder)), \
+                    mock.patch.object(media, 'ROOT', Path(folder)), \
+                    mock.patch.object(media, 'WINDOWS', False), \
+                    mock.patch.object(media, 'EXE_SUFFIX', ''), \
+                    mock.patch.object(media.shutil, 'which', return_value='/usr/bin/ffmpeg'):
+                self.assertEqual(media.ffmpeg_path(), '/usr/bin/ffmpeg')
+            with mock.patch.object(media, 'APP_DIR', Path(folder)), \
+                    mock.patch.object(media, 'WINDOWS', True), \
+                    mock.patch.object(media, 'EXE_SUFFIX', '.exe'):
+                self.assertEqual(media.ffmpeg_path(), str(Path(folder) / 'bin' / 'ffmpeg.exe'))
+
+    def test_find_binary_linux_hint(self):
+        with tempfile.TemporaryDirectory() as folder, \
+                mock.patch.object(media, 'APP_DIR', Path(folder)), \
+                mock.patch.object(media, 'ROOT', Path(folder)), \
+                mock.patch.object(media, 'WINDOWS', False), \
+                mock.patch.object(media, 'EXE_SUFFIX', ''), \
+                mock.patch.object(media.shutil, 'which', return_value=None):
+            with self.assertRaisesRegex(RuntimeError, 'apt install ffmpeg'):
+                media.ffprobe_path()
+
     def test_unique_output_path_adds_counter(self):
         with tempfile.TemporaryDirectory() as folder:
             video = Path(folder) / 'Movie.mkv'

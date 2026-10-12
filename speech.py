@@ -2,9 +2,10 @@
 
 Iki calisma yolu (`backend()`):
   - 'inprocess': kaynak koddan calisirken faster-whisper kuruluysa (requirements-whisper.txt)
-  - 'helper': uygulama klasorundeki ayri `aktar-whisper/aktar-whisper.exe` paketi
-    (DERLE_WHISPER.cmd ile derlenir; ffmpeg'in bin/ icinde durmasi gibi). Aktar.exe
-    faster-whisper'i icermez; paket yanindaysa onu alt surec olarak calistirir.
+  - 'helper': uygulama klasorundeki ayri `aktar-whisper/aktar-whisper(.exe)` paketi
+    (Windows'ta DERLE_WHISPER.cmd, Linux'ta derle_whisper.sh ile derlenir; ffmpeg'in
+    bin/ icinde durmasi gibi). Derlenmis Aktar faster-whisper'i icermez; paket
+    yanindaysa onu alt surec olarak calistirir.
 Ikisi de yoksa `available()` anlamli Turkce mesaj dondurur. Kaynak video
 SALT-OKUNUR: ffmpeg yalnizca ilk ses akisini work_files/qa altina 16 kHz mono WAV
 olarak cikarir; WAV transkript bitince silinir. Model APP_DIR/models/whisper
@@ -24,7 +25,7 @@ from pathlib import Path
 
 import media
 import qa
-from app_core import APP_DIR, GracefulStop, read, save_json
+from app_core import APP_DIR, EXE_SUFFIX, WINDOWS, GracefulStop, read, save_json
 
 DEFAULT_MODEL = 'large-v3-turbo'
 MODELS = ('large-v3-turbo', 'large-v3', 'medium', 'small', 'base')
@@ -33,19 +34,23 @@ CUE_CHARS = 84       # bir altyazi cue'sunda en fazla karakter (2 x 42)
 CUE_SECONDS = 6.0    # bir cue'nun en uzun suresi
 LINE_CHARS = 42      # gosterimde satir genisligi
 HELPER_NAME = 'aktar-whisper'
+BUILD_WHISPER_SCRIPT = 'DERLE_WHISPER.cmd' if WINDOWS else 'derle_whisper.sh'
 INSTALL_HINT = ('Konuşmadan metin için faster-whisper kurulu değil. Kurmak için uygulama '
-                'klasöründe: py -3 -m pip install -r requirements-whisper.txt '
-                '(veya aktar-whisper paketini uygulama klasörüne koyun; KULLANIM.md 1.5).')
+                'klasöründe: ' + ('py -3 -m pip install -r requirements-whisper.txt' if WINDOWS
+                                  else './kur.sh --whisper ya da .venv/bin/pip install -r '
+                                       'requirements-whisper.txt') +
+                ' (veya aktar-whisper paketini uygulama klasörüne koyun; KULLANIM.md 1.5).')
 _SENTENCE_END = re.compile(r'[.?!…]["\')\]]*$')
 
 
-FROZEN_HINT = ('Konuşmadan metin (Whisper) paketi bulunamadı. Aktar.exe ile aynı klasöre '
-               '"aktar-whisper" klasörünü koyun (DERLE_WHISPER.cmd ile derlenir; KULLANIM.md 1.5).')
+FROZEN_HINT = (f'Konuşmadan metin (Whisper) paketi bulunamadı. Aktar{EXE_SUFFIX} ile aynı klasöre '
+               f'"aktar-whisper" klasörünü koyun ({BUILD_WHISPER_SCRIPT} ile derlenir; '
+               'KULLANIM.md 1.5).')
 
 
 def helper_command():
     """Ayri Whisper paketinin calistirma komutu (liste) veya None."""
-    candidate = APP_DIR / HELPER_NAME / (HELPER_NAME + '.exe')
+    candidate = APP_DIR / HELPER_NAME / (HELPER_NAME + EXE_SUFFIX)
     return [str(candidate)] if candidate.exists() else None
 
 
@@ -164,46 +169,79 @@ def extract_audio(video, output):
 
 
 _CUDA_LIBS = ('cublas', 'cudnn')
-_CUDA_MARKERS = ('cublas64_12.dll', 'cudnn64_9.dll')  # ctranslate2 4.x: CUDA 12 + cuDNN 9
+# ctranslate2 4.x: CUDA 12 + cuDNN 9. pip paketleri Windows'ta <paket>/bin/*.dll,
+# Linux'ta <paket>/lib/*.so.* olarak kurulur.
+CUDA_MARKERS_WINDOWS = ('cublas64_12.dll', 'cudnn64_9.dll')
+CUDA_MARKERS_LINUX = ('libcublas.so.12', 'libcudnn.so.9')
+_CUDA_MARKERS = CUDA_MARKERS_WINDOWS if WINDOWS else CUDA_MARKERS_LINUX
+_CUDA_SUBDIR, _CUDA_GLOB = ('bin', '*.dll') if WINDOWS else ('lib', 'lib*.so*')
 _cuda_dirs_added = []
 
 
 def check_cuda_dir(folder):
-    """Kullanicinin gosterdigi klasorde eksik cuBLAS/cuDNN DLL'leri (bos liste: tamam)."""
+    """Kullanicinin gosterdigi klasorde eksik cuBLAS/cuDNN kutuphaneleri (bos liste: tamam)."""
     folder = Path(folder)
     return [name for name in _CUDA_MARKERS if not (folder / name).is_file()]
 
 
 def _cuda_dll_dirs(extra=''):
-    """NVIDIA DLL klasorleri, oncelik sirasiyla: Ayarlar'da gosterilen klasor (baska
-    programlarla ortak kullanilan cuBLAS/cuDNN), aktar-whisper paketine DERLE_WHISPER.cmd
-    ile konanlar, pip'le kurulanlar (nvidia-cublas-cu12, nvidia-cudnn-cu12)."""
+    """NVIDIA kutuphane klasorleri, oncelik sirasiyla: Ayarlar'da gosterilen klasor (baska
+    programlarla ortak kullanilan cuBLAS/cuDNN), aktar-whisper paketine derleme betigiyle
+    konanlar, pip'le kurulanlar (nvidia-cublas-cu12, nvidia-cudnn-cu12)."""
     folders = [Path(extra)] if str(extra or '').strip() else []
     frozen_root = getattr(sys, '_MEIPASS', None)
-    if frozen_root:  # paket: _internal/nvidia/<kutuphane>/bin (namespace paket import edilemeyebilir)
-        folders += [Path(frozen_root) / 'nvidia' / name / 'bin' for name in _CUDA_LIBS]
+    if frozen_root:  # paket: _internal/nvidia/<kutuphane>/bin|lib (namespace paket import edilemeyebilir)
+        folders += [Path(frozen_root) / 'nvidia' / name / _CUDA_SUBDIR for name in _CUDA_LIBS]
     for name in _CUDA_LIBS:
         try:
             module = __import__('nvidia.' + name, fromlist=['__path__'])
         except ImportError:
             continue
-        folders += [Path(root) / 'bin' for root in getattr(module, '__path__', [])]
+        folders += [Path(root) / _CUDA_SUBDIR for root in getattr(module, '__path__', [])]
     # Bos klasorler (ornegin pip kaldirmasindan kalanlar) sayilmaz.
     return list(dict.fromkeys(folder for folder in folders
-                              if folder.is_dir() and any(folder.glob('*.dll'))))
+                              if folder.is_dir() and any(folder.glob(_CUDA_GLOB))))
 
 
 def _add_cuda_dll_dirs(extra=''):
-    """NVIDIA DLL klasorlerini Windows DLL arama yoluna ekler (her klasor bir kez)."""
-    if os.name != 'nt':
+    """NVIDIA kutuphane klasorlerini yukleyiciye tanitir (her klasor bir kez).
+
+    Windows: DLL arama yoluna eklenir. Linux: LD_LIBRARY_PATH surec basladiktan sonra
+    okunmadigi icin kutuphaneler RTLD_GLOBAL ile onceden yuklenir; ctranslate2 sonra
+    ayni soname'i (libcublas.so.12 ...) dlopen edince bunlar kullanilir. NVIDIA
+    surucusu yoksa (GPU yok) Linux'ta hicbir sey yuklenmez.
+    """
+    if not WINDOWS and not os.path.exists('/proc/driver/nvidia/version'):
         return []
-    for folder in _cuda_dll_dirs(extra):
-        if folder in _cuda_dirs_added:
-            continue
-        os.add_dll_directory(str(folder))
+    new = [folder for folder in _cuda_dll_dirs(extra) if folder not in _cuda_dirs_added]
+    for folder in new:
+        if WINDOWS:
+            os.add_dll_directory(str(folder))
         os.environ['PATH'] = str(folder) + os.pathsep + os.environ.get('PATH', '')
         _cuda_dirs_added.append(folder)
+    if new and not WINDOWS:
+        _preload_shared_libs([path for folder in new for path in sorted(folder.glob(_CUDA_GLOB))])
     return list(_cuda_dirs_added)
+
+
+def _preload_shared_libs(paths):
+    """Linux: .so dosyalarini RTLD_GLOBAL ile yukler. Birbirine bagimli kutuphaneler
+    (cuDNN alt kutuphaneleri cuBLAS'a bagli olabilir) icin, ilerleme durana kadar
+    basarisiz olanlar tekrar denenir. Donen: yuklenemeyenler."""
+    import ctypes
+
+    pending = [path for path in paths if path.is_file()]
+    while pending:
+        failed = []
+        for path in pending:
+            try:
+                ctypes.CDLL(str(path), mode=ctypes.RTLD_GLOBAL)
+            except OSError:
+                failed.append(path)
+        if len(failed) == len(pending):
+            return failed
+        pending = failed
+    return []
 
 
 def _device_plan(device):

@@ -32,6 +32,9 @@ except ImportError:
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 APP_DIR = (Path(sys.executable).resolve().parent
            if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent)
+# Kullaniciya gosterilen dosya adlari ve ikili uzantisi platforma gore (Windows / Linux).
+WINDOWS = os.name == 'nt'
+EXE_SUFFIX = '.exe' if WINDOWS else ''
 
 DEFAULT_CONFIG = {
     'base_url': 'http://127.0.0.1:1234/v1',

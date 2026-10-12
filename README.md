@@ -11,7 +11,7 @@ Video dosyalarındaki **metin tabanlı altyazıları** çıkarıp, **yerel bir y
 
 > **Gizlilik:** Hiçbir veri internet üzerinden gönderilmez. Çeviri ve soru-cevap tamamen yerel ağdaki LM Studio sunucusunda (`127.0.0.1`) yapılır. Kaynak video dosyası **salt-okunur** kabul edilir; kopyalanmaz, taşınmaz, değiştirilmez veya yeniden encode edilmez.
 
-> **English:** Aktar is a PySide6 desktop app (with a companion CLI) that extracts text subtitles from video files and translates them to Turkish with a local LLM served by LM Studio. Everything runs locally and the source video is treated as read-only. The program preserves subtitle structure, timings, order and ASS tags — while the model only ever sees plain text, and it enforces a glossary for consistent terminology across episodes. An **Ask** tab works like YouTube's "Ask about this video": a built-in player plus a chat that answers questions about your own videos with clickable timestamp citations, using embedded subtitles or optional local speech-to-text (faster-whisper).
+> **English:** Aktar is a cross-platform (Windows, Linux) PySide6 desktop app (with a companion CLI) that extracts text subtitles from video files and translates them to Turkish with a local LLM served by LM Studio. Everything runs locally and the source video is treated as read-only. The program preserves subtitle structure, timings, order and ASS tags — while the model only ever sees plain text, and it enforces a glossary for consistent terminology across episodes. An **Ask** tab works like YouTube's "Ask about this video": a built-in player plus a chat that answers questions about your own videos with clickable timestamp citations, using embedded subtitles or optional local speech-to-text (faster-whisper).
 
 ---
 
@@ -31,7 +31,7 @@ Video dosyalarındaki **metin tabanlı altyazıları** çıkarıp, **yerel bir y
 
 ## Gereksinimler
 
-- **Windows** veya Python 3.10+ çalışan herhangi bir masaüstü ortamı.
+- **Windows 10/11** veya **Linux** (Debian, Ubuntu, Fedora…; KDE Plasma/GNOME, Wayland veya X11). Linux kurulumu için aşağıdaki **Linux** bölümüne bakın.
 - **Python 3.10+** (kaynak koddan çalıştırma için).
 - **PySide6** (arayüz).
 - **FFmpeg / ffprobe:** `bin\ffmpeg.exe` ve `bin\ffprobe.exe` olarak taşınabilir şekilde projeye konur(daha fazla bilgi için bin klasöründe  **[README.txt](bin/README.txt)** 'i okuyabilirsiniz).
@@ -59,6 +59,16 @@ GUI_BASLAT.cmd
 
 4. Videoyu pencereye sürükleyin → altyazı akışını işaretleyin → **Çevir**.
 5. Videoya soru sormak için başlık şeridinden **Soru Sor** sekmesine geçin.
+
+### Linux (Debian, Ubuntu, KDE Plasma…)
+
+```bash
+sudo apt install python3-venv ffmpeg fontconfig libxcb-cursor0
+./kur.sh --kisayol
+./baslat.sh
+```
+
+`kur.sh`, paketleri proje klasöründeki `.venv` sanal ortamına kurar. `--whisper` konuşmadan metni, `--gpu` bunun yanında NVIDIA CUDA kütüphanelerini de kurar; `--kisayol` uygulama menüsüne kısayol ekler. FFmpeg sistemden kullanılır. Derleme için `./derle.sh` ve `./derle_whisper.sh` var. Ayrıntılar: **[KULLANIM.md → 1.6](KULLANIM.md#16-linux-debian-ubuntu-fedora-kde-plasma-gnome)**.
 
 Ayrıntılı kullanım ve .exe'nin derlenmesi için bkz. **[KULLANIM.md](KULLANIM.md)**.
 

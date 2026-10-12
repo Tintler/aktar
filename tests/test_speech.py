@@ -1,6 +1,7 @@
 """Konusmadan metin (F48) testleri. faster-whisper/GPU gerektirmez (sahte model)."""
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -106,8 +107,9 @@ class HelperTests(unittest.TestCase):
     def test_cuda_dirs_found_inside_frozen_helper(self):
         with tempfile.TemporaryDirectory() as folder:
             for name in ('cublas', 'cudnn'):
-                (Path(folder) / 'nvidia' / name / 'bin').mkdir(parents=True)
-                (Path(folder) / 'nvidia' / name / 'bin' / f'{name}.dll').write_bytes(b'')
+                lib_dir = Path(folder) / 'nvidia' / name / speech._CUDA_SUBDIR
+                lib_dir.mkdir(parents=True)
+                (lib_dir / (f'{name}.dll' if speech.WINDOWS else f'lib{name}.so.12')).write_bytes(b'')
             with mock.patch.object(sys, '_MEIPASS', folder, create=True),                     mock.patch.dict(sys.modules, {'nvidia.cublas': None, 'nvidia.cudnn': None}):
                 found = speech._cuda_dll_dirs()
         self.assertEqual([item.parent.name for item in found], ['cublas', 'cudnn'])
@@ -116,24 +118,62 @@ class HelperTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             shared = Path(folder) / 'cuBLAS and cuDNN'
             shared.mkdir()
-            self.assertEqual(speech.check_cuda_dir(shared), ['cublas64_12.dll', 'cudnn64_9.dll'])
-            (shared / 'cublas64_12.dll').write_bytes(b'')
-            (shared / 'cudnn64_9.dll').write_bytes(b'')
+            cublas, cudnn = speech._CUDA_MARKERS
+            sub = speech._CUDA_SUBDIR
+            self.assertEqual(speech.check_cuda_dir(shared), [cublas, cudnn])
+            (shared / cublas).write_bytes(b'')
+            (shared / cudnn).write_bytes(b'')
             self.assertEqual(speech.check_cuda_dir(shared), [])
             pip_root = Path(folder) / 'site' / 'cublas'
-            (pip_root / 'bin').mkdir(parents=True)
+            (pip_root / sub).mkdir(parents=True)
             empty_root = Path(folder) / 'site' / 'cudnn'   # pip kaldirmasindan kalan bos klasor
-            (empty_root / 'bin').mkdir(parents=True)
-            (pip_root / 'bin' / 'cublas64_12.dll').write_bytes(b'')
+            (empty_root / sub).mkdir(parents=True)
+            (pip_root / sub / cublas).write_bytes(b'')
             fake_module = types.SimpleNamespace(__path__=[str(pip_root)])
             empty_module = types.SimpleNamespace(__path__=[str(empty_root)])
             with mock.patch.dict(sys.modules, {'nvidia.cublas': fake_module,
                                                'nvidia.cudnn': empty_module}):
                 found = speech._cuda_dll_dirs(str(shared))
-                self.assertEqual(found, [shared, pip_root / 'bin'])
-                self.assertEqual(speech._cuda_dll_dirs(''), [pip_root / 'bin'])
+                self.assertEqual(found, [shared, pip_root / sub])
+                self.assertEqual(speech._cuda_dll_dirs(''), [pip_root / sub])
             with mock.patch.dict(sys.modules, {'nvidia.cublas': None, 'nvidia.cudnn': None}):
                 self.assertEqual(speech._cuda_dll_dirs(str(Path(folder) / 'yok')), [])
+
+    def test_linux_preloads_cuda_libs_only_with_nvidia_driver(self):
+        folder = Path('/opt/cuda-ortak')
+        with mock.patch.object(speech, 'WINDOWS', False), \
+                mock.patch.object(speech, '_cuda_dirs_added', []), \
+                mock.patch.object(speech, '_cuda_dll_dirs', return_value=[folder]), \
+                mock.patch.object(Path, 'glob', return_value=[folder / 'libcublas.so.12']), \
+                mock.patch.object(speech, '_preload_shared_libs') as preload, \
+                mock.patch.dict(os.environ, {'PATH': ''}):
+            with mock.patch.object(speech.os.path, 'exists', return_value=False):
+                self.assertEqual(speech._add_cuda_dll_dirs(), [])
+            preload.assert_not_called()
+            with mock.patch.object(speech.os.path, 'exists', return_value=True):
+                self.assertEqual(speech._add_cuda_dll_dirs(), [folder])
+                self.assertEqual(speech._add_cuda_dll_dirs(), [folder])  # ikinci kez yuklenmez
+        preload.assert_called_once()
+        self.assertEqual(list(preload.call_args[0][0]), [folder / 'libcublas.so.12'])
+
+    def test_preload_retries_dependent_libs(self):
+        loaded, calls = set(), []
+
+        def fake_cdll(path, mode=0):
+            calls.append(path)
+            if path.endswith('b.so') and 'a.so' not in loaded:
+                raise OSError('bagimlilik eksik')
+            loaded.add(Path(path).name)
+
+        with tempfile.TemporaryDirectory() as folder:
+            first, second = Path(folder) / 'b.so', Path(folder) / 'a.so'
+            first.write_bytes(b'')
+            second.write_bytes(b'')
+            import ctypes
+            with mock.patch.object(ctypes, 'CDLL', side_effect=fake_cdll), \
+                    mock.patch.object(ctypes, 'RTLD_GLOBAL', 0, create=True):
+                self.assertEqual(speech._preload_shared_libs([first, second]), [])
+        self.assertEqual([Path(item).name for item in calls], ['b.so', 'a.so', 'b.so'])
 
     def test_available_reports_install_hint(self):
         with mock.patch.dict(sys.modules, {'faster_whisper': None}):
@@ -148,7 +188,7 @@ class HelperTests(unittest.TestCase):
             ok, message = speech.available()
         self.assertFalse(ok)
         self.assertIn('aktar-whisper', message)
-        self.assertIn('DERLE_WHISPER.cmd', message)
+        self.assertIn(speech.BUILD_WHISPER_SCRIPT, message)
         with mock.patch.object(sys, 'frozen', True, create=True), \
                 mock.patch.object(speech, 'helper_command', return_value=['x.exe']):
             self.assertEqual(speech.backend(), 'helper')
@@ -160,7 +200,7 @@ class HelperTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             with mock.patch.object(speech, 'APP_DIR', Path(folder)):
                 self.assertIsNone(speech.helper_command())
-                exe = Path(folder) / 'aktar-whisper' / 'aktar-whisper.exe'
+                exe = Path(folder) / 'aktar-whisper' / ('aktar-whisper' + speech.EXE_SUFFIX)
                 exe.parent.mkdir()
                 exe.write_bytes(b'')
                 self.assertEqual(speech.helper_command(), [str(exe)])

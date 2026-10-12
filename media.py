@@ -12,7 +12,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from app_core import APP_DIR, ROOT
+from app_core import APP_DIR, EXE_SUFFIX, ROOT, WINDOWS
 
 # ffprobe codec adi -> (destekleniyor mu, cikti uzantisi, metin mi)
 TEXT_SUBTITLE_CODECS = {
@@ -34,18 +34,23 @@ VIDEO_EXTENSIONS = ('.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.ts', '.wm
 
 
 def _find_binary(name):
-    """Once uygulama dizini, sonra PyInstaller _MEIPASS, sonra PATH."""
+    """Once uygulama dizini, sonra PyInstaller _MEIPASS, sonra PATH.
+
+    Yalnizca bu platformda calisan ikili aranir: Linux'ta bin/ icinde duran
+    Windows ffmpeg.exe'si atlanir (calistirilamaz), sistemdeki ffmpeg kullanilir.
+    """
     for directory in (APP_DIR / 'bin', ROOT / 'bin'):
-        for candidate in (directory / f'{name}.exe', directory / name):
-            if candidate.exists():
-                return str(candidate)
+        candidate = directory / (name + EXE_SUFFIX)
+        if candidate.is_file() and (WINDOWS or os.access(candidate, os.X_OK)):
+            return str(candidate)
     found = shutil.which(name)
     if found:
         return found
-    raise RuntimeError(
-        f'{name} bulunamadı. Uygulama klasöründeki "bin" dizinine '
-        f'{name}.exe dosyasını koyun.'
-    )
+    if WINDOWS:
+        raise RuntimeError(f'{name} bulunamadı. Uygulama klasöründeki "bin" dizinine '
+                           f'{name}.exe dosyasını koyun.')
+    raise RuntimeError(f'{name} bulunamadı. FFmpeg kurun (Debian/Ubuntu: sudo apt install '
+                       f'ffmpeg) veya uygulama klasöründeki "bin" dizinine {name} koyun.')
 
 
 def ffprobe_path():

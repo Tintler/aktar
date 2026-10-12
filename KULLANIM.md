@@ -8,6 +8,8 @@ Bu kılavuz son kullanıcı içindir: kurulum, LM Studio ayarı, bütün akışl
 
 ### 1.1 Kaynak koddan çalıştırma
 
+Linux için bkz. **1.6**.
+
 ```bat
 cd /d Z:\LLM-Files\Projects\Aktar
 py -3 -m pip install -r requirements.txt
@@ -86,6 +88,33 @@ Paket boyutu GPU kütüphaneleri olmadan ~270 MB, pakete gömülü NVIDIA kütü
     `DERLE_WHISPER.cmd` bunları bulursa pakete gömer (~2.1 GB). Bu yüzden derlenmiş paket için bu adımı `DERLE_WHISPER.cmd`'den önce yapın.
 
   Cihaz ayarı `auto` iken GPU varsa önce o denenir. Konsolda önce `GPU kütüphaneleri: cublas (...), cudnn (...)` satırı görünür. Kütüphaneler eksikse ya da GPU çalışmazsa nedeni yazılır ve işlemciyle devam edilir (çok daha yavaş).
+
+### 1.6 Linux (Debian, Ubuntu, Fedora; KDE Plasma, GNOME)
+Aktar Linux'ta kaynak koddan çalışır. Arayüz Qt (PySide6) olduğu için KDE Plasma'da hem Wayland hem X11 oturumunda doğal görünür. Windows betikleri (`.cmd`) yerine aynı işi yapan `.sh` betikleri vardır:
+
+| Windows | Linux | Ne yapar |
+|---|---|---|
+| `py -3 -m pip install -r requirements.txt` | `./kur.sh` | `.venv` sanal ortamını oluşturur, paketleri kurar |
+| `GUI_BASLAT.cmd` | `./baslat.sh` | Arayüzü başlatır |
+| `DERLE.cmd` | `./derle.sh` | Tek dosya `dist/Aktar` derler |
+| `DERLE_WHISPER.cmd` | `./derle_whisper.sh` | `dist/aktar-whisper/` paketini derler |
+
+**Kurulum (Debian 12/13, Ubuntu 22.04+):**
+
+```bash
+sudo apt install python3-venv ffmpeg fontconfig libxcb-cursor0
+./kur.sh --kisayol
+./baslat.sh
+```
+
+- Debian/Ubuntu sistem Python'una doğrudan `pip install` yaptırmaz; bu yüzden `kur.sh` paketleri proje klasöründeki `.venv` içine kurar. `baslat.sh` bu ortamı kendiliğinden kullanır.
+- `--kisayol`, uygulama menüsüne **Aktar** kısayolu ekler. Dosya yöneticisinde (Dolphin) bir videoya sağ tıklayıp **Birlikte Aç → Aktar** dediğinizde video doğrudan açılır.
+- `--whisper` konuşmadan metni (faster-whisper) kurar. `--gpu` buna ek olarak NVIDIA CUDA 12 kütüphanelerini (cuBLAS, cuDNN) `.venv` içine kurar. Seçenekler birlikte verilebilir: `./kur.sh --gpu --kisayol`.
+- **FFmpeg:** Sistemdeki `ffmpeg`/`ffprobe` kullanılır (`sudo apt install ffmpeg`). `bin/` içindeki Windows `.exe` dosyaları Linux'ta yok sayılır. Taşınabilir Linux ikilileri isterseniz `bin/ffmpeg` ve `bin/ffprobe` olarak koyun.
+- **LM Studio:** Linux sürümü (AppImage) [lmstudio.ai](https://lmstudio.ai) adresinden indirilir. Sunucu ayarı Windows'takiyle aynıdır (1.3).
+- **Türkçe font kontrolü (3.5):** Linux'ta `fontconfig` (`fc-list`) ile yapılır. Calibri Linux'ta genellikle kurulu değildir; oynatıcı (mpv, VLC) onun yerine benzer bir font kullanır. Calibri ile aynı ölçülere sahip açık kaynak **Carlito** fontunu kurmanız önerilir: `sudo apt install fonts-crosextra-carlito`.
+- **NVIDIA GPU (Whisper):** `./kur.sh --gpu` yeterlidir. Kütüphaneleri başka bir klasörde tutuyorsanız Ayarlar'daki **GPU kütüphane klasörü** alanına o klasörü gösterin; klasörde `libcublas.so.12` ve `libcudnn.so.9` bulunmalıdır. NVIDIA sürücüsü kurulu değilse Whisper işlemciyle çalışır.
+- **Derleme:** Önce `sudo apt install libpython3-dev` (PyInstaller Python kütüphanesini pakete koyar). `./derle.sh` ile oluşan `dist/Aktar`, derlendiği dağıtımdaki glibc sürümüne bağlıdır. Birden fazla dağıtımda çalışacaksa en eski hedef sistemde derleyin. Whisper paketi `./derle_whisper.sh` ile derlenir ve `dist/aktar-whisper/` klasörü `Aktar`'ın yanına konur.
 
 ---
 
@@ -262,7 +291,7 @@ Seri deposu uygulama dizinindedir (`series\`). Yazma korumalı bir klasörde (ö
 ## 6. Sorun giderme
 
 ### 6.1 `ffprobe bulunamadi` / `ffmpeg bulunamadi`
-`bin\` klasörüne `ffprobe.exe` ve `ffmpeg.exe` koyun. Ya da FFmpeg'i sistem `PATH`'ine ekleyin.
+`bin\` klasörüne `ffprobe.exe` ve `ffmpeg.exe` koyun. Ya da FFmpeg'i sistem `PATH`'ine ekleyin. Linux'ta: `sudo apt install ffmpeg` (bkz. 1.6).
 
 ### 6.2 Model metin döndürmüyor (boş yanıt)
 Hata mesajında `finish_reason=length` ve yüksek `dusunce_token` görürseniz, model **düşünmeye tüm token bütçesini harcıyor** demektir.
@@ -288,7 +317,7 @@ Aynı seri dosyasına başka bir Aktar penceresi erişiyor. Diğer pencereleri k
 Uygulama korumalı bir klasörde (örn. `C:\Program Files`) çalışıyor olabilir. Uygulamayı yazma izni olan bir klasöre taşıyın.
 
 ### 6.8 Çeviride Türkçe harfler görünmüyor (kutu/boş kare)
-Kaynak ASS/SSA fontu Türkçe karakterleri desteklemiyor olabilir. Aktar bu durumda çıktıdaki fontu **Calibri** ile değiştirir; konsolda `Font uyarısı: ... Calibri kullanıldı (...)` mesajını görürsünüz. Türkçe harfler hâlâ görünmüyorsa oynatıcıda Calibri kurulu değil ya da gömülü font (attached fonts) kullanılıyor olabilir; oynatıcının font ayarını kontrol edin.
+Kaynak ASS/SSA fontu Türkçe karakterleri desteklemiyor olabilir. Aktar bu durumda çıktıdaki fontu **Calibri** ile değiştirir; konsolda `Font uyarısı: ... Calibri kullanıldı (...)` mesajını görürsünüz. Türkçe harfler hâlâ görünmüyorsa oynatıcıda Calibri kurulu değil ya da gömülü font (attached fonts) kullanılıyor olabilir; oynatıcının font ayarını kontrol edin. Linux'ta Calibri yerine Carlito fontunu kurun (`sudo apt install fonts-crosextra-carlito`).
 
 ### 6.9 `Yanıt doğrulanamadı; ... parti ... bölünüyor`
 Model çoklu istekte ID'leri düşürmüş, girdileri eksik döndürmüş veya token sınırına ulaşmış olabilir. Program aynı partiyi daha küçük parçalara ayırıp tekrar dener; gerekirse tek girdiye iner. Başarılı alt partiler kaydedilir. Tek girdide de hata sürerse işlem durur; konsoldaki hatayı ve LM Studio'nun ham yanıtını inceleyin. Bu mekanizma yanlış sıralanmış cevapları sessizce kabul etmez; çevirinin anlamsal doğruluğunu otomatik olarak garanti etmez.
@@ -301,11 +330,12 @@ Konsolda `Whisper cuda ile çalışamadı: ...` görüyorsanız:
 - `GPU kütüphaneleri: bulunamadı` yazıyorsa CUDA kütüphaneleri eksiktir. Ayarlar'da **GPU kütüphane klasörü** alanına mevcut cuBLAS/cuDNN klasörünüzü gösterin ya da 1.5'teki B seçeneğini uygulayın.
 - `UYARI: GPU kütüphane klasöründe eksik: ...` yazıyorsa gösterdiğiniz klasörde listelenen DLL yoktur; doğru klasörü seçtiğinizi kontrol edin.
 - `CUDA driver version is insufficient` yazıyorsa NVIDIA sürücüsünü güncelleyin.
+- Linux'ta `GPU kütüphaneleri: bulunamadı` yazıyorsa NVIDIA sürücüsü yüklü değildir (`nvidia-smi` çalışmalı) ya da `./kur.sh --gpu` henüz çalıştırılmamıştır.
 
 Başarılı olunca konsolda `cihaz: cuda` yazar. GPU'suz bilgisayarda Ayarlar'dan daha küçük bir model (`small`) seçebilirsiniz.
 
 ### 6.12 Soru Sor: `Konuşmadan metin (Whisper) paketi bulunamadı`
-Derlenmiş `Aktar.exe` kullanıyorsunuz ve yanında `aktar-whisper` klasörü yok. 1.5'teki "Derlenmiş .exe ile" adımlarını izleyin. Paket varsa ama hata veriyorsa mesajın sonundaki ayrıntıya bakın; paketin kendi hata çıktısı oraya eklenir.
+Derlenmiş `Aktar.exe` (Linux'ta `Aktar`) kullanıyorsunuz ve yanında `aktar-whisper` klasörü yok. 1.5'teki "Derlenmiş .exe ile" adımlarını izleyin. Paket varsa ama hata veriyorsa mesajın sonundaki ayrıntıya bakın; paketin kendi hata çıktısı oraya eklenir.
 
 ### 6.13 Soru Sor: video oynatılmıyor
 Oynatıcı Qt Multimedia'nın FFmpeg altyapısını kullanır. Hata mesajı sohbet alanına yazılır. Videonun başka bir oynatıcıda açıldığını kontrol edin. Soru-cevap ve altyazı çıkarma oynatma olmadan da çalışır.

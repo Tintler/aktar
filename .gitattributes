@@ -1,0 +1,2 @@
+# Linux betikleri Windows klonlarinda da LF kalsin (CRLF ile /bin/sh calismaz).
+*.sh text eol=lf

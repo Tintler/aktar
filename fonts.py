@@ -10,12 +10,16 @@ degilse GDI zaten yedek fonta dusemez ve glif "yok" (0xFFFF) doner, bu da
 dogru sekilde "Türkçe desteklemiyor" anlamina gelir. Basarisizlik durumunda
 yanlis font degisikligi yapmamak icin font "destekliyor" varsayilir.
 
-Windows disinda tespit yapilamaz; ayni sekilde font "destekliyor" varsayilir
-ve cikti degistirilmez. Boylece cekirdek platformdan bagimsiz kalir.
+Linux'ta (ve fontconfig olan diger sistemlerde) ayni tespit `fc-list` ile
+yapilir: ailenin kurulu yuzlerinin karakter kumesi okunur. Windows'taki gibi
+font kurulu degilse "Türkçe desteklemiyor" sayilir. fc-list yoksa veya hata
+verirse font "destekliyor" varsayilir ve cikti degistirilmez.
 """
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 
 # Turkce alfabeye ozgu harfler. Yalnizca Latin-1'de bulunmayanlar ayirt edici
 # olsa da tamami denetlenir; herhangi biri eksikse font Turkce'yi desteklemiyor
@@ -90,6 +94,51 @@ def _gdi_missing(family):
         gdi32.DeleteObject(font)
 
 
+def _fontconfig_escape(family):
+    """fontconfig desen sozdizimindeki ozel karakterleri kacirir."""
+    return ''.join('\\' + char if char in '\\-:,=' else char for char in family)
+
+
+def _parse_charset(text):
+    """fc-list %{charset} ciktisini ('20-7e a0-17f ...') kod noktasi araliklarina cevirir."""
+    ranges = []
+    for item in text.split():
+        start, _, end = item.partition('-')
+        try:
+            ranges.append((int(start, 16), int(end or start, 16)))
+        except ValueError:
+            continue
+    return ranges
+
+
+def _fontconfig_missing(family):
+    """Kurulu bir font ailesinde eksik Turkce glifleri dondurur (fontconfig / fc-list).
+
+    Ailenin herhangi bir yuzu tum harfleri iceriyorsa liste bos doner. Aile kurulu
+    degilse tum harfler eksik sayilir (Windows GDI davranisiyla ayni). fc-list
+    yoksa veya hata verirse istisna firlatir (cagiran "destekliyor" varsayar).
+    """
+    command = shutil.which('fc-list')
+    if not command:
+        raise RuntimeError('fc-list bulunamadi')
+    result = subprocess.run([command, '--format', '%{charset}\\n',
+                             ':family=' + _fontconfig_escape(family)],
+                            capture_output=True, text=True, encoding='utf-8',
+                            errors='replace', timeout=15)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or 'fc-list basarisiz')
+    best = list(TURKISH_CHARS)
+    for line in result.stdout.splitlines():
+        ranges = _parse_charset(line)
+        if not ranges:
+            continue
+        missing = [char for char in TURKISH_CHARS
+                   if not any(start <= ord(char) <= end for start, end in ranges)]
+        if len(missing) < len(best):
+            best = missing
+    return best
+
+
 def supports_turkish(family):
     """Font Turkce karakterleri cizebiliyor mu? Bilinemiyorsa True doner."""
     name = str(family or '').strip()
@@ -97,11 +146,8 @@ def supports_turkish(family):
         return True
     if name in _support_cache:
         return _support_cache[name]
-    if os.name != 'nt':
-        _support_cache[name] = True
-        return True
     try:
-        supported = not _gdi_missing(name)
+        supported = not (_gdi_missing(name) if os.name == 'nt' else _fontconfig_missing(name))
     except Exception:
         supported = True
     _support_cache[name] = supported

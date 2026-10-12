@@ -1,8 +1,8 @@
-"""aktar-whisper: Aktar.exe'nin cagirdigi ayri konusmadan metin paketi (F50).
+"""aktar-whisper: derlenmis Aktar'in cagirdigi ayri konusmadan metin paketi (F50).
 
-DERLE_WHISPER.cmd bu betigi faster-whisper (ve kuruluysa NVIDIA CUDA kutuphaneleri)
-ile birlikte `dist\\aktar-whisper\\` klasorune derler; klasor Aktar.exe'nin yanina
-konur. Aktar sesi kendisi WAV'a cikarir ve bu pakete verir; paket stdout'a satir
+DERLE_WHISPER.cmd (Windows) / derle_whisper.sh (Linux) bu betigi faster-whisper (ve
+kuruluysa NVIDIA CUDA kutuphaneleri) ile birlikte `dist/aktar-whisper/` klasorune
+derler; klasor Aktar.exe'nin (Linux'ta Aktar'in) yanina konur. Aktar sesi kendisi WAV'a cikarir ve bu pakete verir; paket stdout'a satir
 basina bir JSON yazar (speech._run_helper protokolu). Kaynak koddan calisirken
 gerekmez: faster-whisper kuruluysa Aktar onu dogrudan kullanir.
 

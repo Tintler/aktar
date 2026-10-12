@@ -18,6 +18,7 @@ Ceviri/checkpoint/glossary mantigi app_core'da tek yerde tutulur; buraya kopyala
 """
 from __future__ import annotations
 
+import os
 import sys
 import threading
 from pathlib import Path
@@ -251,8 +252,11 @@ def build_style():
     """THEME + QSS sablonundan stil uretir (font tespiti ve varlik yolu dahil)."""
     global _MONO_FAMILY
     theme = dict(THEME)
-    theme['ui_font'] = _first_font([THEME['ui_font'], THEME['fallback_font']])
-    theme['mono_font'] = _first_font([THEME['mono_font'], THEME['fallback_mono']])
+    # Linux'ta Segoe UI / Consolas yoktur; KDE/GNOME'da yaygin aileler sonra denenir.
+    theme['ui_font'] = _first_font([THEME['ui_font'], THEME['fallback_font'],
+                                    'Noto Sans', 'DejaVu Sans'])
+    theme['mono_font'] = _first_font([THEME['mono_font'], THEME['fallback_mono'],
+                                      'Noto Sans Mono', 'DejaVu Sans Mono'])
     _MONO_FAMILY = theme['mono_font']
     check_icon = asset_path('check-lime.svg')
     theme['check_image'] = (' image:url(' + check_icon.as_posix() + ');'
@@ -430,6 +434,8 @@ class HoverHighlightDelegate(QStyledItemDelegate):
             self._accent_palette(option)
 
     def eventFilter(self, obj, event):
+        if not _alive(self._table):  # kapanista tablo delegeden once silinebilir
+            return False
         if obj is self._table.viewport():
             if event.type() == QEvent.MouseMove:
                 index = self._table.indexAt(event.position().toPoint())
@@ -710,7 +716,9 @@ class Toast(QFrame):
 
 # speech.MODELS ile ayni (speech modulu yuklenmeden ayarlar penceresi acilabilsin)
 WHISPER_MODELS = ('large-v3-turbo', 'large-v3', 'medium', 'small', 'base')
-CUDA_MARKERS = ('cublas64_12.dll', 'cudnn64_9.dll')  # speech._CUDA_MARKERS ile ayni
+# speech.CUDA_MARKERS_WINDOWS / CUDA_MARKERS_LINUX ile ayni
+CUDA_MARKERS = (('cublas64_12.dll', 'cudnn64_9.dll') if os.name == 'nt'
+                else ('libcublas.so.12', 'libcudnn.so.9'))
 MODE_TRANSLATE, MODE_ASK = 0, 1  # baslik seridindeki sekmeler / self.pages sirasi
 
 
@@ -1201,8 +1209,8 @@ class SettingsDialog(QDialog):
         layout.addRow('Konuşma dili', whisper_language)
         cuda_dir = QLineEdit(str(config.get('whisper_cuda_dir', '')))
         cuda_dir.setPlaceholderText('Boş: pip ile kurulan veya pakete gömülü kütüphaneler')
-        cuda_dir.setToolTip('Başka programlarla ortak kullandığınız cuBLAS 12 / cuDNN 9 DLL '
-                            'klasörü (cublas64_12.dll, cudnn64_9.dll ...).')
+        cuda_dir.setToolTip('Başka programlarla ortak kullandığınız cuBLAS 12 / cuDNN 9 '
+                            'kütüphane klasörü (' + ', '.join(CUDA_MARKERS) + ' ...).')
         self.fields['whisper_cuda_dir'] = cuda_dir
         self.cuda_browse = QPushButton('Gözat...')
         self.cuda_browse.clicked.connect(self.choose_cuda_dir)
@@ -2474,6 +2482,10 @@ def main():
     app.setFont(font)
     window = MainWindow()
     window.show()
+    # Dosya yoneticisinden "Birlikte ac" / masaustu kisayolu (%f) ile gelen video.
+    videos = [arg for arg in app.arguments()[1:] if Path(arg).is_file()]
+    if videos:
+        window.open_video(videos[0])
     return app.exec()
 
 
