@@ -220,7 +220,7 @@ SRT/VTT font taşımadığı için bu işlem yalnızca ASS/SSA çıktısında uy
 Çeviri sürerken düğme **İptal** olur; duraklatma desteği kod tarafında mevcuttur.
 
 ### 3.6 Soru Sor sekmesi (videoya soru sorma)
-YouTube'daki "Bu video hakkında soru sorun" özelliğinin yerel karşılığıdır: solda video oynatıcı, sağda yerel modelle sohbet.
+Video hakkında yerel modelle soru sormanızı sağlar: solda video oynatıcı, sağda yerel modelle sohbet.
 
 **Hazırlık.** Sekmeye ilk geçişte videonun transkripti çıkarılır ve model videoya genel bir bakış hazırlar. Bu sırada videoya özel önerilen sorular da üretilir. Sonuç `work_files\qa\` altında saklanır, aynı video tekrar açıldığında hesaplanmaz.
 - Transkript kaynağı varsayılan olarak videodaki metin altyazısıdır. Birden fazla altyazı varsa **Transkript** seçicisinden değiştirilebilir. Seçicideki **Sesten (Whisper)** seçeneği konuşmayı sesten metne çevirir (bkz. 1.5). Videoda birden fazla ses parçası varsa (örneğin `.mkv` içinde Japonca ve İngilizce) her parça ayrı **Sesten (Whisper) · <parça>** seçeneği olarak listelenir; Whisper'a hangi sesin gideceğini buradan seçersiniz. Her parçanın transkripti ayrı önbelleğe alınır.

@@ -69,7 +69,7 @@ class TimeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             qa.parse_time('abc')
 
-    def test_format_time_matches_youtube_style(self):
+    def test_format_time_style(self):
         self.assertEqual(qa.format_time(3), '0:03')
         self.assertEqual(qa.format_time(754.9), '12:34')
         self.assertEqual(qa.format_time(3723), '1:02:03')

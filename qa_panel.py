@@ -1,7 +1,7 @@
 """Soru Sor sekmesi paneli (F45/F46): solda oynatici, sagda atifli sohbet.
 
 Ana penceredeki "Soru Sor" sekmesinin icerigidir (F46'dan once ayri pencereydi).
-Duzen (YouTube "Bu video hakkinda soru sorun" paneli):
+Duzen:
   - Sol kart: QVideoWidget + bolum isaretli arama cubugu + [oynat] [ses] 0:03 / 20:29 [bolum]
   - Sag kart: baslik, transkript kaynagi, hazirlik durumu, sohbet (QTextBrowser),
     onerilen soru dugmeleri, soru alani.
@@ -638,7 +638,7 @@ class VideoQAPanel(QWidget):
                 worker.cancel_event.set()
 
     def hideEvent(self, event):
-        """Ceviri sekmesine gecilince video duraklar (YouTube'da sekme degisimi gibi)."""
+        """Ceviri sekmesine gecilince video duraklar."""
         self.player.pause()
         super().hideEvent(event)
 
@@ -730,7 +730,7 @@ class VideoQAPanel(QWidget):
 
     # --- altyazi (CC) ---------------------------------------------------------
     def show_subtitle_menu(self):
-        """YouTube CC menusu gibi: Kapali / videodaki akislar / yan dosyalar."""
+        """Altyazi menusu: Kapali / videodaki akislar / yan dosyalar."""
         menu = QMenu(self)
         group = QActionGroup(menu)
         group.setExclusive(True)

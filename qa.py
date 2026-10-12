@@ -1,6 +1,6 @@
 """Videoya Soru Sor cekirdegi: zaman damgali transkript, video haritasi, atifli cevap.
 
-YouTube'daki "Bu video hakkinda soru sorun" ozelliginin yerel karsiligi. Qt'den
+Video icerigi hakkinda yerel modelle soru-cevap. Qt'den
 bagimsizdir; gui.py ve testler ayni mantigi kullanir. Kaynak video SALT-OKUNUR:
 yalnizca secilen altyazi stream'i work_files altina cikarilir.
 
@@ -58,7 +58,7 @@ def parse_time(value):
 
 
 def format_time(seconds):
-    """Saniye -> 'm:ss' veya 'h:mm:ss' (YouTube bicimi)."""
+    """Saniye -> 'm:ss' veya 'h:mm:ss'."""
     total = max(0, int(seconds))
     hours, rest = divmod(total, 3600)
     minutes, secs = divmod(rest, 60)
@@ -327,7 +327,7 @@ Give 3-6 topics and exactly 4 questions. Questions must be specific to this vide
 
 ROUTE_PROMPT = '''Choose the video sections whose detailed transcript is needed to answer the viewer's latest question. The question may be in a different language than the video. Reply with a JSON object only: {{"sections": [section numbers, most relevant first]}}. Choose at most {limit}. For broad questions about the whole video (summary, main message, verdict) choose the sections that carry its key points and conclusion. Return an empty list only if no section relates to the question.'''
 
-ANSWER_PROMPT = '''You answer a viewer's questions about one specific video, like YouTube's "Ask about this video" feature. The video's content is given below.
+ANSWER_PROMPT = '''You answer a viewer's questions about one specific video. The video's content is given below.
 
 Rules:
 - Answer in Turkish, naturally and concisely. Use short paragraphs or bullet points when they help.
