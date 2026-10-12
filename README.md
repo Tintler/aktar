@@ -60,7 +60,7 @@ GUI_BASLAT.cmd
 4. Videoyu pencereye sürükleyin → altyazı akışını işaretleyin → **Çevir**.
 5. Videoya soru sormak için başlık şeridinden **Soru Sor** sekmesine geçin.
 
-Ayrıntılı kullanım için bkz. **[KULLANIM.md](KULLANIM.md)**.
+Ayrıntılı kullanım ve .exe'nin derlenmesi için bkz. **[KULLANIM.md](KULLANIM.md)**.
 
 ### Komut satırı (isteğe bağlı)
 
