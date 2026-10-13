@@ -1,8 +1,8 @@
 """Belge goruntuleyici (F64) + tek belgeye soru sor (F66).
 
 Solda belge: PDF'ler QtPdf/QtPdfWidgets ile (PySide6 ile gelir) uygulama icinde
-gosterilir; .txt/.md dosyalari duz metin olarak, documents.TEXT_PAGE_LINES
-satirlik "sayfalarla" ayni numaralandirmada acilir. Sagda sohbet: belge
+gosterilir; diger belgeler (metin, Word, tablo, e-kitap) sayfa basliklariyla duz
+metin olarak, documents.extract ile ayni sayfa numaralandirmasinda acilir. Sagda sohbet: belge
 acilinca metni cikarilir (embedding modeli seciliyse indekslenir); kisa belgede
 metnin tamami, uzun belgede ilgili parcalar modele gider. Cevaptaki s.N atiflari
 tiklaninca belge o sayfaya gider. Kaynak dosya SALT-OKUNUR.
@@ -10,10 +10,11 @@ tiklaninca belge o sayfaya gider. Kaynak dosya SALT-OKUNUR.
 from __future__ import annotations
 
 import threading
+from bisect import bisect_right
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, Qt, QThread, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QTextCursor
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QPushButton, QSplitter,
                                QTextBrowser, QVBoxLayout, QWidget)
 
@@ -39,6 +40,7 @@ class DocumentView(QWidget):
         self.kind = documents.kind_of(self.path)
         self._log = log or (lambda _message: None)
         self._pages = 1
+        self._requested = None  # metin goruntuleyicide son istenen sayfa
         self._entries = [('note', GREETING)]
         self._targets = []
         self._session = None
@@ -106,14 +108,34 @@ class DocumentView(QWidget):
             self._pages = max(1, self.document.pageCount())
         else:
             self.view = QTextBrowser(self)
-            self.view.setPlainText(documents.read_text(self.path))
             self.view.setStyleSheet('QTextBrowser { background:transparent; border:0; '
                                     'padding:14px; color:%s; }' % THEME['text'])
+            self._fill_text(documents.pages_of(self.path))
             self.view.verticalScrollBar().valueChanged.connect(lambda _value: self._update())
-            self._pages = max(1, len(documents.text_pages(self.path)))
         inner.addWidget(self.view, 1)
         column.addWidget(frame, 1)
         return holder
+
+    def _fill_text(self, pages):
+        """PDF disi belgeler: sayfa basliklari ('— s. 3 —') ile duz metin; atiftaki sayfa
+        numarasi documents.extract ile ayni numaralandirmadir."""
+        self._pages = max(1, len(pages))
+        self._page_blocks = []
+        cursor = QTextCursor(self.view.document())
+        heading, body = QTextCharFormat(), QTextCharFormat()
+        heading.setForeground(QColor(THEME['muted']))
+        heading.setFontWeight(QFont.Bold)
+        body.setForeground(QColor(THEME['text']))
+        for number, text in enumerate(pages, 1):
+            if number > 1:
+                cursor.insertBlock()
+                cursor.insertBlock()
+            self._page_blocks.append(cursor.block().blockNumber())
+            cursor.insertText(f'— s. {number} —', heading)
+            for line in text.splitlines():
+                cursor.insertBlock()
+                cursor.insertText(line, body)
+        self.view.moveCursor(QTextCursor.Start)
 
     def _build_chat(self):
         frame, column = card(spacing=10, margins=(16, 14, 16, 14), shadow=False)
@@ -236,17 +258,23 @@ class DocumentView(QWidget):
     def current_page(self):
         if self.kind == 'pdf':
             return self.view.pageNavigator().currentPage() + 1
-        line = self.view.cursorForPosition(self.view.viewport().rect().topLeft()).blockNumber()
-        return line // documents.TEXT_PAGE_LINES + 1
+        block = self.view.cursorForPosition(self.view.viewport().rect().topLeft()).blockNumber()
+        page = max(1, bisect_right(self._page_blocks, block))
+        bar = self.view.verticalScrollBar()
+        # Kisa metinde istenen sayfa ekranin ustune kaydirilamaz; istenen sayfa gosterilir.
+        if self._requested and self._requested > page and bar.value() >= bar.maximum():
+            return self._requested
+        return page
 
     def go_to_page(self, page):
         """1'den baslayan sayfa numarasina gider (atiftaki s.N)."""
         page = max(1, min(int(page), self._pages))
+        self._requested = page
         if self.kind == 'pdf':
             navigator = self.view.pageNavigator()
             navigator.jump(page - 1, QPointF(), navigator.currentZoom())
         else:
-            block = self.view.document().findBlockByNumber((page - 1) * documents.TEXT_PAGE_LINES)
+            block = self.view.document().findBlockByNumber(self._page_blocks[page - 1])
             self.view.setTextCursor(QTextCursor(block))
             layout = self.view.document().documentLayout()
             self.view.verticalScrollBar().setValue(int(layout.blockBoundingRect(block).top()))

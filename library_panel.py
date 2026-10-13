@@ -419,7 +419,7 @@ class QueueWorker(QObject):
             overview = collection_qa.build_overview(title, videos, cfg, log=self.log.emit)
             if overview is not None:
                 library.save_overview(slug, overview)
-                self.log.emit(f'Koleksiyon özeti hazır: {len(overview["videos"])} video.')
+                self.log.emit(f'Koleksiyon özeti hazır: {len(overview["videos"])} dosya.')
                 self.overview_ready.emit(slug)
         except Exception as error:  # ozet cikmazsa hazirlanan transkriptler yine kullanilir
             self.log.emit('Koleksiyon özeti çıkarılamadı: ' + str(error))

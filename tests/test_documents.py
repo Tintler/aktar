@@ -187,5 +187,84 @@ class DocumentTests(unittest.TestCase):
         self.assertEqual(parts[-1], 'İkinci paragraf.')
 
 
+W_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+S_NS = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+R_NS = 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+
+
+def write_zip(path, files):
+    import zipfile
+    with zipfile.ZipFile(path, 'w') as archive:
+        for name, text in files.items():
+            archive.writestr(name, text)
+
+
+class OfficeAndEbookTests(unittest.TestCase):
+    """F68: Word, Excel/CSV ve EPUB zip/XML'den ek kutuphanesiz okunur."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+
+    def test_docx_keeps_word_page_breaks(self):
+        path = self.root / 'rapor.docx'
+        write_zip(path, {'word/document.xml': (
+            f'<w:document {W_NS}><w:body>'
+            '<w:p><w:r><w:t>Giriş bölümü.</w:t></w:r></w:p>'
+            '<w:p><w:r><w:t xml:space="preserve">İkinci </w:t></w:r><w:r><w:t>paragraf.</w:t></w:r></w:p>'
+            '<w:p><w:r><w:br w:type="page"/><w:t>Sonuç: bütçe aşıldı.</w:t></w:r></w:p>'
+            '</w:body></w:document>')})
+        pages, segments = documents.extract(path)
+        self.assertEqual(pages, 2)
+        self.assertEqual([(item['start'], item['text']) for item in segments],
+                         [(1.0, 'Giriş bölümü.'), (1.0, 'İkinci paragraf.'),
+                          (2.0, 'Sonuç: bütçe aşıldı.')])
+
+    def test_xlsx_rows_use_headers_and_csv_delimiter(self):
+        path = self.root / 'satis.xlsx'
+        write_zip(path, {
+            'xl/workbook.xml': f'<workbook {S_NS} {R_NS}><sheets><sheet name="Ocak" r:id="rId1"/>'
+                               '</sheets></workbook>',
+            'xl/_rels/workbook.xml.rels': (
+                '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                '<Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>'),
+            'xl/sharedStrings.xml': f'<sst {S_NS}><si><t>Ürün</t></si><si><t>Adet</t></si>'
+                                    '<si><t>Çay</t></si></sst>',
+            'xl/worksheets/sheet1.xml': (
+                f'<worksheet {S_NS}><sheetData>'
+                '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>'
+                '<row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>42</v></c></row>'
+                '</sheetData></worksheet>')})
+        pages = documents.pages_of(path)
+        self.assertEqual(len(pages), 1)
+        self.assertIn('Ocak · sütunlar: Ürün, Adet', pages[0])
+        self.assertIn('Satır 2: Ürün: Çay; Adet: 42', pages[0])
+        csv_path = self.root / 'liste.csv'
+        csv_path.write_text('Ad;Şehir\nAyşe;İzmir\n', encoding='utf-8')
+        self.assertIn('Satır 2: Ad: Ayşe; Şehir: İzmir', documents.pages_of(csv_path)[0])
+
+    def test_epub_chapters_in_spine_order(self):
+        path = self.root / 'kitap.epub'
+        write_zip(path, {
+            'META-INF/container.xml': (
+                '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles>'
+                '<rootfile full-path="OEBPS/content.opf"/></rootfiles></container>'),
+            'OEBPS/content.opf': (
+                '<package xmlns="http://www.idpf.org/2007/opf"><manifest>'
+                '<item id="b" href="text/b.xhtml"/><item id="a" href="text/a.xhtml"/></manifest>'
+                '<spine><itemref idref="a"/><itemref idref="b"/></spine></package>'),
+            'OEBPS/text/a.xhtml': '<html><head><style>p{}</style></head><body><h1>Bölüm 1</h1>'
+                                  '<p>Yolculuk başlar.</p></body></html>',
+            'OEBPS/text/b.xhtml': '<html><body><p>Son &amp; dönüş.</p></body></html>'})
+        pages = documents.pages_of(path)
+        self.assertEqual(pages, ['Bölüm 1\n\nYolculuk başlar.', 'Son & dönüş.'])
+        self.assertEqual(library.kind_of(path), 'document')
+        broken = self.root / 'bozuk.epub'
+        broken.write_bytes(b'zip degil')
+        with self.assertRaises(ValueError):
+            documents.pages_of(broken)
+
+
 if __name__ == '__main__':
     unittest.main()

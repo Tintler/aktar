@@ -36,7 +36,7 @@ class LibraryTests(unittest.TestCase):
         self.media = self.root / 'media'
         touch(self.media / 'Ders 10.mkv')
         touch(self.media / 'Ders 2.mp4')
-        touch(self.media / 'notlar.docx')
+        touch(self.media / 'notlar.pptx')
         touch(self.media / 'alt' / 'Ders 3.webm')
         touch(self.media / '.gizli' / 'x.mkv')
 
@@ -96,7 +96,7 @@ class LibraryTests(unittest.TestCase):
         self.assertFalse(library.add_folder(data, self.media / 'alt'))
         outside = touch(self.root / 'tek.mkv')
         self.assertEqual(library.add_files(data, [outside, self.media / 'Ders 2.mp4',
-                                                  self.media / 'notlar.docx']), 1)
+                                                  self.media / 'notlar.pptx']), 1)
         self.assertEqual(data['files'], [str(outside)])
         outside.unlink()
         entries, _ = library.scan(data)

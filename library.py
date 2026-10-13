@@ -32,6 +32,8 @@ from media import VIDEO_EXTENSIONS
 VERSION = 1
 # Ileride: 'image', 'table' (her tur kendi metin cikaricisiyla).
 KINDS = {'video': VIDEO_EXTENSIONS, 'document': documents.SUFFIXES}
+DOCUMENT_LABELS = {'text': 'Metin dosyası', 'word': 'Word metni', 'sheet': 'Tablo',
+                   'epub': 'E-kitap'}
 SKIPPED_DIRS = {'$recycle.bin', 'system volume information', '__pycache__', 'node_modules'}
 
 
@@ -395,8 +397,8 @@ def describe(entry, base=None, cfg=None):
         label = 'Altyazı' + (' · ' + source['language'] if source.get('language') else '')
     elif source.get('kind') == 'pdf':
         label = 'PDF metni'
-    elif source.get('kind') == 'text':
-        label = 'Metin dosyası'
+    elif source.get('kind') in DOCUMENT_LABELS:
+        label = DOCUMENT_LABELS[source['kind']]
     else:
         label = 'Whisper' + (' · ' + source['model'] if source.get('model') else '')
     indexed = is_indexed(entry['path'], best, _embedding_cfg(cfg), base)
