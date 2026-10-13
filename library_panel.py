@@ -38,8 +38,8 @@ from gui import (THEME, DropdownCombo, HoverIconButton, ToggleSwitch, _alive, ca
 
 PAGE_EMPTY, PAGE_LIST, PAGE_DETAIL = 0, 1, 2
 SCOPE_ALL, SCOPE_SELECTED = 'Tüm koleksiyon', 'Seçili dosyalar'
-CHAT_GREETING = ('Bu koleksiyondaki videolar hakkında soru sorun; cevaplar hangi videoda, '
-                 'hangi dakikada geçtiğini gösterir.')
+CHAT_GREETING = ('Bu koleksiyondaki dosyalar hakkında soru sorun; cevaplar hangi dosyada, '
+                 'hangi dakikada ya da sayfada geçtiğini gösterir.')
 MIN_SEARCH_CHARS = 3     # transkript aramasi bu uzunluktan sonra baslar
 HIT_LIMIT = 200          # listede gosterilen en fazla transkript eslesmesi
 SEARCH_DELAY_MS = 250
@@ -50,6 +50,7 @@ REPEATED_ERROR_LIMIT = 3  # ust uste ayni hata: kuyruk durur
 WARN = '#f0b44c'  # onay bekleyen (Whisper) durumlar; tasarim taslagindaki amber
 KIND_LABELS = {'video': 'Video', 'document': 'Belge'}
 KIND_ICONS = {'video': 'video', 'document': 'document'}
+KIND_FILTERS = {'video': 'Videolar', 'document': 'Belgeler'}
 STATUS_TEXT = {'ready': 'Hazır', 'transcript': 'Metin hazır', 'pending': 'Bekliyor',
                'no_subtitle': 'Altyazı yok · Whisper bekliyor',
                'no_text': 'Metin yok (taranmış PDF)', 'missing': 'Bulunamadı'}
@@ -89,6 +90,9 @@ QListWidget#libHits {{ background:{panel}; border:1px solid {border}; border-rad
     outline:none; padding:4px; }}
 QListWidget#libHits::item {{ color:{secondary}; padding:6px 8px; border-radius:6px; }}
 QListWidget#libHits::item:hover {{ background:{panel_alt}; color:{accent}; }}
+QListWidget#libHits::item:selected {{ background:#1a2530; color:{accent}; }}
+QTableWidget#libTable {{ selection-background-color:#1a2530; selection-color:{accent}; }}
+QTableWidget#libTable::item:selected {{ background:#1a2530; color:{accent}; }}
 QMenu {{ background:{panel}; border:1px solid {drop_border}; padding:6px; }}
 QMenu::item {{ padding:7px 26px 7px 18px; border-radius:6px; color:{text}; }}
 QMenu::item:selected {{ background:{panel_alt}; color:{accent}; }}
@@ -119,8 +123,14 @@ def format_size(path):
 
 
 def file_filter():
-    patterns = ' '.join('*' + suffix for suffix in library.supported_suffixes())
-    return f'Desteklenen dosyalar ({patterns})'
+    """Dosya sec penceresi: once tum desteklenenler, sonra tur tur."""
+    def patterns(suffixes):
+        return ' '.join('*' + suffix for suffix in suffixes)
+
+    groups = [f'Desteklenen dosyalar ({patterns(library.supported_suffixes())})']
+    groups += [f'{KIND_FILTERS.get(kind, kind)} ({patterns(suffixes)})'
+               for kind, suffixes in library.KINDS.items()]
+    return ';;'.join(groups)
 
 
 def _dropped_paths(event):
@@ -677,7 +687,7 @@ class LibraryPanel(QWidget):
         tools = QHBoxLayout()
         tools.setSpacing(8)
         self.search = QLineEdit()
-        self.search.setPlaceholderText('Dosya adında ve transkriptlerde ara…')
+        self.search.setPlaceholderText('Dosya adında ve içerikte ara…')
         self.search.setClearButtonEnabled(True)
         self.search.setToolTip('Model kullanmadan anında arar; büyük/küçük harf ve Türkçe '
                                'karakter farkı yok sayılır (asiri = aşırı).')
@@ -711,6 +721,7 @@ class LibraryPanel(QWidget):
 
         frame, inner = card(spacing=0, margins=(0, 0, 0, 0), shadow=False)
         self.table = QTableWidget(0, 6)
+        self.table.setObjectName('libTable')
         self.table.setHorizontalHeaderLabels(['', 'Dosya', 'Klasör', 'Uzunluk',
                                               'Metin kaynağı', 'Durum'])
         header = self.table.horizontalHeader()
@@ -824,7 +835,7 @@ class LibraryPanel(QWidget):
         self.ask_button.clicked.connect(self.ask_collection)
         row.addWidget(self.ask_button)
         column.addLayout(row)
-        foot = QLabel('Yapay zekâ yanlış bilgi verebilir; atıflara tıklayıp videoda doğrulayın.')
+        foot = QLabel('Yapay zekâ yanlış bilgi verebilir; atıflara tıklayıp kaynağında doğrulayın.')
         foot.setObjectName('hint')
         foot.setWordWrap(True)
         column.addWidget(foot)
@@ -1206,7 +1217,7 @@ class LibraryPanel(QWidget):
         if not hits:
             self.hits_list.hide()
             self.hits_label.setVisible(len(query) >= MIN_SEARCH_CHARS)
-            self.hits_label.setText('Transkriptlerde eşleşme yok.')
+            self.hits_label.setText('İçerikte eşleşme yok.')
             return
         for hit in hits:
             where = qa.format_position(hit['start'], library.kind_of(hit['path']) == 'document')
@@ -1215,7 +1226,7 @@ class LibraryPanel(QWidget):
             item.setData(Qt.UserRole, (str(hit['path']), hit['start']))
             self.hits_list.addItem(item)
         more = ' (ilk %d gösteriliyor)' % HIT_LIMIT if len(hits) >= HIT_LIMIT else ''
-        self.hits_label.setText(f'Transkriptlerde {len(hits)} eşleşme · {len(matched)} dosya'
+        self.hits_label.setText(f'İçerikte {len(hits)} eşleşme · {len(matched)} dosya'
                                 f'{more} — tıklayınca o anda / o sayfada açılır')
         self.hits_label.show()
         row = self.hits_list.sizeHintForRow(0) or 30
