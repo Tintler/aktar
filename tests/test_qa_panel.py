@@ -104,6 +104,21 @@ class QaWindowContractTests(unittest.TestCase):
         hide = ast.get_source_segment(self.window_source, _method(panel, 'hideEvent'))
         self.assertIn('self.player.pause()', hide)
 
+    def test_collection_citation_opens_video_at_time_after_load(self):
+        """F58: koleksiyon atifi videoyu acar; konum video yuklenince uygulanir."""
+        library = _class(self.library, 'LibraryPanel')
+        cite = ast.get_source_segment(self.library_source, _method(library, 'open_cite'))
+        self.assertIn('self.open_detail(entry)', cite)
+        self.assertIn('seek_when_ready(', cite)
+        link = ast.get_source_segment(self.library_source, _method(library, '_build_chat'))
+        self.assertIn('setOpenLinks(False)', link)
+        self.assertIn('anchorClicked.connect(self._on_chat_link)', link)
+        panel = _class(self.window, 'VideoQAPanel')
+        seek = ast.get_source_segment(self.window_source, _method(panel, 'seek_when_ready'))
+        self.assertIn('self._pending_seek = (ms, play)', seek)
+        setup = ast.get_source_segment(self.window_source, _method(panel, '_setup_player'))
+        self.assertIn('mediaStatusChanged.connect(self._apply_pending_seek)', setup)
+
     def test_gui_registers_itself_when_run_as_script(self):
         self.assertIn("sys.modules.setdefault('gui', sys.modules[__name__])", self.gui_source)
 

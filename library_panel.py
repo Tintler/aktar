@@ -13,6 +13,8 @@ SALT-OKUNUR: "Koleksiyondan cikar" yalnizca kaydi degistirir.
 from __future__ import annotations
 
 import copy
+import html
+import re
 import threading
 from pathlib import Path
 
@@ -22,16 +24,19 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QDialog, QFileDi
                                QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMenu, QMessageBox, QProgressBar,
                                QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem,
-                               QVBoxLayout, QWidget)
+                               QTextBrowser, QVBoxLayout, QWidget)
 
+import collection_qa
 import library
 import qa
 import speech
 from app_core import Client, GracefulStop, load_config
-from gui import (THEME, HoverIconButton, ToggleSwitch, _alive, card, highlight_rows,
-                 tinted_icon, window_icon)
+from gui import (THEME, DropdownCombo, HoverIconButton, ToggleSwitch, _alive, card,
+                 highlight_rows, tinted_icon, window_icon)
 
 PAGE_EMPTY, PAGE_LIST, PAGE_DETAIL = 0, 1, 2
+SCOPE_ALL, SCOPE_SELECTED = 'Tüm koleksiyon', 'Seçili dosyalar'
+CITE_BG = '#18210a'  # atif rozeti zemini (tasarim taslagindaki koyu lime)
 REPEATED_ERROR_LIMIT = 3  # ust uste ayni hata: kuyruk durur
 WARN = '#f0b44c'  # onay bekleyen (Whisper) durumlar; tasarim taslagindaki amber
 KIND_LABELS = {'video': 'Video'}
@@ -68,6 +73,7 @@ QPushButton#libNew {{ background:transparent; border:0; color:{muted}; text-alig
 QPushButton#libNew:hover {{ background:{panel}; color:{accent}; }}
 QPushButton#libBack {{ background:transparent; border:0; color:{secondary}; padding:6px 10px; }}
 QPushButton#libBack:hover {{ background:{panel_alt}; color:{accent}; }}
+QTextBrowser#libChatView {{ background:transparent; border:0; color:{text}; }}
 QFrame#libDrop {{ background:{panel}; border:1.5px dashed {drop_border}; border-radius:16px; }}
 """
 
@@ -361,6 +367,81 @@ class QueueWorker(QObject):
         self.finished.emit(done, failed, self.cancel_event.is_set())
 
 
+def inline_html(text):
+    """Model metnini guvenli HTML'e cevirir: kacis, **kalin**, basliklar, madde imleri."""
+    value = html.escape(text, quote=False)
+    value = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', value)
+    value = re.sub(r'(?m)^[ \t]*#{1,6}[ \t]+(.+)$', r'<b>\1</b>', value)
+    value = re.sub(r'(?m)^([ \t]*)[-*][ \t]+', r'\1• ', value)
+    return value.replace('\n', '<br>')
+
+
+def chat_html(entries, targets):
+    """Koleksiyon sohbeti HTML'i. Atiflar 'cite:<n>' baglantisidir; n -> targets[n]
+    (video yolu, saniye). `targets` her cizimde yeniden doldurulur."""
+    targets.clear()
+
+    def link(path, start, label):
+        targets.append((path, start))
+        return ('<a href="cite:%d" style="color:%s; text-decoration:none; font-weight:600;">'
+                '<span style="background-color:%s;">&nbsp;%s&nbsp;</span></a>'
+                % (len(targets) - 1, THEME['accent'], CITE_BG, html.escape(label)))
+
+    blocks = []
+    for kind, value in entries:
+        if kind == 'user':
+            blocks.append(
+                '<table width="100%" cellspacing="0" cellpadding="0" style="margin:10px 0 6px 0;">'
+                '<tr><td align="right"><table cellspacing="0" cellpadding="9" bgcolor="{bg}">'
+                '<tr><td>{text}</td></tr></table></td></tr></table>'.format(
+                    bg=THEME['panel_alt'], text=html.escape(value)))
+        elif kind == 'assistant':
+            body = []
+            for part_kind, part in value['parts']:
+                if part_kind == 'cite':
+                    body.append(' '.join(link(cite['video'], cite['start'], cite['label'])
+                                         for cite in part))
+                else:
+                    body.append(inline_html(part))
+            blocks.append('<p style="margin:6px 0 6px 0;">' + ''.join(body) + '</p>')
+            if value['sources']:
+                sources = ' &nbsp; '.join(
+                    link(item['video'], item['start'], item['label'])
+                    + ' %s <span style="color:%s;">(%d)</span>' % (
+                        html.escape(item['title']), THEME['muted'], item['count'])
+                    for item in value['sources'])
+                blocks.append('<p style="margin:0 0 14px 0; color:%s; font-size:12px;">'
+                              'Kaynaklar: %s</p>' % (THEME['secondary'], sources))
+        elif kind == 'error':
+            blocks.append('<p style="margin:6px 0 12px 0; color:%s;">%s</p>'
+                          % (THEME['secondary'], html.escape(value)))
+        else:  # note / pending
+            blocks.append('<p style="margin:6px 0 12px 0; color:%s;"><i>%s</i></p>'
+                          % (THEME['muted'], html.escape(value)))
+    return ''.join(blocks)
+
+
+class AskWorker(QObject):
+    """Koleksiyon sorusu: arama + model cevabi arka planda."""
+
+    finished = Signal(str, object, str)  # (koleksiyon slug, tur, hata)
+
+    def __init__(self, slug, session, question):
+        super().__init__()
+        self.slug = slug
+        self.session = session
+        self.question = question
+
+    @Slot()
+    def run(self):
+        try:
+            turn = self.session.ask(self.question)
+        except Exception as error:  # baglanti/model hatasi sohbete yazilir
+            self.finished.emit(self.slug, None, str(error))
+            return
+        self.finished.emit(self.slug, turn, '')
+
+
 class LibraryPanel(QWidget):
     """Kutuphane sekmesi: koleksiyon secimi, dosya tablosu ve oynatici ayrintisi."""
 
@@ -382,6 +463,9 @@ class LibraryPanel(QWidget):
         self._queue = None     # (thread, worker): toplu transkript isi
         self._queue_total = 0
         self._queue_name = ''
+        self._chats = {}       # koleksiyon slug -> {'session', 'entries'} (F58 sohbet)
+        self._ask_job = None   # (thread, worker): calisan koleksiyon sorusu
+        self._cite_targets = []
         self.setStyleSheet(LIBRARY_STYLE.format(**THEME))
         self.scanned.connect(self._scan_finished)
         self._build()
@@ -560,6 +644,7 @@ class LibraryPanel(QWidget):
         self.table.cellDoubleClicked.connect(lambda row, _column: self.open_row(row))
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._table_menu)
+        self.table.itemSelectionChanged.connect(self._update_chat_state)
         inner.addWidget(self.table, 1)
         foot = QLabel('Çift tıkla: oynatıcı ve soru sor · Sağ tık: altyazı çevir, '
                       'konumu aç, koleksiyondan çıkar')
@@ -603,26 +688,49 @@ class LibraryPanel(QWidget):
         return self.queue_strip
 
     def _build_chat(self):
+        """Koleksiyona sor (F58): indeksli videolar uzerinde atifli sohbet."""
         chat = QFrame()
         chat.setObjectName('libChat')
-        chat.setFixedWidth(400)
+        chat.setFixedWidth(420)
         column = QVBoxLayout(chat)
         column.setContentsMargins(18, 16, 18, 16)
-        column.setSpacing(12)
+        column.setSpacing(10)
+        head = QHBoxLayout()
         title = QLabel('Koleksiyona sor')
         title.setObjectName('libChatTitle')
-        column.addWidget(title)
-        note = QLabel('Tüm dosyalara birden soru sorma, dosyalar toplu hazırlandıktan sonra '
-                      'burada açılacak.\n\nŞimdilik bir videoya çift tıklayıp o video '
-                      'hakkında soru sorabilirsiniz.')
-        note.setObjectName('libChatNote')
-        note.setWordWrap(True)
-        column.addWidget(note)
-        column.addStretch(1)
-        ask = QLineEdit()
-        ask.setPlaceholderText('Tüm dosyalara sor…')
-        ask.setEnabled(False)
-        column.addWidget(ask)
+        head.addWidget(title, 1)
+        self.scope_combo = DropdownCombo()
+        self.scope_combo.addItems([SCOPE_ALL, SCOPE_SELECTED])
+        self.scope_combo.setToolTip('Soru tüm hazır dosyalara mı, tabloda seçili olanlara mı sorulsun')
+        self.scope_combo.currentIndexChanged.connect(lambda _index: self._update_chat_state())
+        head.addWidget(self.scope_combo)
+        column.addLayout(head)
+        self.chat_view = QTextBrowser()
+        self.chat_view.setObjectName('libChatView')
+        self.chat_view.setOpenLinks(False)
+        self.chat_view.anchorClicked.connect(self._on_chat_link)
+        column.addWidget(self.chat_view, 1)
+        self.chat_note = QLabel('')
+        self.chat_note.setObjectName('hint')
+        self.chat_note.setWordWrap(True)
+        column.addWidget(self.chat_note)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self.ask_input = QLineEdit()
+        self.ask_input.setPlaceholderText('Tüm dosyalara sor…')
+        self.ask_input.returnPressed.connect(self.ask_collection)
+        row.addWidget(self.ask_input, 1)
+        self.ask_button = HoverIconButton('')
+        self.ask_button.setObjectName('iconOnly')
+        self.ask_button.setTintedIcon('send', THEME['text'])
+        self.ask_button.setToolTip('Gönder')
+        self.ask_button.clicked.connect(self.ask_collection)
+        row.addWidget(self.ask_button)
+        column.addLayout(row)
+        foot = QLabel('Yapay zekâ yanlış bilgi verebilir; atıflara tıklayıp videoda doğrulayın.')
+        foot.setObjectName('hint')
+        foot.setWordWrap(True)
+        column.addWidget(foot)
         return chat
 
     def _build_detail(self):
@@ -681,6 +789,7 @@ class LibraryPanel(QWidget):
         self.slug = slug
         self.title_label.setText(self.data['title'])
         self._fill_folders()
+        self._render_chat()
         self.rescan()
 
     def _fill_folders(self):
@@ -738,6 +847,7 @@ class LibraryPanel(QWidget):
         self._fill_folders()
         self._fill_chips()
         self._fill_table()
+        self._update_chat_state()
 
     def _save_and_refresh(self, message=''):
         try:
@@ -942,6 +1052,7 @@ class LibraryPanel(QWidget):
         self.infos[row] = library.describe(self.entries[row])
         self._fill_row(row)
         self._update_meta()
+        self._update_chat_state()
 
     @staticmethod
     def _where(entry):
@@ -1031,6 +1142,112 @@ class LibraryPanel(QWidget):
         if panel.busy():
             self._qa_retired.append(panel)
         panel.retire()
+
+    # --- koleksiyona sor (F58) ---------------------------------------------
+    def _chat(self):
+        return self._chats.setdefault(self.slug, {'session': None, 'entries': [
+            ('note', 'Bu koleksiyondaki videolar hakkında soru sorun; cevaplar hangi videoda, '
+                     'hangi dakikada geçtiğini gösterir.')]})
+
+    def _scope_videos(self):
+        """Soru kapsami: hazir (indeksli) videolar; 'Secili dosyalar'da yalnizca secililer."""
+        rows = (self._selected_rows() if self.scope_combo.currentText() == SCOPE_SELECTED
+                else range(len(self.entries)))
+        return [self.entries[row]['path'] for row in rows
+                if row < len(self.infos) and self.infos[row]['status'] == 'ready']
+
+    def _update_chat_state(self):
+        if self.data is None:
+            return
+        cfg = library._embedding_cfg(None)
+        model = str(cfg.get('embedding_model', '')).strip()
+        ready = sum(1 for info in self.infos if info['status'] == 'ready')
+        videos = self._scope_videos()
+        busy = self._ask_job is not None
+        if not model:
+            note = 'Embedding modeli seçilmedi: Ayarlar → Kütüphane indeksi.'
+        elif not ready:
+            note = 'Henüz indeksli video yok: önce "Hepsini hazırla".'
+        elif not videos:
+            note = 'Seçili dosyalar arasında hazır video yok.'
+        else:
+            waiting = len(self.entries) - ready
+            note = f'{len(videos)} hazır video' + (
+                f' · {waiting} dosya henüz hazır değil'
+                if waiting and self.scope_combo.currentText() == SCOPE_ALL else '')
+        self.chat_note.setText('Cevap hazırlanıyor…' if busy else note)
+        enabled = bool(videos) and not busy and bool(model)
+        self.ask_input.setEnabled(enabled)
+        self.ask_button.setEnabled(enabled)
+        self.scope_combo.setEnabled(not busy)
+
+    def _render_chat(self):
+        if self.data is None:
+            return
+        self.chat_view.setHtml(chat_html(self._chat()['entries'], self._cite_targets))
+        bar = self.chat_view.verticalScrollBar()
+        bar.setValue(bar.maximum())
+
+    def ask_collection(self):
+        question = ' '.join(self.ask_input.text().split())
+        videos = self._scope_videos()
+        if not question or not videos or self._ask_job is not None:
+            return
+        chat = self._chat()
+        session = chat['session']
+        if session is None or [str(path) for path in session.videos] != [str(p) for p in videos]:
+            # Kapsam degisti: etiketler yeni listeye gore; konusma gecmisi korunur.
+            fresh = collection_qa.CollectionQA(videos, self.data['title'], log=self._log)
+            if session is not None:
+                fresh.history = session.history
+            session = chat['session'] = fresh
+        chat['entries'] += [('user', question), ('pending', 'Videolarda aranıyor…')]
+        self.ask_input.clear()
+        worker = AskWorker(self.slug, session, question)
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._ask_finished)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(thread.deleteLater)
+        self._ask_job = (thread, worker)
+        self._render_chat()
+        self._update_chat_state()
+        thread.start()
+
+    def _ask_finished(self, slug, turn, error):
+        self._ask_job = None
+        chat = self._chats.get(slug)
+        if chat is not None:
+            chat['entries'] = [item for item in chat['entries'] if item[0] != 'pending']
+            chat['entries'].append(('assistant', turn) if turn is not None
+                                   else ('error', 'Cevap alınamadı: ' + error))
+        if error:
+            self._log('Koleksiyon sorusu: ' + error)
+        if slug == self.slug:
+            self._render_chat()
+        self._update_chat_state()
+
+    def _on_chat_link(self, url):
+        text = url.toString()
+        if not text.startswith('cite:'):
+            return
+        try:
+            path, start = self._cite_targets[int(text[5:])]
+        except (ValueError, IndexError):
+            return
+        self.open_cite(path, start)
+
+    def open_cite(self, path, seconds):
+        """Atiftaki videoyu acar ve o ana gider (video yuklenince)."""
+        key = library._key(path)
+        entry = next((item for item in self.entries if library._key(item['path']) == key), None)
+        if entry is None:  # baska koleksiyona gecildiyse
+            entry = {'path': Path(path), 'kind': library.kind_of(path) or 'video', 'root': None,
+                     'missing': not Path(path).is_file(), 'new': False}
+        self.open_detail(entry)
+        if self.qa_panel is not None and self.qa_panel.video == entry['path']:
+            self.qa_panel.seek_when_ready(int(float(seconds) * 1000))
 
     # --- toplu hazirlik (F56) ------------------------------------------------
     def prepare_all(self):
@@ -1150,6 +1367,9 @@ class LibraryPanel(QWidget):
             worker.resume_event.set()
             thread.quit()
             thread.wait(5000)
+        if self._ask_job is not None:
+            self._ask_job[0].quit()
+            self._ask_job[0].wait(3000)
         for panel in [self.qa_panel] + self._qa_retired:
             if panel is not None and _alive(panel):
                 panel.shutdown()

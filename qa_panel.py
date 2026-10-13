@@ -413,6 +413,7 @@ class VideoQAPanel(QWidget):
         self._asking = False
         self._ready = False
         self._muted_volume = None
+        self._pending_seek = None   # (ms, oynat): video yuklenince gidilecek an
         self._retired = False
         self._subtitle_key = None   # None: altyazi kapali
         self._timelines = {}        # kaynak anahtari -> qa.SubtitleTimeline
@@ -611,6 +612,7 @@ class VideoQAPanel(QWidget):
         self.player.positionChanged.connect(self.on_position)
         self.player.playbackStateChanged.connect(self.on_playback_state)
         self.player.errorOccurred.connect(self.on_player_error)
+        self.player.mediaStatusChanged.connect(self._apply_pending_seek)
         # Altyazi metnini Aktar cizer (tum kaynaklar ayni yoldan); Qt'nin kendi
         # gomulu altyazi secimi kapali tutulur.
         self.player.tracksChanged.connect(lambda: self.player.setActiveSubtitleTrack(-1))
@@ -679,6 +681,24 @@ class VideoQAPanel(QWidget):
         self.seek_bar.set_position(ms)
         if play:
             self.player.play()
+
+    def seek_when_ready(self, ms, play=True):
+        """Koleksiyon atifindan acilinca: video yuklendiyse hemen, degilse yuklenince gider.
+
+        Kaynak yuklenmeden yapilan setPosition QMediaPlayer'da yok sayilabilir."""
+        if self.player.mediaStatus() in (QMediaPlayer.LoadedMedia, QMediaPlayer.BufferedMedia,
+                                         QMediaPlayer.BufferingMedia, QMediaPlayer.EndOfMedia):
+            self._pending_seek = None
+            self.seek_to(ms, play=play)
+        else:
+            self._pending_seek = (ms, play)
+
+    def _apply_pending_seek(self, status):
+        if self._pending_seek is not None and status in (QMediaPlayer.LoadedMedia,
+                                                         QMediaPlayer.BufferedMedia):
+            ms, play = self._pending_seek
+            self._pending_seek = None
+            self.seek_to(ms, play=play)
 
     def toggle_mute(self):
         if self._muted_volume is None:
