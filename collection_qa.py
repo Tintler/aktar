@@ -103,6 +103,21 @@ class CollectionQA:
             text = text[:limit].rsplit('\n', 1)[0]
         return text
 
+    def whole_hits(self, cfg):
+        """Tek dosyalik sohbette (F66) metnin tamami baglama sigiyorsa arama gerekmez.
+
+        Donen: tum metni kapsayan tek 'isabet' ya da None (birden cok dosya / sigmiyor)."""
+        if len(self.videos) != 1:
+            return None
+        data = self._video_lines(self.videos[0])
+        if not data or not data[1]:
+            return None
+        lines = data[1]
+        budget = int(cfg.get('qa_context_chars', 24000)) - len(self.map_text(cfg))
+        if sum(len(line['text']) + 12 for line in lines) > budget:
+            return None
+        return [{'video': str(self.videos[0]), 'start': lines[0]['start'], 'end': lines[-1]['end']}]
+
     def build_context(self, hits, cfg):
         """Arama sonuclarindan baglam metni. Donen: (metin, {etiket: video})."""
         overview = self.map_text(cfg)
@@ -158,8 +173,9 @@ class CollectionQA:
             raise ValueError('Soru boş olamaz.')
         cfg = self.config_provider()
         client = client or Client(cfg, log=self.log)
-        hits = search_index.search(self.videos, self._query(question), cfg, client,
-                                   limit=HIT_LIMIT, base=self.base, log=self.log)
+        hits = self.whole_hits(cfg) or search_index.search(
+            self.videos, self._query(question), cfg, client, limit=HIT_LIMIT, base=self.base,
+            log=self.log)
         if not hits:
             raise ValueError('İndekste bu soruyla ilgili bir şey bulunamadı. Dosyalar '
                              '"Hepsini hazırla" ile indekslendi mi?')

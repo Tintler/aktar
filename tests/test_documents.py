@@ -132,6 +132,29 @@ class DocumentTests(unittest.TestCase):
         self.assertIsNone(collection_qa.summarize_video(self.pdf, lambda: dict(cfg), QUIET,
                                                         base=self.work))
 
+    def test_single_short_document_is_answered_without_index(self):
+        """F66: tek belgeye soru; metin baglama sigiyorsa embedding/indeks gerekmez."""
+        cfg = dict(DEFAULT_CONFIG, embedding_model='', auto_retry_count=1)
+        library.transcribe(self.entry(self.pdf), cfg, base=self.work, log=QUIET)
+
+        class NoEmbed(FakeClient):
+            def embed(self, texts):
+                raise AssertionError('kisa belgede arama yapilmamali')
+
+        chat = collection_qa.CollectionQA([self.pdf], 'Kılavuz', lambda: dict(cfg), log=QUIET,
+                                          base=self.work)
+        self.assertIsNotNone(chat.whole_hits(cfg))
+        client = NoEmbed()
+        turn = chat.ask('filtre', client)
+        self.assertIn('[s.1] Kullanım Kılavuzu', client.messages[0]['content'])
+        self.assertEqual([cite['label'] for kind, value in turn['parts'] if kind == 'cite'
+                          for cite in value], ['V1 s.2'])
+        tiny = dict(cfg, qa_context_chars=1000)
+        long_doc = collection_qa.CollectionQA([self.pdf], 'K', lambda: tiny, log=QUIET,
+                                              base=self.work)
+        long_doc._video_lines(self.pdf)[1].extend([{'start': 2.0, 'end': 2.0, 'text': 'x' * 900}])
+        self.assertIsNone(long_doc.whole_hits(tiny))
+
     def test_paragraphs_split_long_blocks_at_sentences(self):
         text = ('Bir cümle burada. ' * 60).strip() + '\n\nİkinci paragraf.'
         parts = documents.paragraphs(text)
