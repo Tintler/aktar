@@ -61,6 +61,9 @@ DEFAULT_CONFIG = {
     'embedding_model': '',
     'embedding_query_template': 'task: search result | query: {query}',
     'embedding_document_template': 'title: {title} | text: {text}',
+    # Gorsel okuma (F69): taranmis PDF sayfalari ve gorseller. Bos: sohbet modeli kullanilir
+    # (gorsel destekli olmali; ornegin gemma-4). OCR'a ozel model (GLM-OCR vb.) secilebilir.
+    'vision_model': '',
     # Reasoning/thinking ureten modellerde dusunmeyi kapatma denemesi
     # (LM Studio chat_template_kwargs desteklerse). Desteklenmezse yok sayilir;
     # o durumda LM Studio model preset'inden thinking kapatilmalidir.
@@ -204,6 +207,8 @@ def validate_config(cfg):
         raise ValueError('whisper_language boş (otomatik) veya dil kodu (örn. en) olmalı.')
     if not isinstance(cfg.get('whisper_cuda_dir', ''), str):
         raise ValueError('whisper_cuda_dir klasör yolu (metin) olmalı.')
+    if not isinstance(cfg.get('vision_model', ''), str):
+        raise ValueError('vision_model model adı (metin) olmalı.')
     if not isinstance(cfg.get('embedding_model', ''), str):
         raise ValueError('embedding_model model adı (metin) olmalı.')
     for key, field in (('embedding_query_template', '{query}'),
@@ -543,6 +548,23 @@ class Client:
     def models(self):
         value = self.request('/models')
         return [item['id'] for item in value.get('data', []) if item.get('id')]
+
+    def vision(self, prompt, image, mime='image/png', max_tokens=4096):
+        """Gorsel + metin istegi (F69): `vision_model` (bossa sohbet modeli) ile."""
+        import base64
+        model = str(self.cfg.get('vision_model', '')).strip() or self.cfg['model']
+        payload = {'model': model, 'temperature': 0, 'max_tokens': max_tokens, 'stream': False,
+                   'messages': [{'role': 'user', 'content': [
+                       {'type': 'text', 'text': prompt},
+                       {'type': 'image_url', 'image_url': {
+                           'url': f'data:{mime};base64,' + base64.b64encode(image).decode()}}]}]}
+        if self.cfg.get('disable_thinking'):
+            payload['chat_template_kwargs'] = {'enable_thinking': False}
+        value = self.request('/chat/completions', payload)
+        try:
+            return str(value['choices'][0]['message'].get('content') or '')
+        except (KeyError, IndexError, TypeError):
+            raise ValueError('Beklenmeyen API çıktısı biçimi.') from None
 
     def embed(self, texts):
         """Metinleri `embedding_model` ile vektore cevirir (giris sirasiyla)."""

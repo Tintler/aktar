@@ -13,10 +13,11 @@ import threading
 from bisect import bisect_right
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, Qt, QThread, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QTextCharFormat, QTextCursor
-from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QPushButton, QSplitter,
-                               QTextBrowser, QVBoxLayout, QWidget)
+from PySide6.QtCore import QEvent, QPointF, Qt, QThread, QUrl, Signal
+from PySide6.QtGui import (QColor, QDesktopServices, QFont, QPixmap, QTextCharFormat,
+                           QTextCursor)
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+                               QScrollArea, QSplitter, QTextBrowser, QVBoxLayout, QWidget)
 
 import collection_qa
 import documents
@@ -25,6 +26,7 @@ from app_core import load_config
 from chat_render import AskWorker, chat_html
 from gui import THEME, HoverIconButton, card, section_label
 
+VISION_PAGES_ON_OPEN = 20  # acilista gorsel modelle okunacak en fazla taranmis sayfa
 GREETING = ('Bu belge hakkında soru sorun; cevaplar hangi sayfada geçtiğini gösterir. '
             'Sayfa atfına tıklayınca belge o sayfaya gider.')
 
@@ -33,6 +35,7 @@ class DocumentView(QWidget):
     """Tek belge: solda goruntuleyici (sayfa gezinme), sagda belgeye soru sor."""
 
     prepared = Signal(str)  # hazirlik bitti: hata metni ('' = basarili)
+    vision_progress = Signal(int, int)  # gorsel okuma: (okunan, toplam)
 
     def __init__(self, path, parent=None, log=None):
         super().__init__(parent)
@@ -58,6 +61,7 @@ class DocumentView(QWidget):
         splitter.setStretchFactor(1, 2)
         splitter.setSizes([860, 460])
         self.prepared.connect(self._on_prepared)
+        self.vision_progress.connect(self._on_vision_progress)
         self._render_chat()
         self._set_chat_enabled(False, 'Belge hazırlanıyor…')
         threading.Thread(target=self._prepare, name='aktar-doc-prepare', daemon=True).start()
@@ -95,7 +99,19 @@ class DocumentView(QWidget):
         column.addLayout(bar)
 
         frame, inner = card(spacing=0, margins=(0, 0, 0, 0), shadow=False)
-        if self.kind == 'pdf':
+        if self.kind == 'image':
+            self.view = QScrollArea(self)
+            self.view.setWidgetResizable(True)
+            self.view.setFrameShape(QFrame.NoFrame)
+            self.image_label = QLabel()
+            self.image_label.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
+            self._pixmap = QPixmap(str(self.path))
+            self.view.setWidget(self.image_label)
+            self.view.viewport().installEventFilter(self)  # boyut degisince yeniden sigdir
+            self._pages = 1
+            for widget in (self.prev_button, self.next_button, self.page_label):
+                widget.hide()
+        elif self.kind == 'pdf':
             from PySide6.QtPdf import QPdfDocument
             from PySide6.QtPdfWidgets import QPdfView
             self.document = QPdfDocument(self)
@@ -167,12 +183,27 @@ class DocumentView(QWidget):
 
     # --- hazirlik --------------------------------------------------------------
     def _prepare(self):
-        """Metni cikarir; embedding modeli varsa indeksler (uzun belgede arama icin)."""
-        entry = {'path': self.path, 'kind': 'document', 'root': None, 'missing': False,
-                 'new': False}
+        """Metni cikarir (gerekirse gorsel modelle); embedding modeli varsa indeksler.
+
+        Uzun taranmis PDF'ler (VISION_PAGES_ON_OPEN sayfadan fazla) acilista okunmaz;
+        'Hepsini hazirla'ya birakilir."""
+        entry = {'path': self.path, 'kind': 'image' if self.kind == 'image' else 'document',
+                 'root': None, 'missing': False, 'new': False}
         try:
             cfg = load_config()
-            library.transcribe(entry, cfg, log=self._log)
+            scanned = len(documents.scanned_pages(self.path)) if self.kind == 'pdf' else 0
+            allow = scanned <= VISION_PAGES_ON_OPEN
+            if self.kind == 'image' or (scanned and allow):
+                self._emit_progress(0, max(1, scanned))
+            try:
+                library.transcribe(entry, cfg, log=self._log, allow_vision=allow,
+                                   vision_progress=self._emit_progress)
+            except documents.NoTextError:
+                if allow:
+                    raise
+                raise documents.NoTextError(
+                    f'taranmış belge ({scanned} sayfa); kütüphanede "Hepsini hazırla" ile '
+                    'görü modeliyle okutun.') from None
             if str(cfg.get('embedding_model', '')).strip():
                 try:
                     library.index(entry, cfg, log=self._log)
@@ -182,6 +213,17 @@ class DocumentView(QWidget):
             self._emit_prepared(str(error))
             return
         self._emit_prepared('')
+
+    def _emit_progress(self, done, total):
+        try:
+            self.vision_progress.emit(done, total)
+        except RuntimeError:
+            pass
+
+    def _on_vision_progress(self, done, total):
+        if not self._ready:
+            self.chat_note.setText(f'Görü modeliyle okunuyor… {done}/{total}')
+            self.chat_note.show()
 
     def _emit_prepared(self, error):
         try:
@@ -256,6 +298,8 @@ class DocumentView(QWidget):
 
     # --- gezinme -----------------------------------------------------------------
     def current_page(self):
+        if self.kind == 'image':
+            return 1
         if self.kind == 'pdf':
             return self.view.pageNavigator().currentPage() + 1
         block = self.view.cursorForPosition(self.view.viewport().rect().topLeft()).blockNumber()
@@ -270,7 +314,9 @@ class DocumentView(QWidget):
         """1'den baslayan sayfa numarasina gider (atiftaki s.N)."""
         page = max(1, min(int(page), self._pages))
         self._requested = page
-        if self.kind == 'pdf':
+        if self.kind == 'image':
+            pass
+        elif self.kind == 'pdf':
             navigator = self.view.pageNavigator()
             navigator.jump(page - 1, QPointF(), navigator.currentZoom())
         else:
@@ -285,6 +331,14 @@ class DocumentView(QWidget):
         self.page_label.setText(f's. {page} / {self._pages}')
         self.prev_button.setEnabled(page > 1)
         self.next_button.setEnabled(page < self._pages)
+
+    def eventFilter(self, obj, event):
+        if (self.kind == 'image' and obj is self.view.viewport()
+                and event.type() == QEvent.Resize and not self._pixmap.isNull()):
+            width = max(50, obj.width() - 24)
+            self.image_label.setPixmap(self._pixmap.scaledToWidth(
+                min(width, self._pixmap.width()), Qt.SmoothTransformation))
+        return super().eventFilter(obj, event)
 
     def shutdown(self):
         if self._ask_job is not None:

@@ -89,7 +89,7 @@ class DocumentTests(unittest.TestCase):
         notes = self.root / 'notlar.md'
         notes.write_text('\n'.join(f'satır {index}' for index in range(1, 131)),
                          encoding='utf-8')
-        pages, segments = documents.extract(notes)
+        pages, segments, _read = documents.extract(notes)
         self.assertEqual(pages, 3)
         self.assertEqual(segments[-1]['start'], 3.0)
         scanned = self.root / 'tarama.pdf'
@@ -98,13 +98,63 @@ class DocumentTests(unittest.TestCase):
             documents.extract(scanned)
         entry = self.entry(scanned)
         with self.assertRaises(documents.NoTextError):
-            library.transcribe(entry, dict(DEFAULT_CONFIG), base=self.work, log=QUIET)
+            library.transcribe(entry, dict(DEFAULT_CONFIG), base=self.work, log=QUIET,
+                               allow_vision=False)
         self.assertEqual(library.describe(entry, self.work, {'embedding_model': ''})['status'],
                          'no_text')
         result = library.plan([entry, self.entry(self.pdf)], self.work,
                               cfg={'embedding_model': ''})
         self.assertEqual([item['path'].name for item in result['document']], ['Kılavuz.pdf'])
-        self.assertEqual(len(result['failed']), 1)
+        self.assertEqual(([item['path'].name for item in result['vision']],
+                          result['vision_pages']), (['tarama.pdf'], 2))
+
+    def test_scanned_pages_and_images_are_read_with_vision_model(self):
+        """F69: metinsiz PDF sayfalari ve gorseller gorsel modelle okunur (sahte model)."""
+        seen = []
+
+        def reader(_cfg, _log=None):
+            def read(png, prompt):
+                seen.append((png[:8], prompt[:20]))
+                return ('Taranmış sayfa: kombi basıncı 1,5 bar olmalı.' if 'belge sayfası'
+                        in prompt else 'AÇIKLAMA: Kırmızı bir kombi.\n\nYAZI: 1,5 bar')
+            return read
+
+        mixed = self.root / 'karışık.pdf'
+        write_pdf(mixed, [['Kombi kılavuzu, birinci sayfa metni burada.'], []])
+        entry = self.entry(mixed)
+        # Gorsel izni yok: metinli sayfa kullanilir, taranmis sayfa sonra okunacak diye isaretlenir.
+        library.transcribe(entry, dict(DEFAULT_CONFIG), base=self.work, log=QUIET,
+                           allow_vision=False)
+        self.assertIn('1 sayfa okunmadı',
+                      library.describe(entry, self.work, {'embedding_model': ''})['source'])
+        plan = library.plan([entry], self.work, cfg={'embedding_model': ''})
+        self.assertEqual(([item['path'].name for item in plan['vision']], plan['vision_pages']),
+                         (['karışık.pdf'], 1))
+        pages_seen = []
+        with mock.patch('library.vision_reader', reader):
+            library.transcribe(entry, dict(DEFAULT_CONFIG), base=self.work, log=QUIET,
+                               vision_progress=lambda done, total: pages_seen.append((done, total)))
+        session = search_index.primary_session(mixed, self.work)
+        self.assertEqual(session['source'].get('vision_pages'), 1)
+        self.assertNotIn('unread_pages', session['source'])
+        self.assertEqual([(item['start'], item['text']) for item in session['segments']][-1],
+                         (2.0, 'Taranmış sayfa: kombi basıncı 1,5 bar olmalı.'))
+        self.assertEqual(pages_seen, [(1, 1)])
+        self.assertEqual(seen[0][0], b'\x89PNG\r\n\x1a\n')
+        self.assertEqual(len(qa.cached_sessions(mixed, self.work)), 1)
+
+        from PySide6.QtGui import QColor, QImage
+        photo = self.root / 'kombi.jpg'
+        image = QImage(64, 48, QImage.Format_RGB32)
+        image.fill(QColor('red'))
+        self.assertTrue(image.save(str(photo)))
+        self.assertEqual(library.kind_of(photo), 'image')
+        with mock.patch('library.vision_reader', reader):
+            library.transcribe(self.entry(photo), dict(DEFAULT_CONFIG), base=self.work,
+                               log=QUIET)
+        info = library.describe(self.entry(photo), self.work, {'embedding_model': ''})
+        self.assertEqual(info['source'], 'Görü modeli')
+        self.assertIn('Kırmızı bir kombi', ' '.join(line['text'] for line in info['lines']))
 
     def test_document_is_indexed_cited_by_page_and_exported(self):
         cfg = dict(DEFAULT_CONFIG, embedding_model='emb', auto_retry_count=1)
@@ -215,7 +265,7 @@ class OfficeAndEbookTests(unittest.TestCase):
             '<w:p><w:r><w:t xml:space="preserve">İkinci </w:t></w:r><w:r><w:t>paragraf.</w:t></w:r></w:p>'
             '<w:p><w:r><w:br w:type="page"/><w:t>Sonuç: bütçe aşıldı.</w:t></w:r></w:p>'
             '</w:body></w:document>')})
-        pages, segments = documents.extract(path)
+        pages, segments, _read = documents.extract(path)
         self.assertEqual(pages, 2)
         self.assertEqual([(item['start'], item['text']) for item in segments],
                          [(1.0, 'Giriş bölümü.'), (1.0, 'İkinci paragraf.'),

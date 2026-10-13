@@ -135,7 +135,7 @@ def format_lines(lines, document=False):
 
 
 # --- belgeler (F64): konum zaman yerine sayfa numarasidir --------------------
-DOCUMENT_KINDS = ('pdf', 'text', 'word', 'sheet', 'epub')
+DOCUMENT_KINDS = ('pdf', 'text', 'word', 'sheet', 'epub', 'image')
 
 
 def is_document(data):

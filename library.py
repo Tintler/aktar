@@ -31,9 +31,11 @@ from media import VIDEO_EXTENSIONS
 
 VERSION = 1
 # Ileride: 'image', 'table' (her tur kendi metin cikaricisiyla).
-KINDS = {'video': VIDEO_EXTENSIONS, 'document': documents.SUFFIXES}
+KINDS = {'video': VIDEO_EXTENSIONS, 'document': documents.SUFFIXES,
+         'image': documents.IMAGE_SUFFIXES}
+TEXT_KINDS = ('document', 'image')  # documents.py ile metne cevrilen turler
 DOCUMENT_LABELS = {'text': 'Metin dosyası', 'word': 'Word metni', 'sheet': 'Tablo',
-                   'epub': 'E-kitap'}
+                   'epub': 'E-kitap', 'image': 'Görü modeli'}
 SKIPPED_DIRS = {'$recycle.bin', 'system volume information', '__pycache__', 'node_modules'}
 
 
@@ -396,7 +398,8 @@ def describe(entry, base=None, cfg=None):
     if source.get('kind') == 'subtitle':
         label = 'Altyazı' + (' · ' + source['language'] if source.get('language') else '')
     elif source.get('kind') == 'pdf':
-        label = 'PDF metni'
+        label = ('PDF · OCR' if source.get('vision_pages') else 'PDF metni') + (
+            f' · {source["unread_pages"]} sayfa okunmadı' if source.get('unread_pages') else '')
     elif source.get('kind') in DOCUMENT_LABELS:
         label = DOCUMENT_LABELS[source['kind']]
     else:
@@ -513,30 +516,43 @@ def plan(entries, base=None, progress=None, cancelled=None, cfg=None):
     """Toplu hazirlik plani; gerekirse videolari yoklar.
 
     Donen: {'ready': [entry], 'summary': [entry] (indeksli, video ozeti yok),
-            'index': [entry] (transkript var, indeks yok),
+            'index': [entry] (transkript var, indeks yok), 'document': [entry],
+            'vision': [entry] (taranmis PDF / gorsel; 'vision_pages' sayfa),
             'subtitle': [entry], 'whisper': [entry], 'failed': [(entry, hata)],
             'whisper_seconds': float}. Embedding modeli secili degilse transkripti
     olan her video 'ready' sayilir.
     """
     cfg = _embedding_cfg(cfg)
-    result = {'ready': [], 'summary': [], 'index': [], 'document': [], 'subtitle': [],
-              'whisper': [], 'failed': [], 'whisper_seconds': 0.0}
+    result = {'ready': [], 'summary': [], 'index': [], 'document': [], 'vision': [],
+              'subtitle': [], 'whisper': [], 'failed': [], 'whisper_seconds': 0.0,
+              'vision_pages': 0}
     videos = [entry for entry in entries if not entry['missing']]
     for index, entry in enumerate(videos):
         if cancelled and cancelled():
             break
         session = search_index.pick_session(qa.cached_sessions(entry['path'], base))
-        if session is not None:
+        unread = (session or {}).get('source', {}).get('unread_pages', 0)
+        if session is not None and unread:  # karisik PDF'in taranmis sayfalari okunacak
+            result['vision'].append(entry)
+            result['vision_pages'] += unread
+        elif session is not None:
             indexed = (not str(cfg.get('embedding_model', '')).strip()
                        or is_indexed(entry['path'], session, cfg, base))
             summarized = session.get('overview')
             group = 'index' if not indexed else 'ready' if summarized else 'summary'
             result[group].append(entry)
-        elif entry['kind'] == 'document':
-            probed = cached_probe(entry['path'], base)
-            if probed is not None and probed.get('no_text'):
-                result['failed'].append((entry, 'Belgede okunabilir metin yok.'))
-            else:
+        elif entry['kind'] in TEXT_KINDS:
+            try:
+                scanned = (1 if entry['kind'] == 'image'
+                           else len(documents.scanned_pages(entry['path']))
+                           if documents.kind_of(entry['path']) == 'pdf' else 0)
+            except (RuntimeError, ValueError, OSError) as error:
+                result['failed'].append((entry, str(error)))
+                scanned = None
+            if scanned:
+                result['vision'].append(entry)
+                result['vision_pages'] += scanned
+            elif scanned is not None:
                 result['document'].append(entry)
         else:
             try:
@@ -554,21 +570,54 @@ def plan(entries, base=None, progress=None, cancelled=None, cfg=None):
     return result
 
 
+VISION_RETRY_SECONDS = 5
+
+
+def vision_reader(cfg, log=print):
+    """Gorsel model ile sayfa/gorsel okuyan fonksiyon: (png, istem) -> metin.
+
+    LM Studio modeli istek aninda yuklerken gorsel istegi reddedebiliyor (HTTP 400);
+    kisa bekleyip `auto_retry_count` kadar yeniden denenir."""
+    import time
+    from app_core import Client
+    client = Client(cfg, log=log)
+    retries = int(cfg.get('auto_retry_count', 2))
+
+    def read(png, prompt):
+        for attempt in range(retries + 1):
+            try:
+                return qa.strip_thinking(client.vision(prompt, png))
+            except RuntimeError as error:
+                if attempt >= retries:
+                    raise
+                log(f'Görü isteği başarısız, yeniden deneniyor ({attempt + 1}/{retries}): {error}')
+                time.sleep(VISION_RETRY_SECONDS)
+        raise RuntimeError('Görü isteği tamamlanamadı.')
+    return read
+
+
 def transcribe(entry, cfg, allow_whisper=True, base=None, log=print, progress=None,
-               cancelled=None):
+               cancelled=None, allow_vision=True, vision_progress=None):
     """Tek videonun transkriptini qa onbellegine yazar.
 
     Donen: 'cached' (zaten vardi) | 'document' | 'subtitle' | 'whisper' | 'skipped' (altyazi yok,
     Whisper izni yok). Soru Sor paneli ayni onbellegi kullanir (ayni akis secimi).
     """
     path = entry['path']
-    if qa.cached_sessions(path, base):
+    sessions = qa.cached_sessions(path, base)
+    unread = any(item['source'].get('unread_pages') for item in sessions)
+    if sessions and not (unread and allow_vision):
         return 'cached'
-    if entry['kind'] == 'document':
+    if entry['kind'] in TEXT_KINDS:
+        if unread:  # karisik PDF: bu kez taranmis sayfalar da okunacak
+            for item in sessions:
+                qa.cache_path(path, qa.source_key(item['source']), base).unlink(missing_ok=True)
         try:
-            documents.load_session(path, base, log)
+            documents.load_session(path, base, log,
+                                   vision_reader(cfg, log) if allow_vision else None,
+                                   vision_progress, cancelled)
         except documents.NoTextError:
-            mark_no_text(path, base)  # sonraki planlarda tekrar denenmez
+            mark_no_text(path, base)  # gorsel izni olmadan okunamadi
             raise
         return 'document'
     info = probe(path, base)

@@ -742,6 +742,7 @@ def _alive(widget):
 VIDEO_FILTER = 'Video (' + ' '.join('*' + item for item in VIDEO_EXTENSIONS) + ')'
 NONE_SERIES = '(Seri yok)'
 EMBEDDING_OFF = '(kapalı)'
+VISION_SAME = '(sohbet modeliyle aynı)'
 NEW_SERIES = '+ Yeni seri...'
 
 
@@ -1176,6 +1177,14 @@ class SettingsDialog(QDialog):
                              'transkript çıkarılır.')
         self.fields['embedding_model'] = embedding
         layout.addRow('Embedding modeli', embedding)
+        vision = DropdownCombo()
+        vision.setEditable(False)
+        self._fill_vision(vision, self.loaded_models, str(config.get('vision_model', '')).strip())
+        vision.setToolTip('Taranmış PDF sayfalarını ve görselleri okuyan model (görsel destekli '
+                          "olmalı). Varsayılan: sohbet modeli. OCR'a özel bir model (ör. "
+                          "GLM-OCR) LM Studio'ya yüklenip burada seçilebilir.")
+        self.fields['vision_model'] = vision
+        layout.addRow('Görü modeli', vision)
 
         engine_section = QLabel('Çeviri davranışı')
         engine_section.setObjectName('settingsSection')
@@ -1352,6 +1361,8 @@ class SettingsDialog(QDialog):
             self.fields['model'].setCurrentIndex(index)
         embedding = self.fields['embedding_model']
         self._fill_embedding(embedding, names, self._combo_value('embedding_model', embedding))
+        vision = self.fields['vision_model']
+        self._fill_vision(vision, names, self._combo_value('vision_model', vision))
         self.model_hint.setText(f'{len(names)} model bulundu.')
 
     @staticmethod
@@ -1367,9 +1378,23 @@ class SettingsDialog(QDialog):
         combo.setCurrentIndex(max(0, combo.findText(current)) if current else 0)
 
     @staticmethod
+    def _fill_vision(combo, names, current):
+        """'(sohbet modeliyle ayni)' + embedding olmayan modeller (adinda 'ocr' gecenler once)."""
+        names = [str(name) for name in names if 'embed' not in str(name).lower()]
+        ordered = ([name for name in names if 'ocr' in name.lower()]
+                   + [name for name in names if 'ocr' not in name.lower()])
+        if current and current not in ordered:
+            ordered.insert(0, current)
+        combo.clear()
+        combo.addItems([VISION_SAME] + ordered)
+        combo.setCurrentIndex(max(0, combo.findText(current)) if current else 0)
+
+    @staticmethod
     def _combo_value(key, field):
         text = field.currentText().strip()
-        return '' if key == 'embedding_model' and text == EMBEDDING_OFF else text
+        if key == 'embedding_model' and text == EMBEDDING_OFF:
+            return ''
+        return '' if key == 'vision_model' and text == VISION_SAME else text
 
     def reset_defaults(self):
         for key, field in self.fields.items():

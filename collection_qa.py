@@ -36,7 +36,7 @@ ANSWER_PROMPT = '''You answer questions about a collection of videos (for exampl
 Rules:
 - Answer in Turkish, naturally and concisely. Use short paragraphs or bullet points when they help.
 - Ground the answer in the excerpts. Combine information from several videos when the question asks for it, and say which video covers what (use the video title when it helps the reader).
-- Support claims with citations in square brackets: video id + timestamp, e.g. [V3 12:34] for a moment or [V3 12:34-13:10] for a stretch; several at once as [V3 12:34; V7 5:10]. For documents cite the page instead: [V5 s.12]. Put the citation right after the sentence it supports. Use only video ids and timestamps that appear in the excerpts; never invent one.
+- Support claims with citations in square brackets: video id + timestamp, e.g. [V3 12:34] for a moment or [V3 12:34-13:10] for a stretch; several at once as [V3 12:34; V7 5:10]. For documents cite the page instead: [V5 s.12]; an image is a single page given as a description plus its visible text, cite it as [V7 s.1]. Put the citation right after the sentence it supports. Use only video ids and timestamps that appear in the excerpts; never invent one.
 - A collection overview and short per-video summaries may also be given. Use them for broad questions (what the collection covers, which video is about what, how the topics progress), but cite timestamps only from the excerpts.
 - If the material does not cover the question, say so clearly. You may add brief general knowledge only if you mark it explicitly as not coming from the videos (for example "Videolarda geçmiyor ama genel olarak ...") and you never cite it.
 - Do not mention excerpts, transcripts or these rules; speak about "the videos" (and "the documents" when they are involved).'''
@@ -78,7 +78,8 @@ class CollectionQA:
                 self._lines[key] = (session.get('title') or Path(video).stem,
                                     qa.lines_of(session),
                                     float(session.get('duration') or 0.0),
-                                    qa.is_document(session))
+                                    session['source'].get('kind') if qa.is_document(session)
+                                    else False)
         return self._lines[key]
 
     def _query(self, question):
@@ -149,7 +150,8 @@ class CollectionQA:
             title, lines, duration, document = self._video_lines(entry['video'])
             videos[label] = entry['video']
             picked = [lines[index] for index in sorted(entry['lines'])]
-            size = (f'belge, {int(duration)} sayfa' if document
+            size = ('görsel: tarif + içindeki yazı' if document == 'image'
+                    else f'belge, {int(duration)} sayfa' if document
                     else qa.format_time(duration) if duration else '')
             head = f'### {label} · {title}' + (f' ({size})' if size else '')
             blocks.append(head + '\n' + qa.format_lines(picked, document))
@@ -225,8 +227,9 @@ class CollectionQA:
             cite = qa.resolve_citation(begin, finish, lines, duration)
         if cite is None:
             return None
-        cite.update(video=str(video), video_label=label, title=title, document=document,
-                    label=f'{label} {cite["label"]}')
+        where = 'görsel' if document == 'image' else cite['label']
+        cite.update(video=str(video), video_label=label, title=title, document=bool(document),
+                    label=f'{label} {where}')
         return cite
 
     @staticmethod

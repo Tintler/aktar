@@ -14,6 +14,9 @@ sohbetinde [V3 s.12] gibi atiflanir.
 - .xlsx / .csv (F68): her calisma sayfasi bir "sayfa"; satirlar ilk satirdaki
   basliklarla 'Baslik: deger' olarak yazilir (sayfa basina en fazla SHEET_ROWS satir).
 - .epub (F68): her bolum (okuma sirasi) bir "sayfa".
+- Gorsel okuma (F69): metin katmani olmayan PDF sayfalari goruntuye cevrilip, gorsel
+  dosyalari (jpg/png/webp/bmp/gif) dogrudan gorsel modele (LM Studio) verilir. Sayfa
+  sonuclari ayri bir onbellege yazilir; uzun taramada kesilirse kaldigi sayfadan surer.
 Word/Excel/EPUB zip icindeki XML/HTML'den okunur; ek kutuphane gerekmez.
 
 Kaynak dosyalar SALT-OKUNUR.
@@ -22,6 +25,7 @@ from __future__ import annotations
 
 import csv
 import html.parser
+import json
 import io
 import posixpath
 import re
@@ -33,8 +37,19 @@ import qa
 from app_core import save_json
 
 KIND_SUFFIXES = {'pdf': ('.pdf',), 'text': ('.txt', '.md'), 'word': ('.docx',),
-                 'sheet': ('.xlsx', '.csv'), 'epub': ('.epub',)}
-SUFFIXES = tuple(suffix for suffixes in KIND_SUFFIXES.values() for suffix in suffixes)
+                 'sheet': ('.xlsx', '.csv'), 'epub': ('.epub',),
+                 'image': ('.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif')}
+IMAGE_SUFFIXES = KIND_SUFFIXES['image']
+OCR_MIN_CHARS = 20      # bundan az metinli PDF sayfasi taranmis sayilir
+RENDER_LONG_SIDE = 2000  # gorsel modele giden goruntunun uzun kenari (piksel)
+OCR_PROMPT = ('Bu bir belge sayfasının görüntüsü. Sayfadaki tüm metni olduğu gibi, okuma '
+              'sırasıyla yaz; paragrafları boş satırla ayır, tabloları satır satır yaz. '
+              'Açıklama ya da yorum ekleme. Sayfada metin yoksa hiçbir şey yazma.')
+IMAGE_PROMPT = ('Bu görseli Türkçe olarak 2-4 cümleyle tarif et (ne görülüyor, önemli '
+                'ayrıntılar). Ardından görselde okunabilen tüm yazıları aynen yaz. Biçim:\n'
+                'AÇIKLAMA: <tarif>\n\nYAZI: <görseldeki yazılar; yoksa "yok">')
+SUFFIXES = tuple(suffix for kind, suffixes in KIND_SUFFIXES.items() if kind != 'image'
+                 for suffix in suffixes)  # belgeler; gorseller kutuphanede ayri tur
 TEXT_PAGE_LINES = 60
 VIRTUAL_PAGE_CHARS = 3000
 SHEET_ROWS = 5000
@@ -279,6 +294,66 @@ def epub_pages(path):
     return pages or ['']
 
 
+def _png(image):
+    from PySide6.QtCore import QBuffer
+    buffer = QBuffer()
+    buffer.open(QBuffer.WriteOnly)
+    image.save(buffer, 'PNG')
+    return bytes(buffer.data())
+
+
+def render_pdf_page(path, page):
+    """PDF sayfasinin beyaz zeminli PNG goruntusu (QtPdf seffaf cizer; model siyah gorur)."""
+    from PySide6.QtCore import QSize
+    from PySide6.QtGui import QColor, QImage, QPainter
+    from PySide6.QtPdf import QPdfDocument
+    document = QPdfDocument(None)
+    try:
+        document.load(str(path))
+        size = document.pagePointSize(page)
+        scale = RENDER_LONG_SIDE / max(size.width(), size.height(), 1.0)
+        target = QSize(max(1, int(size.width() * scale)), max(1, int(size.height() * scale)))
+        rendered = document.render(page, target)
+    finally:
+        document.close()
+    image = QImage(rendered.size(), QImage.Format_RGB32)
+    image.fill(QColor('white'))
+    painter = QPainter(image)
+    painter.drawImage(0, 0, rendered)
+    painter.end()
+    return _png(image)
+
+
+def image_bytes(path):
+    """Gorsel dosyasi -> modele gidecek PNG (uzun kenar en fazla RENDER_LONG_SIDE)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor, QImage, QPainter
+    image = QImage(str(path))
+    if image.isNull():
+        raise ValueError('Görsel açılamadı: ' + Path(path).name)
+    if max(image.width(), image.height()) > RENDER_LONG_SIDE:
+        image = image.scaled(RENDER_LONG_SIDE, RENDER_LONG_SIDE, Qt.KeepAspectRatio,
+                             Qt.SmoothTransformation)
+    flat = QImage(image.size(), QImage.Format_RGB32)
+    flat.fill(QColor('white'))
+    painter = QPainter(flat)
+    painter.drawImage(0, 0, image)
+    painter.end()
+    return _png(flat)
+
+
+def scanned_pages(path):
+    """PDF'te metin katmani olmayan (OCR gereken) sayfa numaralari (1'den baslar)."""
+    return [number for number, text in enumerate(pdf_pages(path), 1)
+            if len(' '.join(text.split())) < OCR_MIN_CHARS]
+
+
+def needs_vision(path):
+    """Gorsel model gerekiyor mu: gorsel dosyasi ya da taranmis sayfasi olan PDF."""
+    kind = kind_of(path)
+    return kind == 'image' or (kind == 'pdf' and bool(scanned_pages(path)))
+
+
 PAGE_READERS = {'pdf': pdf_pages, 'text': text_pages, 'word': word_pages,
                 'sheet': sheet_pages, 'epub': epub_pages}
 
@@ -294,31 +369,90 @@ def pages_of(path):
         raise ValueError(f'Belge okunamadı ({type(error).__name__}): {Path(path).name}') from None
 
 
-def extract(path):
-    """(sayfa sayisi, segmentler). segment: {'start': sayfa, 'end': sayfa, 'text'}."""
+def extract(path, ocr=None, progress=None, cancelled=None, done=None):
+    """(sayfa sayisi, segmentler, gorselle okunan sayfa sayisi).
+
+    segment: {'start': sayfa, 'end': sayfa, 'text'}. `ocr(png, prompt) -> metin`
+    verilirse metinsiz PDF sayfalari ve gorseller okunur; `done` ({sayfa: metin})
+    daha once okunan sayfalari tasir ve her yeni sayfadan sonra guncellenir.
+    """
     kind = kind_of(path)
+    if kind == 'image':
+        if ocr is None:
+            raise NoTextError('Görsel, görü modeliyle okunmadı.')
+        pages = [ocr(image_bytes(path), IMAGE_PROMPT)]
+        if progress:
+            progress(1, 1)
+        return 1, _segments(pages), 1
     pages = pages_of(path)
+    read = 0
+    if kind == 'pdf' and ocr is not None:
+        missing = [number for number, text in enumerate(pages, 1)
+                   if len(' '.join(text.split())) < OCR_MIN_CHARS]
+        done = {} if done is None else done
+        for index, number in enumerate(missing, 1):
+            if cancelled and cancelled():
+                from app_core import GracefulStop
+                raise GracefulStop('Görsel okuma durduruldu; okunan sayfalar kaydedildi.')
+            if str(number) not in done:
+                done[str(number)] = ocr(render_pdf_page(path, number - 1), OCR_PROMPT)
+            pages[number - 1] = done[str(number)]
+            read += 1
+            if progress:
+                progress(index, len(missing))
+    segments = _segments(pages)
     segments = [{'start': float(number), 'end': float(number), 'text': paragraph}
                 for number, text in enumerate(pages, 1) for paragraph in paragraphs(text)]
     if not segments:
         raise NoTextError('Belgede okunabilir metin yok' + (
-            ' (taranmış PDF olabilir; görsel okuma sonraki sürümde).' if kind == 'pdf' else '.'))
-    return len(pages), segments
+            ' (taranmış PDF olabilir; görü modeliyle okunmadı).' if kind == 'pdf' else '.'))
+    return len(pages), segments, read
 
 
-def load_session(path, base=None, log=print):
-    """Belgenin metin oturumu: onbellekte varsa oradan, yoksa cikarir. (veri, onbellek yolu)."""
+def _segments(pages):
+    return [{'start': float(number), 'end': float(number), 'text': paragraph}
+            for number, text in enumerate(pages, 1) for paragraph in paragraphs(text)]
+
+
+def load_session(path, base=None, log=print, ocr=None, progress=None, cancelled=None):
+    """Belgenin metin oturumu: onbellekte varsa oradan, yoksa cikarir. (veri, onbellek yolu).
+
+    `ocr` verilirse taranmis sayfalar/gorseller okunur; sayfa sonuclari ayri onbellekte
+    (kesilirse kaldigi sayfadan devam)."""
     path = Path(path)
     source = {'kind': kind_of(path)}
     cache = qa.cache_path(path, qa.source_key(source), base)
     cached = qa.load_cache(cache)
     if cached:
         return cached, cache
-    pages, segments = extract(path)
+    partial_path = qa.cache_path(path, 'ocr-pages', base).with_suffix('.ocr')
+    try:
+        partial = json.loads(partial_path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        partial = {}
+
+    class Pages(dict):  # her yeni sayfa diske yazilir
+        def __setitem__(self, key, value):
+            super().__setitem__(key, value)
+            save_json(partial_path, dict(self))
+
+    done = Pages(partial)
+    pages, segments, read = extract(path, ocr, progress, cancelled, done)
     source['pages'] = pages
+    if read:
+        source['vision_pages'] = read
+    if ocr is None and source['kind'] == 'pdf':
+        unread = len(scanned_pages(path))
+        if unread:  # karisik PDF: metinli sayfalar kullanilir, taranmislar sonra okunur
+            source['unread_pages'] = unread
     data = {'version': qa.CACHE_VERSION, 'video': str(path), 'title': path.stem,
             'source': source, 'duration': float(pages), 'chapters': [],
             'segments': segments, 'sections': [], 'mode': '', 'overview': None}
     save_json(cache, data)
-    log(f'Belge metni hazır: {pages} sayfa, {len(segments)} paragraf.')
+    try:
+        partial_path.unlink()
+    except OSError:
+        pass
+    log(f'Belge metni hazır: {pages} sayfa, {len(segments)} paragraf'
+        + (f' ({read} sayfa görü modeliyle okundu).' if read else '.'))
     return data, cache
