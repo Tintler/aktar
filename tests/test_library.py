@@ -199,6 +199,26 @@ class LibraryTests(unittest.TestCase):
             run.assert_called_once()
             self.assertIs(load.call_args.args[1], result)
 
+    def test_transcript_search_ignores_case_and_turkish_letters(self):
+        """F59: model kullanmadan transkript aramasi; tum kelimeler ayni satirda."""
+        work = self.root / 'work'
+        video = self.media / 'Ders 2.mp4'
+        source = {'kind': 'subtitle', 'stream': 2, 'language': 'tr', 'title': ''}
+        segments = [{'start': 5.0, 'end': 8.0, 'text': 'AŞIRI öğrenme ezberdir.'},
+                    {'start': 60.0, 'end': 64.0, 'text': 'Budama ağacı küçültür.'}]
+        save_json(qa.cache_path(video, qa.source_key(source), work),
+                  qa.build_data(video, segments, source, {'duration': 70.0, 'chapters': []}))
+        entry = self._entry('Ders 2.mp4')
+        info = library.describe(entry, work, cfg={'embedding_model': ''})
+        self.assertEqual(library.fold('AŞIRI Öğrenme'), 'asiri ogrenme')
+        hits, matched = library.transcript_hits([entry], [info], 'asiri ogren')
+        self.assertEqual([(hit['start'], hit['text']) for hit in hits],
+                         [(5.0, 'AŞIRI öğrenme ezberdir.')])
+        self.assertEqual(matched, {library._key(entry['path'])})
+        self.assertEqual(library.transcript_hits([entry], [info], 'budama ezber')[0], [])
+        missing = library.describe(dict(entry, missing=True), work)
+        self.assertEqual(missing['lines'], [])
+
     def test_default_title(self):
         self.assertEqual(library.default_title([self.media]), 'media')
         self.assertEqual(library.default_title([self.media / 'Ders 2.mp4']), 'media')

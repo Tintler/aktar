@@ -25,7 +25,7 @@ import qa
 import search_index
 import series
 import speech
-from app_core import APP_DIR, FileLock, load_config, read, save_json
+from app_core import APP_DIR, FileLock, load_config, read, save_json, tr_lower
 from media import VIDEO_EXTENSIONS
 
 VERSION = 1
@@ -307,21 +307,22 @@ def is_indexed(video, session, cfg, base=None):
 
 
 def describe(entry, base=None, cfg=None):
-    """Tablo icin durum: {'status', 'source', 'duration'}.
+    """Tablo icin durum: {'status', 'source', 'duration', 'lines'}.
 
     status: 'missing' | 'ready' (transkript + indeks) | 'transcript' (metin hazir,
     indeks yok ya da embedding modeli secilmedi) | 'no_subtitle' (yoklandi, metin
-    altyazi yok: Whisper bekliyor) | 'pending'.
+    altyazi yok: Whisper bekliyor) | 'pending'. 'lines': transkript aramasi icin
+    [{'start', 'text', 'folded'}] (transkript yoksa bos).
     """
     if entry['missing']:
-        return {'status': 'missing', 'source': '', 'duration': 0.0}
+        return {'status': 'missing', 'source': '', 'duration': 0.0, 'lines': []}
     sessions = qa.cached_sessions(entry['path'], base) if entry['kind'] == 'video' else []
     if not sessions:
         probed = cached_probe(entry['path'], base) if entry['kind'] == 'video' else None
         if probed is None:
-            return {'status': 'pending', 'source': '', 'duration': 0.0}
+            return {'status': 'pending', 'source': '', 'duration': 0.0, 'lines': []}
         return {'status': 'pending' if probed['subtitles'] else 'no_subtitle', 'source': '',
-                'duration': probed['duration']}
+                'duration': probed['duration'], 'lines': []}
     best = search_index.pick_session(sessions)
     source = best['source']
     if source.get('kind') == 'subtitle':
@@ -329,8 +330,39 @@ def describe(entry, base=None, cfg=None):
     else:
         label = 'Whisper' + (' · ' + source['model'] if source.get('model') else '')
     indexed = is_indexed(entry['path'], best, _embedding_cfg(cfg), base)
+    lines = [{'start': line['start'], 'text': line['text'], 'folded': fold(line['text'])}
+             for line in qa.compact_lines(best['segments'])]
     return {'status': 'ready' if indexed else 'transcript', 'source': label,
-            'duration': float(best.get('duration') or 0.0)}
+            'duration': float(best.get('duration') or 0.0), 'lines': lines}
+
+
+# --- transkript aramasi (F59) --------------------------------------------------
+_FOLD = str.maketrans('çğıöşüâîû', 'cgiosuaiu')
+
+
+def fold(text):
+    """Aramada esnek karsilastirma: Turkce kucuk harf + aksansiz ('Aşırı' ~ 'asiri')."""
+    return ' '.join(tr_lower(text).translate(_FOLD).split())
+
+
+def transcript_hits(entries, infos, query, limit=200):
+    """Model kullanmadan transkript satirlarinda arama (tum kelimeler ayni satirda).
+
+    Donen: (hits, eslesen dosya anahtarlari). hit: {'path', 'start', 'text'};
+    dosya sirasiyla, en fazla `limit` tane (sayim icin tum eslesmeler gezilir).
+    """
+    words = fold(query).split()
+    hits, matched = [], set()
+    if not words:
+        return hits, matched
+    for entry, info in zip(entries, infos):
+        for line in info.get('lines') or []:
+            if all(word in line['folded'] for word in words):
+                matched.add(_key(entry['path']))
+                if len(hits) < limit:
+                    hits.append({'path': entry['path'], 'start': line['start'],
+                                 'text': line['text']})
+    return hits, matched
 
 
 # --- yoklama onbellegi + toplu transkript (F56) ---------------------------------

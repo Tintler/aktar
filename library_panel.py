@@ -18,7 +18,7 @@ import re
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QSize, Qt, QThread, QUrl, Signal, Slot
+from PySide6.QtCore import QObject, QSize, Qt, QThread, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QDialog, QFileDialog, QFrame,
                                QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit,
@@ -36,6 +36,10 @@ from gui import (THEME, DropdownCombo, HoverIconButton, ToggleSwitch, _alive, ca
 
 PAGE_EMPTY, PAGE_LIST, PAGE_DETAIL = 0, 1, 2
 SCOPE_ALL, SCOPE_SELECTED = 'Tüm koleksiyon', 'Seçili dosyalar'
+MIN_SEARCH_CHARS = 3     # transkript aramasi bu uzunluktan sonra baslar
+HIT_LIMIT = 200          # listede gosterilen en fazla transkript eslesmesi
+SEARCH_DELAY_MS = 250
+HITS_MAX_HEIGHT = 190
 CITE_BG = '#18210a'  # atif rozeti zemini (tasarim taslagindaki koyu lime)
 REPEATED_ERROR_LIMIT = 3  # ust uste ayni hata: kuyruk durur
 WARN = '#f0b44c'  # onay bekleyen (Whisper) durumlar; tasarim taslagindaki amber
@@ -73,6 +77,10 @@ QPushButton#libNew {{ background:transparent; border:0; color:{muted}; text-alig
 QPushButton#libNew:hover {{ background:{panel}; color:{accent}; }}
 QPushButton#libBack {{ background:transparent; border:0; color:{secondary}; padding:6px 10px; }}
 QPushButton#libBack:hover {{ background:{panel_alt}; color:{accent}; }}
+QListWidget#libHits {{ background:{panel}; border:1px solid {border}; border-radius:10px;
+    outline:none; padding:4px; }}
+QListWidget#libHits::item {{ color:{secondary}; padding:6px 8px; border-radius:6px; }}
+QListWidget#libHits::item:hover {{ background:{panel_alt}; color:{accent}; }}
 QTextBrowser#libChatView {{ background:transparent; border:0; color:{text}; }}
 QFrame#libDrop {{ background:{panel}; border:1.5px dashed {drop_border}; border-radius:16px; }}
 """
@@ -606,9 +614,16 @@ class LibraryPanel(QWidget):
         tools = QHBoxLayout()
         tools.setSpacing(8)
         self.search = QLineEdit()
-        self.search.setPlaceholderText('Dosya adında ara…')
+        self.search.setPlaceholderText('Dosya adında ve transkriptlerde ara…')
         self.search.setClearButtonEnabled(True)
-        self.search.textChanged.connect(self._apply_filter)
+        self.search.setToolTip('Model kullanmadan anında arar; büyük/küçük harf ve Türkçe '
+                               'karakter farkı yok sayılır (asiri = aşırı).')
+        # Her tusta yuzlerce transkripti taramamak icin kisa gecikme.
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(SEARCH_DELAY_MS)
+        self._search_timer.timeout.connect(self._apply_filter)
+        self.search.textChanged.connect(lambda _text: self._search_timer.start())
         tools.addWidget(self.search, 1)
         self.chip_row = QHBoxLayout()
         self.chip_row.setSpacing(6)
@@ -617,6 +632,19 @@ class LibraryPanel(QWidget):
         self.chips.setExclusive(True)
         self.chips.idClicked.connect(lambda _id: self._apply_filter())
         column.addLayout(tools)
+
+        self.hits_label = QLabel('')
+        self.hits_label.setObjectName('hint')
+        self.hits_label.hide()
+        column.addWidget(self.hits_label)
+        self.hits_list = QListWidget()
+        self.hits_list.setObjectName('libHits')
+        self.hits_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.hits_list.setTextElideMode(Qt.ElideRight)
+        self.hits_list.itemActivated.connect(self._open_hit)
+        self.hits_list.itemClicked.connect(self._open_hit)
+        self.hits_list.hide()
+        column.addWidget(self.hits_list)
 
         frame, inner = card(spacing=0, margins=(0, 0, 0, 0), shadow=False)
         self.table = QTableWidget(0, 6)
@@ -846,7 +874,7 @@ class LibraryPanel(QWidget):
         self.entries, self.infos = entries, infos
         self._fill_folders()
         self._fill_chips()
-        self._fill_table()
+        self._fill_table()  # arama filtresini de yeniden uygular (yeni transkriptler dahil)
         self._update_chat_state()
 
     def _save_and_refresh(self, message=''):
@@ -1067,13 +1095,44 @@ class LibraryPanel(QWidget):
         return parent.name
 
     def _apply_filter(self):
-        text = self.search.text().strip().casefold()
+        """Tur filtresi + arama: dosya adi ya da transkript eslesen satirlar gorunur."""
+        query = self.search.text().strip()
+        words = library.fold(query).split()
+        hits, matched = (library.transcript_hits(self.entries, self.infos, query, HIT_LIMIT)
+                         if len(query) >= MIN_SEARCH_CHARS else ([], set()))
         checked = self.chips.checkedButton()
         kind = checked.property('kind') if checked is not None else ''
         for row, entry in enumerate(self.entries):
-            hidden = ((kind and entry['kind'] != kind)
-                      or (text and text not in entry['path'].name.casefold()))
-            self.table.setRowHidden(row, bool(hidden))
+            name = library.fold(entry['path'].name)
+            found = (not words or all(word in name for word in words)
+                     or library._key(entry['path']) in matched)
+            self.table.setRowHidden(row, bool((kind and entry['kind'] != kind) or not found))
+        self._show_hits(hits, matched, query)
+
+    def _show_hits(self, hits, matched, query):
+        self.hits_list.clear()
+        if not hits:
+            self.hits_list.hide()
+            self.hits_label.setVisible(len(query) >= MIN_SEARCH_CHARS)
+            self.hits_label.setText('Transkriptlerde eşleşme yok.')
+            return
+        for hit in hits:
+            item = QListWidgetItem(f'{hit["path"].stem}  ·  {qa.format_time(hit["start"])}   '
+                                   f'{hit["text"]}')
+            item.setToolTip(f'{hit["path"].name} · {qa.format_time(hit["start"])}\n{hit["text"]}')
+            item.setData(Qt.UserRole, (str(hit['path']), hit['start']))
+            self.hits_list.addItem(item)
+        more = ' (ilk %d gösteriliyor)' % HIT_LIMIT if len(hits) >= HIT_LIMIT else ''
+        self.hits_label.setText(f'Transkriptlerde {len(hits)} eşleşme · {len(matched)} dosya'
+                                f'{more} — tıklayınca video o anda açılır')
+        self.hits_label.show()
+        row = self.hits_list.sizeHintForRow(0) or 30
+        self.hits_list.setFixedHeight(min(HITS_MAX_HEIGHT, row * len(hits) + 12))
+        self.hits_list.show()
+
+    def _open_hit(self, item):
+        path, start = item.data(Qt.UserRole)
+        self.open_cite(path, start)
 
     def _selected_rows(self):
         return sorted({index.row() for index in self.table.selectionModel().selectedRows()})
