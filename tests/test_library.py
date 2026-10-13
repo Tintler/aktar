@@ -219,6 +219,29 @@ class LibraryTests(unittest.TestCase):
         missing = library.describe(dict(entry, missing=True), work)
         self.assertEqual(missing['lines'], [])
 
+    def test_chat_is_saved_trimmed_and_deleted_with_collection(self):
+        """F60: sohbet koleksiyon basina diske yazilir; koleksiyon silinince gider."""
+        slug, _data = library.create_collection('ML')
+        self.assertEqual(library.load_chat(slug), {'entries': [], 'history': []})
+        turn = {'question': 'q', 'answer': 'a [V1 0:05]',
+                'parts': [('text', 'a '), ('cite', [{'video': 'x.mkv', 'start': 5.0,
+                                                    'label': 'V1 0:05'}])],
+                'sources': []}
+        entries = [('note', 'merhaba'), ('user', 'q'), ('assistant', turn), ('pending', '...')]
+        library.save_chat(slug, entries, [turn])
+        saved = library.load_chat(slug)
+        self.assertEqual([kind for kind, _item in saved['entries']], ['user', 'assistant'])
+        self.assertEqual(saved['entries'][1][1]['parts'][1][1][0]['start'], 5.0)
+        self.assertEqual(saved['history'], [{'question': 'q', 'answer': 'a [V1 0:05]'}])
+        many = [item for index in range(library.CHAT_TURNS + 5)
+                for item in (('user', f'q{index}'), ('error', 'x'))]
+        library.save_chat(slug, many, [])
+        entries = library.load_chat(slug)['entries']
+        self.assertEqual(len(entries), 2 * library.CHAT_TURNS)
+        self.assertEqual(entries[0], ('user', 'q5'))
+        library.delete_collection(slug)
+        self.assertFalse(library.chat_path(slug).exists())
+
     def test_default_title(self):
         self.assertEqual(library.default_title([self.media]), 'media')
         self.assertEqual(library.default_title([self.media / 'Ders 2.mp4']), 'media')

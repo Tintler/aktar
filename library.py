@@ -156,12 +156,57 @@ def rename_collection(slug, title):
 
 
 def delete_collection(slug):
-    """Yalnizca koleksiyon kaydini siler; kaynak dosyalara dokunulmaz."""
-    for path in (_path(slug), library_dir() / (slug + '.lock')):
+    """Koleksiyon kaydini (ve sohbet/ozet kayitlarini) siler; kaynak dosyalara dokunulmaz."""
+    for path in (_path(slug), library_dir() / (slug + '.lock'), chat_path(slug),
+                 library_dir() / (slug + '.overview.json')):
         try:
             path.unlink()
         except FileNotFoundError:
             pass
+
+
+# --- sohbet gecmisi (F60) ------------------------------------------------------
+CHAT_TURNS = 50  # diskte tutulan en fazla soru-cevap
+
+
+def chat_path(slug):
+    return library_dir() / (slug + '.chat.json')
+
+
+def load_chat(slug):
+    """Kayitli sohbet: {'entries': [(tur, deger)], 'history': [{'question','answer'}]}.
+
+    Okunamazsa bos sohbet doner (sohbet kaybi koleksiyonu bozmasin)."""
+    try:
+        value = json.loads(read(chat_path(slug)))
+    except (OSError, ValueError):
+        return {'entries': [], 'history': []}
+    entries = [(str(kind), item) for kind, item in value.get('entries', [])
+               if kind in ('user', 'assistant', 'error')]
+    history = [{'question': str(turn.get('question', '')), 'answer': str(turn.get('answer', ''))}
+               for turn in value.get('history', []) if isinstance(turn, dict)]
+    return {'entries': entries, 'history': history}
+
+
+def save_chat(slug, entries, history):
+    """Son CHAT_TURNS soru-cevabi yazar (bekleyen/not kayitlari atlanir)."""
+    kept = [[kind, item] for kind, item in entries if kind in ('user', 'assistant', 'error')]
+    users = [index for index, (kind, _item) in enumerate(kept) if kind == 'user']
+    if len(users) > CHAT_TURNS:
+        kept = kept[users[-CHAT_TURNS]:]
+    history = [{'question': turn['question'], 'answer': turn['answer']}
+               for turn in history[-CHAT_TURNS:]]
+    try:
+        save_json(chat_path(slug), {'version': VERSION, 'entries': kept, 'history': history})
+    except OSError:
+        pass  # sohbet yazilamazsa yalnizca bir sonraki acilista gorunmez
+
+
+def clear_chat(slug):
+    try:
+        chat_path(slug).unlink()
+    except FileNotFoundError:
+        pass
 
 
 def default_title(paths):

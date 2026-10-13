@@ -188,7 +188,7 @@ Videolarınızı **koleksiyonlarda** toplar (ör. "Makine Öğrenmesi", "Konfera
 - **Koleksiyona sor (sağ panel):** Koleksiyondaki **Hazır** (indeksli) videoların hepsine birden soru sorarsınız. Soru önce indekste aranır, en ilgili transkript parçaları sohbet modeline verilir; cevap Türkçedir ve iddialar `V3 12:34` gibi atıflarla desteklenir (V3 = koleksiyondaki 3. dosya). Cevabın altındaki **Kaynaklar** satırı hangi videonun kaç kez kaynak gösterildiğini listeler.
   - Atfa tıklayınca o video oynatıcıda açılır ve o ana gider; geri düğmesiyle sohbete dönersiniz, sohbet kaybolmaz.
   - **Kapsam:** **Tüm koleksiyon** ya da **Seçili dosyalar** (tabloda seçtiğiniz satırlar). Henüz hazır olmayan dosyalar cevaba dahil edilmez; panelin altındaki not kaç dosyanın beklediğini söyler.
-  - Önceki sorular hatırlanır; "peki neden?" gibi devam soruları çalışır. Her koleksiyonun sohbeti ayrıdır (uygulama kapanınca silinir).
+  - Önceki sorular hatırlanır; "peki neden?" gibi devam soruları çalışır. Her koleksiyonun sohbeti ayrıdır ve `library\` klasörüne kaydedilir (son 50 soru); uygulama yeniden açılınca kaldığı yerden devam eder. Panelin sağ üstündeki çöp kutusu sohbeti ve kaydını siler; koleksiyon silinince sohbeti de silinir.
   - Soru-cevap için Ayarlar'daki sohbet modeli, arama için embedding modeli kullanılır; ikisi de LM Studio'da aynı adresten çalışır. Çok genel sorular ("bu derslerde neler anlatılıyor?") yalnızca soruya en yakın parçalarla cevaplanır, bütün koleksiyonun özeti değildir.
 
 Koleksiyonlar uygulama dizinindeki `library\` klasöründe tutulur.

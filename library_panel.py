@@ -36,6 +36,8 @@ from gui import (THEME, DropdownCombo, HoverIconButton, ToggleSwitch, _alive, ca
 
 PAGE_EMPTY, PAGE_LIST, PAGE_DETAIL = 0, 1, 2
 SCOPE_ALL, SCOPE_SELECTED = 'Tüm koleksiyon', 'Seçili dosyalar'
+CHAT_GREETING = ('Bu koleksiyondaki videolar hakkında soru sorun; cevaplar hangi videoda, '
+                 'hangi dakikada geçtiğini gösterir.')
 MIN_SEARCH_CHARS = 3     # transkript aramasi bu uzunluktan sonra baslar
 HIT_LIMIT = 200          # listede gosterilen en fazla transkript eslesmesi
 SEARCH_DELAY_MS = 250
@@ -732,6 +734,12 @@ class LibraryPanel(QWidget):
         self.scope_combo.setToolTip('Soru tüm hazır dosyalara mı, tabloda seçili olanlara mı sorulsun')
         self.scope_combo.currentIndexChanged.connect(lambda _index: self._update_chat_state())
         head.addWidget(self.scope_combo)
+        self.clear_chat_button = HoverIconButton('')
+        self.clear_chat_button.setObjectName('iconFlat')
+        self.clear_chat_button.setTintedIcon('trash', THEME['muted'], 14)
+        self.clear_chat_button.setToolTip('Sohbeti temizle (kayıtlı geçmiş de silinir)')
+        self.clear_chat_button.clicked.connect(self.clear_chat)
+        head.addWidget(self.clear_chat_button)
         column.addLayout(head)
         self.chat_view = QTextBrowser()
         self.chat_view.setObjectName('libChatView')
@@ -1204,9 +1212,20 @@ class LibraryPanel(QWidget):
 
     # --- koleksiyona sor (F58) ---------------------------------------------
     def _chat(self):
-        return self._chats.setdefault(self.slug, {'session': None, 'entries': [
-            ('note', 'Bu koleksiyondaki videolar hakkında soru sorun; cevaplar hangi videoda, '
-                     'hangi dakikada geçtiğini gösterir.')]})
+        """Acik koleksiyonun sohbeti; ilk erisimde diskten (F60) yuklenir."""
+        if self.slug not in self._chats:
+            saved = library.load_chat(self.slug)
+            self._chats[self.slug] = {'session': None, 'history': saved['history'],
+                                      'entries': [('note', CHAT_GREETING)] + saved['entries']}
+        return self._chats[self.slug]
+
+    def clear_chat(self):
+        if self._ask_job is not None or self.data is None:
+            return
+        library.clear_chat(self.slug)
+        self._chats.pop(self.slug, None)
+        self._render_chat()
+        self._log('Koleksiyon sohbeti temizlendi: ' + self.data['title'])
 
     def _scope_videos(self):
         """Soru kapsami: hazir (indeksli) videolar; 'Secili dosyalar'da yalnizca secililer."""
@@ -1239,6 +1258,7 @@ class LibraryPanel(QWidget):
         self.ask_input.setEnabled(enabled)
         self.ask_button.setEnabled(enabled)
         self.scope_combo.setEnabled(not busy)
+        self.clear_chat_button.setEnabled(not busy)
 
     def _render_chat(self):
         if self.data is None:
@@ -1257,8 +1277,7 @@ class LibraryPanel(QWidget):
         if session is None or [str(path) for path in session.videos] != [str(p) for p in videos]:
             # Kapsam degisti: etiketler yeni listeye gore; konusma gecmisi korunur.
             fresh = collection_qa.CollectionQA(videos, self.data['title'], log=self._log)
-            if session is not None:
-                fresh.history = session.history
+            fresh.history = session.history if session is not None else list(chat['history'])
             session = chat['session'] = fresh
         chat['entries'] += [('user', question), ('pending', 'Videolarda aranıyor…')]
         self.ask_input.clear()
@@ -1281,6 +1300,9 @@ class LibraryPanel(QWidget):
             chat['entries'] = [item for item in chat['entries'] if item[0] != 'pending']
             chat['entries'].append(('assistant', turn) if turn is not None
                                    else ('error', 'Cevap alınamadı: ' + error))
+            if chat['session'] is not None:
+                chat['history'] = chat['session'].history
+            library.save_chat(slug, chat['entries'], chat['history'])
         if error:
             self._log('Koleksiyon sorusu: ' + error)
         if slug == self.slug:
