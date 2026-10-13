@@ -11,18 +11,19 @@ Video dosyalarındaki **metin tabanlı altyazıları** çıkarıp, **yerel bir y
 
 > **Gizlilik:** Hiçbir veri internet üzerinden gönderilmez. Çeviri ve soru-cevap tamamen yerel ağdaki LM Studio sunucusunda (`127.0.0.1`) yapılır. Kaynak video dosyası **salt-okunur** kabul edilir; kopyalanmaz, taşınmaz, değiştirilmez veya yeniden encode edilmez.
 
-> **English:** Aktar is a cross-platform (Windows, Linux) PySide6 desktop app (with a companion CLI) that extracts text subtitles from video files and translates them to Turkish with a local LLM served by LM Studio. Everything runs locally and the source video is treated as read-only. The program preserves subtitle structure, timings, order and ASS tags — while the model only ever sees plain text, and it enforces a glossary for consistent terminology across episodes. An **Ask** tab offers a built-in player plus a chat that answers questions about your own videos with clickable timestamp citations, using embedded subtitles or optional local speech-to-text (faster-whisper).
+> **English:** Aktar is a cross-platform (Windows, Linux) PySide6 desktop app (with a companion CLI) that extracts text subtitles from video files and translates them to Turkish with a local LLM served by LM Studio. Everything runs locally and the source video is treated as read-only. The program preserves subtitle structure, timings, order and ASS tags — while the model only ever sees plain text, and it enforces a glossary for consistent terminology across episodes. The **Library** home page groups folders and videos into named collections (rescanned on open); opening a video gives a built-in player plus a chat that answers questions about your own videos with clickable timestamp citations, using embedded subtitles or optional local speech-to-text (faster-whisper).
 
 ---
 
 ## Öne çıkan özellikler
 
+- **Kütüphane (açılış sayfası):** Klasörleri ve videoları adlandırılmış koleksiyonlarda toplar. Klasörler alt klasörleriyle taranır, koleksiyon her açıldığında yeni eklenen videolar bulunur. Tabloda her videonun transkript kaynağı ve hazırlık durumu görünür; videoya çift tıklayınca oynatıcı ve soru-cevap açılır.
 - **Zorunlu terim sözlüğü (glossary):** Çeviride belirtilen terimlerin karşılığı Türkçe çekim ekleriyle birlikte denetlenir; eksikse tek düzeltme turu yapılır.
 - **Seri bazlı glossary + süreklilik:** TV dizisi/anime bölümleri arasında isim yazımı, hitap biçimi (sen/siz) ve tekrar eden kalıplar seri düzeyinde saklanır.
 - **Yapay zekâ ön analizi:** Kaynak altyazıdan çevrilebilir kurgu terimleri, unvanlar, yerler ve kalıcı süreklilik kararları için Türkçe öneriler üretir; kullanıcı karşılığı düzenleyip yalnız bölüm veya seri kapsamıyla onaylayabilir.
 - **Çeviri sonrası öğrenme:** Ön analiz kapalı olsa bile çevirinin sonunda sonraki bölümlerde kullanılabilecek terimler ve süreklilik kararları çıkarılır; kullanıcı onayı olmadan seri terimlerine yazılmaz.
 - **Format korunur:** SRT→SRT, ASS→ASS, SSA→SSA, VTT→VTT. Yalnızca `mov_text` SRT'ye dönüştürülür.
-- **Videoya soru sor (Soru Sor sekmesi):** Yerleşik oynatıcının yanında videonun içeriği hakkında yerel modelle sohbet eder; özet gibi genel sorular da belirli ayrıntılar da cevaplanır. Cevaptaki `12:34` atıflarına tıklayınca video o ana gider. Uzun videolarda bölüm bölüm "video haritası" çıkarılır.
+- **Videoya soru sor (Kütüphane → video):** Yerleşik oynatıcının yanında videonun içeriği hakkında yerel modelle sohbet eder; özet gibi genel sorular da belirli ayrıntılar da cevaplanır. Cevaptaki `12:34` atıflarına tıklayınca video o ana gider. Uzun videolarda bölüm bölüm "video haritası" çıkarılır.
 - **Altyazısız videolar için konuşmadan metin (isteğe bağlı):** faster-whisper ile ses yerelde metne çevrilir; sonuç hem soru-cevapta hem oynatıcıda altyazı olarak kullanılır. NVIDIA GPU varsa hızlandırılır.
 - **Oynatıcıda altyazı seçimi:** Videodaki akışlar, video klasöründeki altyazı dosyaları (Aktar'ın `_TR` çevirisi dahil) ve Whisper transkripti CC menüsünden seçilip izlenebilir.
 - **Türkçe karakter güvenliği:** Kaynak ASS/SSA fontu Türkçe harfleri (`ç ğ ı İ ö ş ü`) çizemiyorsa çıktıda o font otomatik olarak **Calibri** ile değiştirilir.
@@ -57,8 +58,8 @@ py -3 -m pip install -r requirements.txt
 GUI_BASLAT.cmd
 ```
 
-4. Videoyu pencereye sürükleyin → altyazı akışını işaretleyin → **Çevir**.
-5. Videoya soru sormak için başlık şeridinden **Soru Sor** sekmesine geçin.
+4. Açılan **Kütüphane** sayfasına bir klasör veya video sürükleyin; koleksiyon oluşur. Videoya çift tıklayınca oynatıcı ve soru-cevap açılır.
+5. Altyazı çevirmek için başlık şeridinden **Altyazı Çevir** sekmesine geçin (ya da tablodaki videoya sağ tıklayıp **Altyazıyı çevir…**): videoyu sürükleyin → altyazı akışını işaretleyin → **Çevir**.
 
 ### Linux (Debian, Ubuntu, KDE Plasma…)
 

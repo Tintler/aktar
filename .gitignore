@@ -5,6 +5,7 @@ build/
 dist/
 *.spec
 series/
+library/
 bin/ffmpeg.exe
 bin/ffprobe.exe
 bin/ffmpeg

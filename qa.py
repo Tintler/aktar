@@ -272,26 +272,57 @@ def build_data(video, segments, source, info=None):
     }
 
 
+def source_key(source):
+    """Oturum kaynagindan onbellek anahtari: 'subtitle:2' / 'whisper:<model>:<dil>[:a<iz>]'."""
+    if source.get('kind') == 'subtitle':
+        return f'subtitle:{int(source["stream"])}'
+    track = source.get('audio_track')
+    suffix = '' if track is None else f':a{int(track)}'
+    return f'whisper:{source.get("model", "")}:{source.get("language", "")}{suffix}'
+
+
+def cached_sessions(video, base=None):
+    """Video icin onbellekte duran (video degismediyse gecerli) tum oturumlar."""
+    video = Path(video)
+    try:
+        resolved = video.resolve()
+        stem = re.sub(r'[^\w.-]+', '_', video.stem)[:40] or 'video'
+        candidates = sorted((Path(base or work_dir()) / 'qa').glob(stem + '.*.json'))
+    except OSError:
+        return []
+    sessions = []
+    for path in candidates:
+        data = load_cache(path)
+        if not data or not isinstance(data.get('source'), dict):
+            continue
+        try:
+            if (Path(data.get('video', '')).resolve() != resolved
+                    or cache_path(video, source_key(data['source']), base) != path):
+                continue
+        except (OSError, KeyError, TypeError, ValueError):
+            continue
+        sessions.append(data)
+    return sessions
+
+
 def load_subtitle_session(video, stream, base=None, log=print):
     """Altyazi stream'inden oturum verisi: onbellekte varsa oradan, yoksa cikarir."""
     source = {'kind': 'subtitle', 'stream': int(stream['index']),
               'language': stream.get('language', ''), 'title': stream.get('title', '')}
-    return _load_session(video, f'subtitle:{int(stream["index"])}', source,
+    return _load_session(video, source,
                          lambda: subtitle_segments(video, stream, base), base, log)
 
 
 def load_whisper_session(video, result, base=None, log=print):
     """speech.transcribe sonucundan (konusmadan metin) oturum verisi."""
-    track = result.get('audio_track')
     source = {'kind': 'whisper', 'model': result.get('model', ''),
-              'language': result.get('language', ''), 'audio_track': track}
-    suffix = '' if track is None else f':a{int(track)}'
-    return _load_session(video, f'whisper:{source["model"]}:{source["language"]}{suffix}', source,
+              'language': result.get('language', ''), 'audio_track': result.get('audio_track')}
+    return _load_session(video, source,
                          lambda: [dict(item) for item in result['segments']], base, log)
 
 
-def _load_session(video, source_key, source, make_segments, base, log):
-    path = cache_path(video, source_key, base)
+def _load_session(video, source, make_segments, base, log):
+    path = cache_path(video, source_key(source), base)
     cached = load_cache(path)
     if cached:
         log('Transkript önbellekten yüklendi.')

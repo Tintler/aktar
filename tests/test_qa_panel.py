@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 GUI_PATH = ROOT / 'gui.py'
 WINDOW_PATH = ROOT / 'qa_panel.py'
+LIBRARY_PATH = ROOT / 'library_panel.py'
 
 
 def _class(tree, name):
@@ -37,25 +38,32 @@ class QaWindowContractTests(unittest.TestCase):
     def setUpClass(cls):
         cls.gui_source = GUI_PATH.read_text(encoding='utf-8')
         cls.window_source = WINDOW_PATH.read_text(encoding='utf-8')
+        cls.library_source = LIBRARY_PATH.read_text(encoding='utf-8')
         cls.gui = ast.parse(cls.gui_source)
         cls.window = ast.parse(cls.window_source)
+        cls.library = ast.parse(cls.library_source)
 
-    def test_title_bar_switches_between_translate_and_ask_tabs(self):
+    def test_title_bar_switches_between_library_and_translate_tabs(self):
+        """F55: acilis sayfasi Kutuphane; ceviri ikinci sekme. Video Sec ve seri
+        kontrolleri yalnizca Altyazi Cevir sekmesinde gorunur."""
         main = _class(self.gui, 'MainWindow')
         bar = ast.get_source_segment(self.gui_source, _method(main, '_build_title_bar'))
-        self.assertIn("('Çeviri', 'translate'", bar)
-        self.assertIn("('Soru Sor', 'ask'", bar)
-        self.assertIn("setObjectName('modeSwitch')", bar)
-        self.assertLess(bar.index("HoverIconButton('Video Seç')"), bar.index("setObjectName('modeSwitch')"),
-                        'Video Seç, Çeviri | Soru Sor seçicisinin solunda olmalı')
+        self.assertIn("('Kütüphane', 'library'", bar)
+        self.assertIn("('Altyazı Çevir', 'translate'", bar)
+        self.assertNotIn("('Soru Sor', 'ask'", bar)
+        self.assertIn('self.mode_group.button(MODE_LIBRARY).setChecked(True)', bar)
+        self.assertLess(bar.index("setObjectName('modeSwitch')"), bar.index("HoverIconButton('Video Seç')"),
+                        'Video Seç, Kütüphane | Altyazı Çevir seçicisinin sağında olmalı')
         self.assertIn('self.mode_group.idClicked.connect(self.set_mode)', bar)
-        self.assertIn('self.series_group', bar)
         mode = ast.get_source_segment(self.gui_source, _method(main, 'set_mode'))
+        self.assertIn('self.open_button.setVisible(mode == MODE_TRANSLATE)', mode)
         self.assertIn('self.series_group.setVisible(mode == MODE_TRANSLATE)', mode)
         self.assertIn('self.pages.setCurrentIndex(mode)', mode)
+        self.assertIn('MODE_LIBRARY, MODE_TRANSLATE = 0, 1', self.gui_source)
         build = ast.get_source_segment(self.gui_source, _method(main, '_build'))
         self.assertIn('QStackedWidget()', build)
-        self.assertIn('self.qa_drop.select_requested.connect(self.choose_video)', build)
+        self.assertIn('self.pages.insertWidget(MODE_LIBRARY, self.library)', build)
+        self.assertIn('self.library.translate_requested.connect(self.translate_video)', build)
         self.assertIn('QFrame#modeSwitch QPushButton#modeTab:checked', self.gui_source)
 
     def test_separate_qa_window_and_file_card_button_are_gone(self):
@@ -66,21 +74,25 @@ class QaWindowContractTests(unittest.TestCase):
         self.assertNotIn('FramelessWindowHint', self.window_source)
 
     def test_qa_panel_is_imported_lazily(self):
-        main = _class(self.gui, 'MainWindow')
-        ensure = _method(main, '_ensure_qa_panel')
-        imports = [node for node in ast.walk(ensure) if isinstance(node, ast.ImportFrom)]
+        library = _class(self.library, 'LibraryPanel')
+        opened = _method(library, 'open_detail')
+        imports = [node for node in ast.walk(opened) if isinstance(node, ast.ImportFrom)]
         self.assertEqual([node.module for node in imports], ['qa_panel'])
-        top_level = {node.module for node in self.gui.body if isinstance(node, ast.ImportFrom)}
-        self.assertNotIn('qa_panel', top_level, 'QtMultimedia yalnizca gerektiginde yuklenmeli')
+        for tree in (self.gui, self.library):
+            top_level = {node.module for node in tree.body if isinstance(node, ast.ImportFrom)}
+            self.assertNotIn('qa_panel', top_level, 'QtMultimedia yalnizca gerektiginde yuklenmeli')
 
     def test_video_change_retires_old_panel_and_close_shuts_down(self):
-        main = _class(self.gui, 'MainWindow')
-        opened = ast.get_source_segment(self.gui_source, _method(main, 'open_video'))
+        library = _class(self.library, 'LibraryPanel')
+        opened = ast.get_source_segment(self.library_source, _method(library, 'open_detail'))
         self.assertIn('self._retire_qa_panel()', opened)
-        retire = ast.get_source_segment(self.gui_source, _method(main, '_retire_qa_panel'))
+        retire = ast.get_source_segment(self.library_source, _method(library, '_retire_qa_panel'))
         self.assertIn('panel.retire()', retire)
+        shutdown = ast.get_source_segment(self.library_source, _method(library, 'shutdown'))
+        self.assertIn('panel.shutdown()', shutdown)
+        main = _class(self.gui, 'MainWindow')
         close = ast.get_source_segment(self.gui_source, _method(main, 'closeEvent'))
-        self.assertIn('panel.shutdown()', close)
+        self.assertIn('self.library.shutdown()', close)
         panel = _class(self.window, 'VideoQAPanel')
         retire = ast.get_source_segment(self.window_source, _method(panel, 'retire'))
         self.assertIn('self._cancel_jobs()', retire)

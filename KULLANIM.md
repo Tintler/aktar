@@ -1,6 +1,6 @@
 # Aktar — Kullanım Kılavuzu
 
-Bu kılavuz son kullanıcı içindir: kurulum, LM Studio ayarı, bütün akışlar (Çeviri ve Soru Sor sekmeleri), terim sözlüğü (glossary), seri ayarları ve sorun giderme.
+Bu kılavuz son kullanıcı içindir: kurulum, LM Studio ayarı, bütün akışlar (Kütüphane ve Altyazı Çevir sekmeleri, videoya soru sorma), terim sözlüğü (glossary), seri ayarları ve sorun giderme.
 
 ---
 
@@ -167,7 +167,21 @@ Bu ayarların hepsi **Ayarlar** penceresinden de değiştirilebilir.
 
 ## 3. Arayüz akışı
 
-Başlık şeridindeki **Çeviri | Soru Sor** seçicisiyle iki sekme arasında geçilir. Açılan video iki sekmede ortaktır. Seri, Terim ve Süreklilik düğmeleri yalnızca Çeviri sekmesinde görünür. 3.1–3.5 Çeviri sekmesini, 3.6 Soru Sor sekmesini anlatır.
+Başlık şeridindeki **Kütüphane | Altyazı Çevir** seçicisiyle iki sekme arasında geçilir. Uygulama Kütüphane sekmesiyle açılır. Video Seç, Seri, Terim ve Süreklilik düğmeleri yalnızca Altyazı Çevir sekmesinde görünür. 3.0 Kütüphaneyi, 3.1–3.5 Altyazı Çevir sekmesini, 3.6 videoya soru sormayı anlatır.
+
+### 3.0 Kütüphane
+Videolarınızı **koleksiyonlarda** toplar (ör. "Makine Öğrenmesi", "Konferans 2026").
+
+- **İlk açılış:** Henüz koleksiyon yoksa ortada **Klasör veya dosya bırak** alanı görünür. Bir klasör bırakın ya da **Klasör seç** / **Dosya seç** ile seçin; klasörün adıyla bir koleksiyon oluşur.
+- **Koleksiyonlar (sol):** Koleksiyona tıklayınca içeriği açılır. **Yeni koleksiyon** ile boş bir koleksiyon oluşturulur. Sağ tık: **Yeniden adlandır**, **Yeniden tara**, **Koleksiyonu sil**. Silme yalnızca koleksiyon kaydını siler; dosyalarınız diskte kalır.
+- **Kaynak klasörler (sol alt):** Klasörler alt klasörleriyle birlikte taranır (gizli ve sistem klasörleri atlanır). Koleksiyon her açıldığında klasörler yeniden taranır: yeni bulunan videolar adının yanında **yeni** ile işaretlenir, diskten silinen ya da takılı olmayan diskteki videolar **Bulunamadı** olarak listede kalır. Sağ tık: **Klasörü aç**, **Koleksiyondan kaldır**.
+- **Klasör ekle / Dosya ekle:** Açık koleksiyona klasör veya tek tek video ekler. Klasör ve videolar sayfaya sürüklenerek de eklenebilir.
+- **Dosya tablosu:** Dosya adı, bulunduğu alt klasör, süre (hazırlanmamışsa dosya boyutu), metin kaynağı (Altyazı · dil / Whisper · model) ve durum (**Hazır**: özet çıkarılmış; **Metin hazır**: transkript var; **Bekliyor**; **Bulunamadı**). Arama kutusu dosya adında süzer.
+- **Videoya çift tıklayınca** oynatıcı ve soru-cevap açılır (bkz. 3.6); sol üstteki geri düğmesi listeye döndürür.
+- **Sağ tık menüsü:** **Oynat ve soru sor**, **Altyazıyı çevir…** (videoyu Altyazı Çevir sekmesinde açar), **Dosya konumunu aç**, **Koleksiyondan çıkar** (dosya diskte kalır; birden çok satır seçilebilir).
+- **Hepsini hazırla** ve sağdaki **Koleksiyona sor** paneli henüz etkin değildir; toplu hazırlık ve tüm koleksiyona soru sorma sonraki sürümlerde gelecek.
+
+Koleksiyonlar uygulama dizinindeki `library\` klasöründe tutulur.
 
 ```
 Video (sürükle-bırak veya Video Seç)
@@ -219,10 +233,10 @@ SRT/VTT font taşımadığı için bu işlem yalnızca ASS/SSA çıktısında uy
 
 Çeviri sürerken düğme **İptal** olur; duraklatma desteği kod tarafında mevcuttur.
 
-### 3.6 Soru Sor sekmesi (videoya soru sorma)
+### 3.6 Videoya soru sorma (Kütüphane → videoya çift tıklama)
 Video hakkında yerel modelle soru sormanızı sağlar: solda video oynatıcı, sağda yerel modelle sohbet.
 
-**Hazırlık.** Sekmeye ilk geçişte videonun transkripti çıkarılır ve model videoya genel bir bakış hazırlar. Bu sırada videoya özel önerilen sorular da üretilir. Sonuç `work_files\qa\` altında saklanır, aynı video tekrar açıldığında hesaplanmaz.
+**Hazırlık.** Video ilk açıldığında videonun transkripti çıkarılır ve model videoya genel bir bakış hazırlar. Bu sırada videoya özel önerilen sorular da üretilir. Sonuç `work_files\qa\` altında saklanır, aynı video tekrar açıldığında hesaplanmaz.
 - Transkript kaynağı varsayılan olarak videodaki metin altyazısıdır. Birden fazla altyazı varsa **Transkript** seçicisinden değiştirilebilir. Seçicideki **Sesten (Whisper)** seçeneği konuşmayı sesten metne çevirir (bkz. 1.5). Videoda birden fazla ses parçası varsa (örneğin `.mkv` içinde Japonca ve İngilizce) her parça ayrı **Sesten (Whisper) · <parça>** seçeneği olarak listelenir; Whisper'a hangi sesin gideceğini buradan seçersiniz. Her parçanın transkripti ayrı önbelleğe alınır.
 - Altyazısı olmayan videoda **Sesten transkript çıkar (Whisper)** önerisi çıkar. Model büyük olduğu için işlem otomatik başlamaz.
 - Kısa videolarda modele transkriptin tamamı gider. Transkript `qa_context_chars` sınırını aşarsa video bölümlere ayrılır (videoda gömülü bölüm/chapter varsa onlar, yoksa ~4 dakikalık parçalar) ve her bölüm özetlenir. Böylece uzun videolarda da genel sorular cevaplanabilir.
@@ -236,7 +250,7 @@ Video hakkında yerel modelle soru sormanızı sağlar: solda video oynatıcı, 
 **Oynatıcı.**
 - Videoya tıklamak veya **Boşluk** tuşu oynatır/duraklatır. **←/→** 5 saniye geri/ileri sarar.
 - Arama çubuğu videonun bölümlerine göre parçalıdır. Üzerine gelince zaman ve bölüm adı görünür.
-- Çeviri sekmesine geçince video duraklar. Sohbet ve video konumu korunur.
+- Listeye dönünce ya da Altyazı Çevir sekmesine geçince video duraklar. Aynı videoyu tekrar açarsanız sohbet ve video konumu korunur; başka bir video açılınca önceki sohbet kapanır.
 - **Ses parçası (kulaklık düğmesi):** Videoda birden fazla ses parçası varsa CC düğmesinin solunda görünür. Oynatılan sesi buradan değiştirirsiniz; video konumu korunur.
 
 **Altyazılar (CC düğmesi).** Oynatıcının sağ altındaki CC düğmesi şunları listeler:
@@ -368,4 +382,5 @@ py -3 cevir.py translate "C:\video\Movie.ass" --series game-of-thrones --glossar
 - `base_url` yalnızca yerel adres olabilir.
 - Kaynak video **salt-okunur**: kopyalanmaz, taşınmaz, değiştirilmez, yeniden encode edilmez.
 - Seri sözlükleri uygulama dizinindeki `series\` klasöründe tutulur (kullanıcı verisi; sürüm kontrolüne girmez).
+- Kütüphane koleksiyonları `library\` klasöründe tutulur; yalnızca dosya yollarını içerir, dosyaların kendisi kopyalanmaz.
 - Soru Sor transkriptleri, video haritası ve Whisper sonuçları `work_files\qa\` altında önbelleğe alınır. Silmek güvenlidir; gerekirse yeniden üretilir.

@@ -1,0 +1,135 @@
+"""Kutuphane (koleksiyon deposu + klasor taramasi) testleri; Qt gerektirmez."""
+from __future__ import annotations
+
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+import library  # noqa: E402
+import qa  # noqa: E402
+from app_core import save_json  # noqa: E402
+
+
+def touch(path, data=b'x'):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return path
+
+
+class LibraryTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.store = self.root / 'store'
+        patcher = mock.patch.dict(os.environ, {'AKTAR_LIBRARY_DIR': str(self.store)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self.temp.cleanup)
+        self.media = self.root / 'media'
+        touch(self.media / 'Ders 10.mkv')
+        touch(self.media / 'Ders 2.mp4')
+        touch(self.media / 'notlar.txt')
+        touch(self.media / 'alt' / 'Ders 3.webm')
+        touch(self.media / '.gizli' / 'x.mkv')
+
+    def paths(self, entries):
+        return [os.path.relpath(item['path'], self.media) for item in entries]
+
+    def test_create_list_rename_delete(self):
+        slug, data = library.create_collection('Makine Öğrenmesi', folders=[self.media])
+        self.assertEqual(slug, 'makine-ogrenmesi')
+        again, _ = library.create_collection('Makine Öğrenmesi')
+        self.assertEqual(again, 'makine-ogrenmesi-2')
+        self.assertEqual(list(library.list_collections()), [slug, again])
+        library.rename_collection(again, 'Belgeseller')
+        self.assertEqual(library.load_collection(again)['title'], 'Belgeseller')
+        library.delete_collection(again)
+        self.assertEqual(list(library.list_collections()), [slug])
+        self.assertTrue((self.media / 'Ders 2.mp4').exists(), 'kaynak dosyalara dokunulmaz')
+
+    def test_scan_walks_subfolders_in_natural_order_and_skips_hidden(self):
+        _slug, data = library.create_collection('ML', folders=[self.media])
+        entries, changed = library.scan(data)
+        self.assertTrue(changed)
+        self.assertEqual(self.paths(entries),
+                         [os.path.join('alt', 'Ders 3.webm'), 'Ders 2.mp4', 'Ders 10.mkv'])
+        self.assertTrue(all(item['kind'] == 'video' and not item['new'] for item in entries))
+
+    def test_rescan_marks_new_and_missing_files(self):
+        _slug, data = library.create_collection('ML', folders=[self.media])
+        library.scan(data)
+        touch(self.media / 'Ders 11.mkv')
+        (self.media / 'Ders 2.mp4').unlink()
+        entries, changed = library.scan(data)
+        self.assertTrue(changed)
+        state = {os.path.basename(item['path']): item for item in entries}
+        self.assertTrue(state['Ders 11.mkv']['new'])
+        self.assertTrue(state['Ders 2.mp4']['missing'])
+        self.assertFalse(state['Ders 10.mkv']['new'])
+        _entries, changed = library.scan(data)
+        self.assertFalse(changed)
+
+    def test_exclude_and_add_back(self):
+        _slug, data = library.create_collection('ML', folders=[self.media])
+        library.scan(data)
+        target = self.media / 'Ders 10.mkv'
+        library.exclude(data, [target])
+        entries, _ = library.scan(data)
+        self.assertNotIn('Ders 10.mkv', self.paths(entries))
+        self.assertEqual(library.add_files(data, [target]), 1)
+        entries, _ = library.scan(data)
+        self.assertIn('Ders 10.mkv', self.paths(entries))
+
+    def test_folders_merge_and_single_files(self):
+        data = {'folders': [], 'files': [], 'excluded': [], 'known': []}
+        self.assertTrue(library.add_folder(data, self.media / 'alt'))
+        self.assertTrue(library.add_folder(data, self.media))
+        self.assertEqual(data['folders'], [str(self.media)])
+        self.assertFalse(library.add_folder(data, self.media / 'alt'))
+        outside = touch(self.root / 'tek.mkv')
+        self.assertEqual(library.add_files(data, [outside, self.media / 'Ders 2.mp4',
+                                                  self.media / 'notlar.txt']), 1)
+        self.assertEqual(data['files'], [str(outside)])
+        outside.unlink()
+        entries, _ = library.scan(data)
+        self.assertTrue(next(item for item in entries if item['root'] is None)['missing'])
+
+    def test_remove_folder_drops_its_files(self):
+        _slug, data = library.create_collection('ML', folders=[self.media])
+        library.scan(data)
+        self.assertTrue(library.remove_folder(data, self.media))
+        entries, _ = library.scan(data)
+        self.assertEqual(entries, [])
+
+    def test_describe_reads_qa_cache(self):
+        video = self.media / 'Ders 2.mp4'
+        entry = {'path': video, 'kind': 'video', 'root': None, 'missing': False, 'new': False}
+        work = self.root / 'work'
+        self.assertEqual(library.describe(entry, work)['status'], 'pending')
+        source = {'kind': 'subtitle', 'stream': 2, 'language': 'eng', 'title': ''}
+        data = qa.build_data(video, [{'start': 0.0, 'end': 2.0, 'text': 'merhaba'}], source,
+                             {'duration': 95.0, 'chapters': []})
+        save_json(qa.cache_path(video, qa.source_key(source), work), data)
+        info = library.describe(entry, work)
+        self.assertEqual((info['status'], info['source'], info['duration']),
+                         ('transcript', 'Altyazı · eng', 95.0))
+        data['overview'] = {'summary': 'x', 'topics': [], 'questions': []}
+        save_json(qa.cache_path(video, qa.source_key(source), work), data)
+        self.assertEqual(library.describe(entry, work)['status'], 'ready')
+        missing = dict(entry, missing=True)
+        self.assertEqual(library.describe(missing, work)['status'], 'missing')
+
+    def test_default_title(self):
+        self.assertEqual(library.default_title([self.media]), 'media')
+        self.assertEqual(library.default_title([self.media / 'Ders 2.mp4']), 'media')
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -1,11 +1,11 @@
 """PySide6 masaustu arayuzu.
 
 Duzen (mockup-2 "Ust Arac Cubugu" v2):
-  - Üst özel başlık şeridi (frameless): [marka] [Video Seç] [Çeviri | Soru Sor] [Seri: dropdown / Terim / Süreklilik*] [durum rozeti] [Ayarlar] [─ ▢ ✕]
-    (* seri kontrolleri yalnizca Ceviri sekmesinde gorunur)
-  - Sayfalar (QStackedWidget): Ceviri (asagidaki duzen) | Soru Sor (qa_panel.VideoQAPanel:
-    oynatici + atifli sohbet; ilk acilista lazy import)
-  - Orta alan (kart yuzeyleri): bos durum birakma alani / dosya karti + akis tablosu
+  - Üst özel başlık şeridi (frameless): [marka] [Kütüphane | Altyazı Çevir] [Video Seç* Seri: dropdown / Terim / Süreklilik*] [durum rozeti] [Ayarlar] [─ ▢ ✕]
+    (* video secimi ve seri kontrolleri yalnizca Altyazi Cevir sekmesinde gorunur)
+  - Sayfalar (QStackedWidget): Kutuphane (library_panel.LibraryPanel: koleksiyonlar,
+    dosya tablosu, cift tiklayinca oynatici + soru sor) | Altyazi Cevir (asagidaki duzen)
+  - Ceviri orta alani (kart yuzeyleri): bos durum birakma alani / dosya karti + akis tablosu
   - Islem karti: [Bolum terimleri...] [On analiz yap (anahtar)] [ilerleme] [Duraklat] [Cevir]
   - Alt panel (QSplitter + QTabWidget): [Konsol] [On Analiz]
 
@@ -726,7 +726,7 @@ WHISPER_MODELS = ('large-v3-turbo', 'large-v3', 'medium', 'small', 'base')
 # speech.CUDA_MARKERS_WINDOWS / CUDA_MARKERS_LINUX ile ayni
 CUDA_MARKERS = (('cublas64_12.dll', 'cudnn64_9.dll') if os.name == 'nt'
                 else ('libcublas.so.12', 'libcudnn.so.9'))
-MODE_TRANSLATE, MODE_ASK = 0, 1  # baslik seridindeki sekmeler / self.pages sirasi
+MODE_LIBRARY, MODE_TRANSLATE = 0, 1  # baslik seridindeki sekmeler / self.pages sirasi
 
 
 def _alive(widget):
@@ -1611,8 +1611,6 @@ class MainWindow(QMainWindow):
         self._worker = None
         self._run_worker = None
         self._running = False
-        self.qa_panel = None
-        self._qa_retired = []  # video degisince durdurulan, isi suren eski paneller
         self.loaded_models = []
         self._progress_animation = QVariantAnimation(self)
         self._progress_animation.setDuration(280)
@@ -1671,19 +1669,14 @@ class MainWindow(QMainWindow):
         self.splitter.setStretchFactor(1, 1)
         self.splitter.setSizes([520, 220])
 
-        # Soru Sor sayfasi: video yokken kendi birakma alani; panel ilk acilista kurulur.
-        self.qa_page = QWidget()
-        self.qa_layout = QVBoxLayout(self.qa_page)
-        self.qa_layout.setContentsMargins(0, 0, 0, 0)
-        self.qa_empty = QWidget()
-        qa_empty_layout = QVBoxLayout(self.qa_empty)
-        qa_empty_layout.setContentsMargins(16, 16, 16, 16)
-        self.qa_drop = DropArea()
-        self.qa_drop.dropped.connect(self.open_video)
-        self.qa_drop.select_requested.connect(self.choose_video)
-        qa_empty_layout.addWidget(self.qa_drop)
-        self.qa_layout.addWidget(self.qa_empty, 1)
-        self.pages.addWidget(self.qa_page)
+        # Kutuphane (acilis sayfasi, MODE_LIBRARY). Konsol kurulduktan sonra kurulur
+        # (gunluge yazar); library_panel 'from gui import ...' yaptigi icin burada
+        # ice aktarilir.
+        from library_panel import LibraryPanel
+        self.library = LibraryPanel(log=self.append, warn=self.warn)
+        self.library.translate_requested.connect(self.translate_video)
+        self.pages.insertWidget(MODE_LIBRARY, self.library)
+        self.pages.setCurrentIndex(MODE_LIBRARY)
 
         self.toast = Toast(central)
         self._show_empty_state(True)
@@ -1854,11 +1847,6 @@ class MainWindow(QMainWindow):
         brand_row.addWidget(brand_text)
         row.addWidget(brand)
 
-        self.open_button = HoverIconButton('Video Seç')
-        self.open_button.setTintedIcon('upload', THEME['secondary'], 18)
-        self.open_button.clicked.connect(self.choose_video)
-        row.addWidget(self.open_button)
-
         switch = QFrame()
         switch.setObjectName('modeSwitch')
         switch_row = QHBoxLayout(switch)
@@ -1867,8 +1855,8 @@ class MainWindow(QMainWindow):
         self.mode_group = QButtonGroup(self)
         self.mode_group.setExclusive(True)
         for mode, (text, icon, tip) in enumerate((
-                ('Çeviri', 'translate', 'Altyazı çıkarma ve Türkçeye çeviri'),
-                ('Soru Sor', 'ask', 'Oynatıcı ve atıflı sohbetle videoya soru sorun'))):
+                ('Kütüphane', 'library', 'Koleksiyonlar, dosyalar ve soru sor'),
+                ('Altyazı Çevir', 'translate', 'Altyazı çıkarma ve Türkçeye çeviri'))):
             button = HoverIconButton(text)
             button.setObjectName('modeTab')
             button.setCheckable(True)
@@ -1877,11 +1865,18 @@ class MainWindow(QMainWindow):
             button.setCursor(Qt.PointingHandCursor)
             self.mode_group.addButton(button, mode)
             switch_row.addWidget(button)
-        self.mode_group.button(MODE_TRANSLATE).setChecked(True)
+        self.mode_group.button(MODE_LIBRARY).setChecked(True)
         self.mode_group.idClicked.connect(self.set_mode)
         row.addWidget(switch)
 
-        # Seri kontrolleri yalnizca Ceviri sekmesinde anlamlidir (set_mode gizler).
+        # Video secimi ve seri kontrolleri yalnizca Altyazi Cevir sekmesinde
+        # anlamlidir (set_mode gosterir/gizler; acilis Kutuphane'dir).
+        self.open_button = HoverIconButton('Video Seç')
+        self.open_button.setTintedIcon('upload', THEME['secondary'], 18)
+        self.open_button.clicked.connect(self.choose_video)
+        self.open_button.setVisible(False)
+        row.addWidget(self.open_button)
+
         self.series_group = QWidget()
         self.series_group.setStyleSheet('background:transparent;')
         series_row = QHBoxLayout(self.series_group)
@@ -1905,6 +1900,7 @@ class MainWindow(QMainWindow):
         self.continuity_button.setToolTip('Seri süreklilik kararlarını düzenle')
         self.continuity_button.clicked.connect(self.edit_series_decisions)
         series_row.addWidget(self.continuity_button)
+        self.series_group.setVisible(False)
         row.addWidget(self.series_group)
 
         spacer = QWidget()
@@ -2120,10 +2116,6 @@ class MainWindow(QMainWindow):
         self.progress.setValue(0)
         self.progress_value.setText('0 / 0')
         self.append('Video açıldı: ' + str(path))
-        self._retire_qa_panel()
-        self.qa_empty.show()
-        if self.pages.currentIndex() == MODE_ASK:
-            self.set_mode(MODE_ASK)
         if not self.series_slug:
             matches = series.matching_series(path)
             if len(matches) == 1:
@@ -2202,47 +2194,21 @@ class MainWindow(QMainWindow):
                 return self.streams[row]
         return None
 
-    # --- sekmeler: Ceviri | Soru Sor ---------------------------------------
+    # --- sekmeler: Kutuphane | Altyazi Cevir --------------------------------
     def set_mode(self, mode):
-        """Ceviri / Soru Sor sayfasi arasinda gecer (baslik seridindeki secici)."""
-        if mode == MODE_ASK and self.video is not None and not self._ensure_qa_panel():
-            mode = MODE_TRANSLATE
+        """Kutuphane / Altyazi Cevir sayfasi arasinda gecer (baslik seridindeki secici)."""
         self.mode_group.button(mode).setChecked(True)
+        self.open_button.setVisible(mode == MODE_TRANSLATE)
         self.series_group.setVisible(mode == MODE_TRANSLATE)
         self.pages.setCurrentIndex(mode)
 
-    def _ensure_qa_panel(self):
-        """Acik video icin Soru Sor panelini (yoksa) kurar. Basarisizsa False."""
-        if self.qa_panel is not None and self.qa_panel.video == self.video:
-            return True
-        try:
-            # Lazy import: QtMultimedia yalnizca Soru Sor sekmesi kullanilinca yuklenir.
-            from qa_panel import VideoQAPanel
-        except ImportError as error:
-            self.warn('Video oynatıcı bileşeni yüklenemedi (QtMultimedia): ' + str(error))
-            return False
-        self._retire_qa_panel()
-        stream = self.selected_stream()
-        if stream is not None and not stream['supported']:
-            stream = None
-        self.qa_panel = VideoQAPanel(self.video, stream=stream, streams=self.streams or None,
-                                     log=self.append)
-        self.qa_layout.addWidget(self.qa_panel, 1)
-        self.qa_empty.hide()
-        self.append('Soru Sor hazırlanıyor: ' + self.video.name)
-        return True
-
-    def _retire_qa_panel(self):
-        """Eski videonun panelini durdurur; isi bitince panel kendini siler."""
-        panel = self.qa_panel
-        if panel is None:
+    def translate_video(self, path):
+        """Kutuphanedeki bir videoyu Altyazi Cevir sekmesinde acar."""
+        if self._running:
+            self.warn('Çeviri sürerken başka video açılamaz.')
             return
-        self.qa_panel = None
-        self.qa_layout.removeWidget(panel)
-        self._qa_retired = [item for item in self._qa_retired if _alive(item) and item.busy()]
-        if panel.busy():
-            self._qa_retired.append(panel)
-        panel.retire()
+        self.set_mode(MODE_TRANSLATE)
+        self.open_video(path)
 
     # --- ceviri -----------------------------------------------------------
     def edit_chapter_glossary(self):
@@ -2446,9 +2412,7 @@ class MainWindow(QMainWindow):
             self._run_worker.request_cancel()
             self._thread.quit()
             self._thread.wait(5000)
-        for panel in [self.qa_panel] + self._qa_retired:
-            if panel is not None and _alive(panel):
-                panel.shutdown()
+        self.library.shutdown()
         event.accept()
 
     def warn(self, message):
@@ -2492,7 +2456,7 @@ def main():
     # Dosya yoneticisinden "Birlikte ac" / masaustu kisayolu (%f) ile gelen video.
     videos = [arg for arg in app.arguments()[1:] if Path(arg).is_file()]
     if videos:
-        window.open_video(videos[0])
+        window.translate_video(videos[0])
     return app.exec()
 
 

@@ -289,10 +289,10 @@ class GuiReviewContractTests(unittest.TestCase):
         self.assertIn('self.drop.select_requested.connect(self.choose_video)', build)
 
     def test_icon_assets_exist_for_every_tinted_icon(self):
-        source = GUI_PATH.read_text(encoding='utf-8')
-        tree = ast.parse(source)
         icons = set()
-        for node in ast.walk(tree):
+        nodes = [node for path in (GUI_PATH, GUI_PATH.parent / 'library_panel.py')
+                 for node in ast.walk(ast.parse(path.read_text(encoding='utf-8')))]
+        for node in nodes:
             if not (isinstance(node, ast.Call) and node.args
                     and isinstance(node.args[0], ast.Constant)):
                 continue
