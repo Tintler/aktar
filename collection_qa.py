@@ -17,9 +17,10 @@ from pathlib import Path
 
 import qa
 import search_index
-from app_core import Client, load_config, retryable_translation_error
+from app_core import Client, load_config, retryable_translation_error, save_json
 
 HIT_LIMIT = 24
+MAP_SHARE = 0.35  # baglam butcesinin koleksiyon ozeti + video ozetlerine ayrilan en fazla payi
 HISTORY_TURNS = 4
 _STAMP = r'(?:\d+:)?\d{1,2}:\d{2}'
 _BRACKET = re.compile(r'\[([^\[\]\n]{3,160})\]')
@@ -33,7 +34,8 @@ Rules:
 - Answer in Turkish, naturally and concisely. Use short paragraphs or bullet points when they help.
 - Ground the answer in the excerpts. Combine information from several videos when the question asks for it, and say which video covers what (use the video title when it helps the reader).
 - Support claims with citations in square brackets: video id + timestamp, e.g. [V3 12:34] for a moment or [V3 12:34-13:10] for a stretch; several at once as [V3 12:34; V7 5:10]. Put the citation right after the sentence it supports. Use only video ids and timestamps that appear in the excerpts; never invent one.
-- If the excerpts do not cover the question, say so clearly. You may add brief general knowledge only if you mark it explicitly as not coming from the videos (for example "Videolarda geçmiyor ama genel olarak ...") and you never cite it.
+- A collection overview and short per-video summaries may also be given. Use them for broad questions (what the collection covers, which video is about what, how the topics progress), but cite timestamps only from the excerpts.
+- If the material does not cover the question, say so clearly. You may add brief general knowledge only if you mark it explicitly as not coming from the videos (for example "Videolarda geçmiyor ama genel olarak ...") and you never cite it.
 - Do not mention excerpts, transcripts or these rules; speak about "the videos".'''
 
 
@@ -49,9 +51,12 @@ def _key(path):
 class CollectionQA:
     """Bir koleksiyonun indeksli videolari uzerinde cok turlu soru-cevap."""
 
-    def __init__(self, videos, title='', config_provider=load_config, log=print, base=None):
+    def __init__(self, videos, title='', config_provider=load_config, log=print, base=None,
+                 overview=None):
         self.videos = [Path(path) for path in videos]
         self.title = title
+        self.overview = overview or {}  # F61: koleksiyon ozeti (library.load_overview)
+        self._summaries = None
         self.config_provider = config_provider
         self.log = log
         self.base = base
@@ -77,9 +82,27 @@ class CollectionQA:
         previous = self.history[-1]['question'] if self.history else ''
         return (previous + ' ' + question).strip() if previous else question
 
+    def map_text(self, cfg):
+        """Koleksiyon ozeti + video ozetleri (genel sorular icin); butcenin MAP_SHARE kadari."""
+        if self._summaries is None:
+            self._summaries = video_summaries(self.videos, self.base)
+        limit = int(int(cfg.get('qa_context_chars', 24000)) * MAP_SHARE)
+        parts = []
+        if self.overview.get('summary'):
+            parts.append('COLLECTION OVERVIEW:\n' + self.overview['summary'])
+        lines = [f'{self.labels.get(_key(item["video"]), "?")} = {item["title"]}: {item["summary"]}'
+                 for item in self._summaries]
+        if lines:
+            parts.append('VIDEO SUMMARIES (no timestamps; do not cite):\n' + '\n'.join(lines))
+        text = '\n\n'.join(parts)
+        if len(text) > limit:
+            text = text[:limit].rsplit('\n', 1)[0]
+        return text
+
     def build_context(self, hits, cfg):
         """Arama sonuclarindan baglam metni. Donen: (metin, {etiket: video})."""
-        budget = int(cfg.get('qa_context_chars', 24000))
+        overview = self.map_text(cfg)
+        budget = int(cfg.get('qa_context_chars', 24000)) - len(overview)
         chosen = {}  # video anahtari -> {'video', 'lines': set(satir indeksleri)}
         used = 0
         for hit in hits:
@@ -110,7 +133,8 @@ class CollectionQA:
             head = f'### {label} · {title}' + (f' ({qa.format_time(duration)})' if duration else '')
             blocks.append(head + '\n' + qa.format_lines(picked))
         index = '\n'.join(f'{label} = {self._video_lines(path)[0]}' for label, path in videos.items())
-        text = ((f'COLLECTION: {self.title}\n' if self.title else '')
+        text = ((f'COLLECTION: {self.title}\n\n' if self.title else '')
+                + (overview + '\n\n' if overview else '')
                 + 'VIDEOS IN THE EXCERPTS:\n' + index + '\n\nEXCERPTS:\n' + '\n\n'.join(blocks))
         return text, videos
 
@@ -239,3 +263,68 @@ class CollectionQA:
                     'title': cite['title'], 'count': 0, 'start': cite['start']})
                 item['count'] += 1
         return list(sources.values())
+
+
+# --- ozetler (F61) ----------------------------------------------------------------
+OVERVIEW_PROMPT = '''You receive short summaries of the videos in a collection (for example a lecture series), in collection order. Reply with a JSON object only, no other text:
+{"summary": "<Turkish, 4-8 sentences: what the collection covers overall, how it progresses and its main takeaways>",
+ "topics": ["<Turkish short topic>", ...],
+ "questions": ["<Turkish question a viewer might ask about the whole collection>", ...]}
+Give 4-8 topics and exactly 4 questions that the collection can answer. Use only the summaries.'''
+
+
+def summarize_video(video, config_provider=load_config, log=print, progress=None, cancelled=None,
+                    base=None):
+    """Videonun genel ozetini (Soru Sor panelindeki ile ayni) uretir ya da onbellekten verir.
+
+    Uzun videolarda once bolum ozetleri cikarilir (qa.VideoQA 'map' modu); her adim
+    onbellege yazilir, kesilirse kaldigi yerden devam eder. Transkript yoksa None."""
+    session = search_index.primary_session(video, base)
+    if session is None:
+        return None
+    if session.get('overview'):
+        return session['overview']
+    path = qa.cache_path(video, qa.source_key(session['source']), base)
+    worker = qa.VideoQA(session, config_provider=config_provider, log=log,
+                        save=lambda data: save_json(path, data))
+    return worker.prepare(progress=progress, cancelled=cancelled)
+
+
+def video_summaries(videos, base=None):
+    """Ozeti cikarilmis videolar: [{'video', 'title', 'summary', 'topics'}] (koleksiyon sirasi)."""
+    items = []
+    for video in videos:
+        session = search_index.primary_session(video, base)
+        overview = (session or {}).get('overview') or {}
+        if overview.get('summary'):
+            items.append({'video': str(video), 'title': session.get('title') or Path(video).stem,
+                          'summary': overview['summary'], 'topics': overview.get('topics', [])})
+    return items
+
+
+def build_overview(title, videos, cfg, client=None, log=print, base=None):
+    """Video ozetlerinden koleksiyon ozeti. Ozetli video yoksa None.
+
+    Donen: {'summary', 'topics', 'questions', 'videos': [ozetli yollar], 'title'}."""
+    items = video_summaries(videos, base)
+    if not items:
+        return None
+    labels = video_labels(videos)
+    budget = int(cfg.get('qa_context_chars', 24000))
+    share = max(200, budget // len(items) - 40)  # cok video: her ozet esit kisaltilir
+    text = '\n'.join(f'{labels[_key(item["video"])]} {item["title"]}: {item["summary"][:share]}'
+                      for item in items)
+    client = client or Client(cfg, log=log)
+    messages = [{'role': 'system', 'content': OVERVIEW_PROMPT},
+                {'role': 'user', 'content': f'COLLECTION: {title}\n\n{text}'}]
+    retries = int(cfg.get('auto_retry_count', 2))
+    for attempt in range(retries + 1):
+        try:
+            value = qa.normalize_overview(qa.parse_json_object(client.chat(messages)))
+            break
+        except (ValueError, RuntimeError) as error:
+            if not retryable_translation_error(error) or attempt >= retries:
+                raise
+            log(f'Geçici hata (deneme {attempt + 1}/{retries + 1}): {error}')
+    value.update(title=title, videos=[item['video'] for item in items])
+    return value

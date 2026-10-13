@@ -158,7 +158,7 @@ def rename_collection(slug, title):
 def delete_collection(slug):
     """Koleksiyon kaydini (ve sohbet/ozet kayitlarini) siler; kaynak dosyalara dokunulmaz."""
     for path in (_path(slug), library_dir() / (slug + '.lock'), chat_path(slug),
-                 library_dir() / (slug + '.overview.json')):
+                 overview_path(slug)):
         try:
             path.unlink()
         except FileNotFoundError:
@@ -200,6 +200,23 @@ def save_chat(slug, entries, history):
         save_json(chat_path(slug), {'version': VERSION, 'entries': kept, 'history': history})
     except OSError:
         pass  # sohbet yazilamazsa yalnizca bir sonraki acilista gorunmez
+
+
+def overview_path(slug):
+    return library_dir() / (slug + '.overview.json')
+
+
+def load_overview(slug):
+    """Kayitli koleksiyon ozeti (F61) ya da None."""
+    try:
+        value = json.loads(read(overview_path(slug)))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) and value.get('summary') else None
+
+
+def save_overview(slug, overview):
+    save_json(overview_path(slug), dict(overview, version=VERSION, created=_now()))
 
 
 def clear_chat(slug):
@@ -473,14 +490,15 @@ def probe(path, base=None):
 def plan(entries, base=None, progress=None, cancelled=None, cfg=None):
     """Toplu hazirlik plani; gerekirse videolari yoklar.
 
-    Donen: {'ready': [entry], 'index': [entry] (transkript var, indeks yok),
+    Donen: {'ready': [entry], 'summary': [entry] (indeksli, video ozeti yok),
+            'index': [entry] (transkript var, indeks yok),
             'subtitle': [entry], 'whisper': [entry], 'failed': [(entry, hata)],
             'whisper_seconds': float}. Embedding modeli secili degilse transkripti
     olan her video 'ready' sayilir.
     """
     cfg = _embedding_cfg(cfg)
-    result = {'ready': [], 'index': [], 'subtitle': [], 'whisper': [], 'failed': [],
-              'whisper_seconds': 0.0}
+    result = {'ready': [], 'summary': [], 'index': [], 'subtitle': [], 'whisper': [],
+              'failed': [], 'whisper_seconds': 0.0}
     videos = [entry for entry in entries if not entry['missing'] and entry['kind'] == 'video']
     for index, entry in enumerate(videos):
         if cancelled and cancelled():
@@ -489,7 +507,8 @@ def plan(entries, base=None, progress=None, cancelled=None, cfg=None):
         if session is not None:
             indexed = (not str(cfg.get('embedding_model', '')).strip()
                        or is_indexed(entry['path'], session, cfg, base))
-            result['ready' if indexed else 'index'].append(entry)
+            group = 'index' if not indexed else 'ready' if session.get('overview') else 'summary'
+            result[group].append(entry)
         else:
             try:
                 info = probe(entry['path'], base)

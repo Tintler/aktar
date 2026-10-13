@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -94,6 +95,35 @@ class CollectionQATests(unittest.TestCase):
         parts = chat.split_citations('Burada [0:31] anlatılıyor.',
                                      {'V1': self.videos[0], 'V2': self.videos[1]})
         self.assertEqual([kind for kind, _value in parts], ['text'])
+
+    def test_video_summaries_feed_collection_overview_and_context(self):
+        """F61: video ozetleri -> koleksiyon ozeti; ikisi de soru baglamina girer."""
+        summaries = iter(['{"summary": "Regresyon dersi.", "topics": ["regresyon"], '
+                          '"questions": ["a?"]}',
+                          '{"summary": "Ağaç dersi.", "topics": ["budama"], "questions": ["b?"]}'])
+
+        with unittest.mock.patch('app_core.Client.chat', lambda _self, _messages: next(summaries)):
+            for video in self.videos:
+                summary = collection_qa.summarize_video(video, lambda: dict(self.cfg), QUIET,
+                                                        base=self.work)
+                self.assertTrue(summary['summary'])
+        self.assertEqual([item['summary'] for item in
+                          collection_qa.video_summaries(self.videos, self.work)],
+                         ['Regresyon dersi.', 'Ağaç dersi.'])
+        client = FakeClient('{"summary": "İki derslik ML serisi.", "topics": ["regresyon", '
+                            '"ağaçlar"], "questions": ["Hangi derste budama var?"]}')
+        overview = collection_qa.build_overview('ML', self.videos, self.cfg, client, QUIET,
+                                                self.work)
+        self.assertEqual(overview['summary'], 'İki derslik ML serisi.')
+        self.assertIn('V2 07 Ağaç: Ağaç dersi.', client.messages[1]['content'])
+        self.assertEqual(len(overview['videos']), 2)
+        chat = collection_qa.CollectionQA(self.videos, 'ML', lambda: dict(self.cfg), log=QUIET,
+                                          base=self.work, overview=overview)
+        answer = FakeClient('Seri iki dersten oluşur [V1 0:30].')
+        chat.ask('bu seride neler var', answer)
+        context = answer.messages[0]['content']
+        self.assertIn('COLLECTION OVERVIEW:\nİki derslik ML serisi.', context)
+        self.assertIn('V1 = 01 Regresyon: Regresyon dersi.', context)
 
     def test_empty_index_raises_helpful_error(self):
         chat = collection_qa.CollectionQA([self.root / 'yok.mkv'], 'ML', lambda: dict(self.cfg),

@@ -168,9 +168,10 @@ class LibraryTests(unittest.TestCase):
             indexed = library.plan(entries, work, cfg={
                 'embedding_model': 'emb', 'embedding_document_template': '{text}'})
         names = {key: [item['path'].name for item in result[key]]
-                 for key in ('ready', 'index', 'subtitle', 'whisper')}
-        self.assertEqual(names, {'ready': ['Ders 10.mkv'], 'index': [], 'subtitle': ['Ders 2.mp4'],
-                                 'whisper': ['Ders 3.webm']})
+                 for key in ('ready', 'summary', 'index', 'subtitle', 'whisper')}
+        # F61: transkripti (ve gerekirse indeksi) olan ama video ozeti olmayan -> 'summary'.
+        self.assertEqual(names, {'ready': [], 'summary': ['Ders 10.mkv'], 'index': [],
+                                 'subtitle': ['Ders 2.mp4'], 'whisper': ['Ders 3.webm']})
         self.assertEqual(result['whisper_seconds'], 90.0)
         # Embedding modeli seciliyse transkripti olup indeksi olmayan video indekslenecek.
         self.assertEqual([item['path'].name for item in indexed['index']], ['Ders 10.mkv'])

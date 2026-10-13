@@ -179,6 +179,8 @@ class PrepareDialog(QDialog):
         self.count_labels = {}
         for key, icon, color, text, hint in (
                 ('ready', 'check', THEME['accent'], 'Zaten hazır', 'Önbellekten gelir, tekrar işlenmez'),
+                ('summary', 'ask', THEME['secondary'], 'Yalnızca özeti eksik',
+                 'Transkript ve indeks hazır; özet seçeneği kapalıysa atlanır'),
                 ('index', 'terms', THEME['secondary'], 'Yalnızca indekslenecek',
                  'Transkript hazır; embedding ile aranabilir yapılır'),
                 ('subtitle', 'subtitles', THEME['secondary'], 'Gömülü altyazıdan',
@@ -212,6 +214,16 @@ class PrepareDialog(QDialog):
         self.plan_label.setObjectName('hint')
         column.addWidget(self.plan_label)
 
+        self.summary_check = ToggleSwitch('Video özetleri ve koleksiyon özeti çıkar')
+        self.summary_check.setChecked(True)
+        self.summary_check.toggled.connect(self._update_start)
+        column.addWidget(self.summary_check)
+        summary_hint = QLabel(f'Sohbet modeliyle ({cfg["model"]}): genel sorular ("bu seride neler '
+                              'anlatılıyor?") ve sohbetin başındaki özet için. Video başına '
+                              'birkaç model isteği; uzun videolarda dakikalar sürebilir.')
+        summary_hint.setObjectName('hint')
+        summary_hint.setWordWrap(True)
+        column.addWidget(summary_hint)
         self.whisper_check = ToggleSwitch('Altyazısız videolarda Whisper kullan')
         self.whisper_check.setChecked(self.whisper_ready)
         self.whisper_check.setEnabled(self.whisper_ready)
@@ -261,7 +273,7 @@ class PrepareDialog(QDialog):
             result = library.plan(entries, progress=self.plan_progress.emit,
                                   cancelled=self._cancel.is_set)
         except Exception as error:  # yoklama hatasi pencereyi kilitlemesin
-            result = {'ready': [], 'index': [], 'subtitle': [], 'whisper': [],
+            result = {'ready': [], 'summary': [], 'index': [], 'subtitle': [], 'whisper': [],
                       'whisper_seconds': 0.0,
                       'failed': [(None, str(error))]}
         if not self._cancel.is_set():
@@ -281,7 +293,7 @@ class PrepareDialog(QDialog):
                                             if entry is not None)
                                 if failed else '')
         self.plan_label.setVisible(bool(failed))
-        for key in ('ready', 'index', 'subtitle', 'whisper'):
+        for key in ('summary', 'index', 'subtitle', 'whisper'):
             self.count_labels[key][0].setText(str(len(result[key])))
         seconds = result['whisper_seconds']
         self.count_labels['whisper'][1].setText(
@@ -292,6 +304,9 @@ class PrepareDialog(QDialog):
     def _update_start(self):
         if self.result_plan is None:
             return
+        ready = len(self.result_plan['ready']) + (0 if self.summaries()
+                                                  else len(self.result_plan['summary']))
+        self.count_labels['ready'][0].setText(str(ready))
         count = len(self.queue())
         self.start_button.setText(f'Hazırlamayı başlat ({count} video)')
         self.start_button.setEnabled(count > 0)
@@ -299,11 +314,15 @@ class PrepareDialog(QDialog):
     def allow_whisper(self):
         return self.whisper_ready and self.whisper_check.isChecked()
 
+    def summaries(self):
+        return self.summary_check.isChecked()
+
     def queue(self):
         """Islenecek sira: once yalnizca indeks ve altyazilar (hizli), sonra Whisper."""
         if self.result_plan is None:
             return []
-        return (list(self.result_plan['index']) + list(self.result_plan['subtitle'])
+        return ((list(self.result_plan['summary']) if self.summaries() else [])
+                + list(self.result_plan['index']) + list(self.result_plan['subtitle'])
                 + (list(self.result_plan['whisper']) if self.allow_whisper() else []))
 
     def done(self, code):
@@ -317,13 +336,17 @@ class QueueWorker(QObject):
     started = Signal(int, str, str)    # (sira, yol, adim)
     progress = Signal(int, int)        # Whisper: (islenen saniye, toplam saniye)
     item_done = Signal(str, str, str)  # (yol, sonuc, hata)
+    summary_progress = Signal(int, int)  # video ozeti: (tamamlanan, toplam adim)
+    overview_ready = Signal(str)       # koleksiyon slug: koleksiyon ozeti yazildi
     log = Signal(str)
     finished = Signal(int, int, bool)  # (tamamlanan, hatali, durduruldu)
 
-    def __init__(self, entries, allow_whisper):
+    def __init__(self, entries, allow_whisper, summaries=False, collection=None):
         super().__init__()
         self.entries = entries
         self.allow_whisper = allow_whisper
+        self.summaries = summaries
+        self.collection = collection  # (slug, baslik, tum video yollari): koleksiyon ozeti icin
         self.cancel_event = threading.Event()
         self.resume_event = threading.Event()
         self.resume_event.set()
@@ -359,6 +382,11 @@ class QueueWorker(QObject):
                         self.started.emit(index, path, 'indeksleniyor')
                     library.index(entry, cfg, log=log, cancelled=self.cancel_event.is_set,
                                   client=client)
+                if outcome != 'skipped' and self.summaries:
+                    self.started.emit(index, path, 'özetleniyor')
+                    collection_qa.summarize_video(entry['path'], log=log,
+                                                  progress=self.summary_progress.emit,
+                                                  cancelled=self.cancel_event.is_set)
             except GracefulStop:
                 break
             except Exception as error:  # tek videonun hatasi kuyrugu durdurmasin
@@ -374,7 +402,21 @@ class QueueWorker(QObject):
             repeats = 0
             done += 1
             self.item_done.emit(path, outcome, '')
+        if self.summaries and self.collection and not self.cancel_event.is_set():
+            self._collection_overview(cfg)
         self.finished.emit(done, failed, self.cancel_event.is_set())
+
+    def _collection_overview(self, cfg):
+        slug, title, videos = self.collection
+        self.started.emit(len(self.entries), '', 'koleksiyon özeti')
+        try:
+            overview = collection_qa.build_overview(title, videos, cfg, log=self.log.emit)
+            if overview is not None:
+                library.save_overview(slug, overview)
+                self.log.emit(f'Koleksiyon özeti hazır: {len(overview["videos"])} video.')
+                self.overview_ready.emit(slug)
+        except Exception as error:  # ozet cikmazsa hazirlanan transkriptler yine kullanilir
+            self.log.emit('Koleksiyon özeti çıkarılamadı: ' + str(error))
 
 
 def inline_html(text):
@@ -422,6 +464,23 @@ def chat_html(entries, targets):
                     for item in value['sources'])
                 blocks.append('<p style="margin:0 0 14px 0; color:%s; font-size:12px;">'
                               'Kaynaklar: %s</p>' % (THEME['secondary'], sources))
+        elif kind == 'overview':
+            topics = ' · '.join(html.escape(topic) for topic in value.get('topics') or [])
+            questions = ''.join(
+                '<a href="ask:%d" style="color:%s; text-decoration:none;">→ %s</a><br>'
+                % (index, THEME['accent'], html.escape(question))
+                for index, question in enumerate(value.get('questions') or []))
+            blocks.append(
+                '<table width="100%%" cellspacing="0" cellpadding="10" bgcolor="%s" '
+                'style="margin:4px 0 10px 0;"><tr><td>'
+                '<span style="color:%s; font-size:11px; font-weight:600;">KOLEKSİYON ÖZETİ · '
+                '%d video</span><br>%s%s%s</td></tr></table>'
+                % (THEME['panel'], THEME['muted'], len(value.get('videos') or []),
+                   '<span style="color:%s;">%s</span>' % (THEME['secondary'],
+                                                         html.escape(value['summary'])),
+                   ('<br><br><span style="color:%s;">Konular: %s</span>' % (THEME['muted'], topics)
+                    if topics else ''),
+                   ('<br><br>' + questions) if questions else ''))
         elif kind == 'error':
             blocks.append('<p style="margin:6px 0 12px 0; color:%s;">%s</p>'
                           % (THEME['secondary'], html.escape(value)))
@@ -476,6 +535,8 @@ class LibraryPanel(QWidget):
         self._chats = {}       # koleksiyon slug -> {'session', 'entries'} (F58 sohbet)
         self._ask_job = None   # (thread, worker): calisan koleksiyon sorusu
         self._cite_targets = []
+        self._overviews = {}   # koleksiyon slug -> kayitli koleksiyon ozeti (ya da None)
+        self._suggestions = []  # ozet kartindaki onerilen sorular (ask:<n>)
         self.setStyleSheet(LIBRARY_STYLE.format(**THEME))
         self.scanned.connect(self._scan_finished)
         self._build()
@@ -1260,10 +1321,21 @@ class LibraryPanel(QWidget):
         self.scope_combo.setEnabled(not busy)
         self.clear_chat_button.setEnabled(not busy)
 
+    def _overview(self):
+        if self.slug not in self._overviews:
+            self._overviews[self.slug] = library.load_overview(self.slug)
+        return self._overviews[self.slug]
+
     def _render_chat(self):
         if self.data is None:
             return
-        self.chat_view.setHtml(chat_html(self._chat()['entries'], self._cite_targets))
+        overview = self._overview()
+        self._suggestions = list((overview or {}).get('questions') or [])
+        entries = self._chat()['entries']
+        if overview:
+            entries = [('overview', overview)] + [item for item in entries
+                                                   if item != ('note', CHAT_GREETING)]
+        self.chat_view.setHtml(chat_html(entries, self._cite_targets))
         bar = self.chat_view.verticalScrollBar()
         bar.setValue(bar.maximum())
 
@@ -1276,7 +1348,8 @@ class LibraryPanel(QWidget):
         session = chat['session']
         if session is None or [str(path) for path in session.videos] != [str(p) for p in videos]:
             # Kapsam degisti: etiketler yeni listeye gore; konusma gecmisi korunur.
-            fresh = collection_qa.CollectionQA(videos, self.data['title'], log=self._log)
+            fresh = collection_qa.CollectionQA(videos, self.data['title'], log=self._log,
+                                               overview=self._overview())
             fresh.history = session.history if session is not None else list(chat['history'])
             session = chat['session'] = fresh
         chat['entries'] += [('user', question), ('pending', 'Videolarda aranıyor…')]
@@ -1311,6 +1384,15 @@ class LibraryPanel(QWidget):
 
     def _on_chat_link(self, url):
         text = url.toString()
+        if text.startswith('ask:'):  # ozet kartindaki onerilen soru
+            try:
+                question = self._suggestions[int(text[4:])]
+            except (ValueError, IndexError):
+                return
+            if self.ask_input.isEnabled():
+                self.ask_input.setText(question)
+                self.ask_collection()
+            return
         if not text.startswith('cite:'):
             return
         try:
@@ -1341,12 +1423,17 @@ class LibraryPanel(QWidget):
         dialog = PrepareDialog(entries, self)
         if dialog.exec() != QDialog.Accepted:
             return
-        self.start_queue(dialog.queue(), dialog.allow_whisper())
+        self.start_queue(dialog.queue(), dialog.allow_whisper(), dialog.summaries())
 
-    def start_queue(self, entries, allow_whisper):
-        if not entries:
+    def start_queue(self, entries, allow_whisper, summaries=False):
+        if not entries and not summaries:
             return
-        worker = QueueWorker(entries, allow_whisper)
+        videos = [entry['path'] for entry in self.entries
+                  if not entry['missing'] and entry['kind'] == 'video']
+        worker = QueueWorker(entries, allow_whisper, summaries,
+                             (self.slug, self.data['title'], videos) if self.data else None)
+        worker.summary_progress.connect(self._summary_progress)
+        worker.overview_ready.connect(self._overview_ready)
         thread = QThread(self)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -1374,11 +1461,31 @@ class LibraryPanel(QWidget):
         thread.start()
 
     def _queue_started(self, index, path, step):
-        self._queue_name = Path(path).name
         self._queue_index = index
+        if not path:  # tum videolardan sonra koleksiyon ozeti
+            self._queue_name = ''
+            self.queue_label.setText('Koleksiyon özeti çıkarılıyor…')
+            return
+        self._queue_name = Path(path).name
         self.queue_label.setText(f'Hazırlanıyor {index + 1}/{self._queue_total} · '
                                  f'{self._queue_name} — {step}')
         self._set_status_cell(path, 'İşleniyor…', THEME['accent'])
+
+    def _summary_progress(self, done, total):
+        if self._queue is None or total <= 0:
+            return
+        entries = self._queue[1].entries
+        if self._queue_index < len(entries):
+            self._set_status_cell(entries[self._queue_index]['path'], f'Özet {done}/{total}',
+                                  THEME['accent'])
+
+    def _overview_ready(self, slug):
+        self._overviews.pop(slug, None)
+        chat = self._chats.get(slug)
+        if chat is not None:
+            chat['session'] = None  # yeni ozetle yeniden kurulsun
+        if slug == self.slug:
+            self._render_chat()
 
     def _queue_progress(self, done, total):
         """Whisper ilerlemesi (saniye): satirda ve seritte yuzde."""
