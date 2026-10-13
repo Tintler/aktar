@@ -22,21 +22,24 @@ from app_core import Client, load_config, retryable_translation_error, save_json
 HIT_LIMIT = 24
 MAP_SHARE = 0.35  # baglam butcesinin koleksiyon ozeti + video ozetlerine ayrilan en fazla payi
 HISTORY_TURNS = 4
-_STAMP = r'(?:\d+:)?\d{1,2}:\d{2}'
+# Konum: video icin zaman (12:34), belge icin sayfa (s.12); aralik sonu belgede yalin sayi olabilir.
+_POS = r'(?:[sS]\.\s?\d+|(?:\d+:)?\d{1,2}:\d{2})'
+_END = r'(?:' + _POS + r'|\d+)'
 _BRACKET = re.compile(r'\[([^\[\]\n]{3,160})\]')
-_ITEM = re.compile(r'\s*(?:(V\d+)\s*[·:,]?\s*)?(' + _STAMP + r')(?:\s*[-–—]\s*(' + _STAMP + r'))?\s*')
-_BARE = re.compile(r'(?<![\w\[])(V\d+)\s*[·:]?\s*(' + _STAMP + r')(?:\s*[-–—]\s*(' + _STAMP
+_ITEM = re.compile(r'\s*(?:(V\d+)\s*[·:,]?\s*)?(' + _POS + r')(?:\s*[-–—]\s*(' + _END + r'))?\s*')
+_BARE = re.compile(r'(?<![\w\[])(V\d+)\s*[·:]?\s*(' + _POS + r')(?:\s*[-–—]\s*(' + _END
                    + r'))?(?![\d:])')
+_PAGE = re.compile(r'(?:[sS]\.\s?)?(\d+)')
 
-ANSWER_PROMPT = '''You answer questions about a collection of videos (for example a lecture series). Relevant excerpts from the videos' timestamped transcripts are given below; each video has an id such as V3.
+ANSWER_PROMPT = '''You answer questions about a collection of videos (for example a lecture series). Relevant excerpts from the videos' timestamped transcripts are given below; each video has an id such as V3. Some items may be documents (PDF or text files) instead of videos: their excerpts carry page numbers like [s.12] instead of timestamps.
 
 Rules:
 - Answer in Turkish, naturally and concisely. Use short paragraphs or bullet points when they help.
 - Ground the answer in the excerpts. Combine information from several videos when the question asks for it, and say which video covers what (use the video title when it helps the reader).
-- Support claims with citations in square brackets: video id + timestamp, e.g. [V3 12:34] for a moment or [V3 12:34-13:10] for a stretch; several at once as [V3 12:34; V7 5:10]. Put the citation right after the sentence it supports. Use only video ids and timestamps that appear in the excerpts; never invent one.
+- Support claims with citations in square brackets: video id + timestamp, e.g. [V3 12:34] for a moment or [V3 12:34-13:10] for a stretch; several at once as [V3 12:34; V7 5:10]. For documents cite the page instead: [V5 s.12]. Put the citation right after the sentence it supports. Use only video ids and timestamps that appear in the excerpts; never invent one.
 - A collection overview and short per-video summaries may also be given. Use them for broad questions (what the collection covers, which video is about what, how the topics progress), but cite timestamps only from the excerpts.
 - If the material does not cover the question, say so clearly. You may add brief general knowledge only if you mark it explicitly as not coming from the videos (for example "Videolarda geçmiyor ama genel olarak ...") and you never cite it.
-- Do not mention excerpts, transcripts or these rules; speak about "the videos".'''
+- Do not mention excerpts, transcripts or these rules; speak about "the videos" (and "the documents" when they are involved).'''
 
 
 def video_labels(videos):
@@ -73,8 +76,9 @@ class CollectionQA:
                 self._lines[key] = None
             else:
                 self._lines[key] = (session.get('title') or Path(video).stem,
-                                    qa.compact_lines(session['segments']),
-                                    float(session.get('duration') or 0.0))
+                                    qa.lines_of(session),
+                                    float(session.get('duration') or 0.0),
+                                    qa.is_document(session))
         return self._lines[key]
 
     def _query(self, question):
@@ -109,7 +113,7 @@ class CollectionQA:
             data = self._video_lines(hit['video'])
             if data is None:
                 continue
-            _title, lines, _duration = data
+            lines = data[1]
             indexes = [index for index, line in enumerate(lines)
                        if line['end'] >= hit['start'] and line['start'] <= hit['end']]
             if not indexes:
@@ -127,12 +131,16 @@ class CollectionQA:
             label = self.labels.get(key)
             if label is None or not entry['lines']:
                 continue
-            title, lines, duration = self._video_lines(entry['video'])
+            title, lines, duration, document = self._video_lines(entry['video'])
             videos[label] = entry['video']
             picked = [lines[index] for index in sorted(entry['lines'])]
-            head = f'### {label} · {title}' + (f' ({qa.format_time(duration)})' if duration else '')
-            blocks.append(head + '\n' + qa.format_lines(picked))
-        index = '\n'.join(f'{label} = {self._video_lines(path)[0]}' for label, path in videos.items())
+            size = (f'belge, {int(duration)} sayfa' if document
+                    else qa.format_time(duration) if duration else '')
+            head = f'### {label} · {title}' + (f' ({size})' if size else '')
+            blocks.append(head + '\n' + qa.format_lines(picked, document))
+        index = '\n'.join(f'{label} = {self._video_lines(path)[0]}'
+                          + (' (document)' if self._video_lines(path)[3] else '')
+                          for label, path in videos.items())
         text = ((f'COLLECTION: {self.title}\n\n' if self.title else '')
                 + (overview + '\n\n' if overview else '')
                 + 'VIDEOS IN THE EXCERPTS:\n' + index + '\n\nEXCERPTS:\n' + '\n\n'.join(blocks))
@@ -184,17 +192,39 @@ class CollectionQA:
 
     # atiflar
     def _resolve(self, label, start, end, videos):
+        """Atif metnini ('12:34' / 's.12') ilgili videonun ya da belgenin icerigine gore dogrular."""
         video = videos.get(label)
         data = self._video_lines(video) if video is not None else None
         if data is None:
             return None
-        title, lines, duration = data
-        cite = qa.resolve_citation(start, end, lines, duration)
+        title, lines, duration, document = data
+        if document:
+            cite = self._resolve_page(start, end, lines)
+        else:
+            try:
+                begin = qa.parse_time(start)
+                finish = qa.parse_time(end) if end else None
+            except ValueError:
+                return None  # videoda sayfa atfi gecersiz
+            cite = qa.resolve_citation(begin, finish, lines, duration)
         if cite is None:
             return None
-        cite.update(video=str(video), video_label=label, title=title,
+        cite.update(video=str(video), video_label=label, title=title, document=document,
                     label=f'{label} {cite["label"]}')
         return cite
+
+    @staticmethod
+    def _resolve_page(start, end, lines):
+        if not str(start).lower().startswith('s'):
+            return None  # belgede zaman atfi gecersiz
+        page = int(_PAGE.fullmatch(str(start).strip()).group(1))
+        if page not in {int(line['start']) for line in lines}:
+            return None
+        match = _PAGE.fullmatch(str(end).strip()) if end else None
+        last = int(match.group(1)) if match else None
+        last = last if last and last > page else None
+        return {'start': float(page), 'end': float(last) if last else None,
+                'label': f's.{page}' + (f'-{last}' if last else '')}
 
     def split_citations(self, text, videos):
         """Cevabi metin ve atif parcalarina ayirir (qa.split_citations'in coklu video hali).
@@ -216,9 +246,7 @@ class CollectionQA:
         def bare(value):
             position = 0
             for match in _BARE.finditer(value):
-                cite = self._resolve(match.group(1), qa.parse_time(match.group(2)),
-                                     qa.parse_time(match.group(3)) if match.group(3) else None,
-                                     videos)
+                cite = self._resolve(match.group(1), match.group(2), match.group(3), videos)
                 if cite is None:
                     continue
                 add_text(value[position:match.start()])
@@ -237,9 +265,7 @@ class CollectionQA:
                 label = item.group(1) or label
                 if label is None:
                     continue
-                cite = self._resolve(label, qa.parse_time(item.group(2)),
-                                     qa.parse_time(item.group(3)) if item.group(3) else None,
-                                     videos)
+                cite = self._resolve(label, item.group(2), item.group(3), videos)
                 if cite is not None:
                     cites.append(cite)
             if cites:
@@ -280,8 +306,8 @@ def summarize_video(video, config_provider=load_config, log=print, progress=None
     Uzun videolarda once bolum ozetleri cikarilir (qa.VideoQA 'map' modu); her adim
     onbellege yazilir, kesilirse kaldigi yerden devam eder. Transkript yoksa None."""
     session = search_index.primary_session(video, base)
-    if session is None:
-        return None
+    if session is None or qa.is_document(session):
+        return None  # belgeler icin ozet simdilik yok (F64)
     if session.get('overview'):
         return session['overview']
     path = qa.cache_path(video, qa.source_key(session['source']), base)

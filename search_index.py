@@ -60,7 +60,17 @@ def index_path(video, session, cfg, base=None):
 
 def chunk_lines(segments, max_seconds=CHUNK_SECONDS, max_chars=CHUNK_CHARS):
     """Transkripti arama parcalarina boler; ardisik parcalar bir satir ortusur."""
-    lines = qa.compact_lines(segments)
+    return _chunk(qa.compact_lines(segments), max_seconds, max_chars)
+
+
+def chunk_session(session):
+    """Oturumun arama parcalari; belgelerde (F64) sure siniri yok, yalnizca karakter."""
+    if qa.is_document(session):
+        return _chunk(qa.lines_of(session), float('inf'), CHUNK_CHARS)
+    return chunk_lines(session['segments'])
+
+
+def _chunk(lines, max_seconds, max_chars):
     chunks, current = [], []
     for line in lines:
         if current and (line['end'] - current[0]['start'] > max_seconds
@@ -111,7 +121,7 @@ def build(video, cfg, client=None, base=None, log=print, cancelled=None):
     path = index_path(video, session, cfg, base)
     if path.exists():
         return path
-    chunks = chunk_lines(session['segments'])
+    chunks = chunk_session(session)
     if not chunks:
         raise ValueError('Transkript boş; indekslenecek metin yok.')
     client = client or Client(cfg, log=log)
@@ -180,8 +190,9 @@ def search(videos, query, cfg, client=None, limit=12, base=None, log=print):
             log(f'İndeks boyutu farklı, atlandı: {Path(video).name}')
             continue
         for chunk, vector in zip(meta['chunks'], vectors):
-            scored.append((sum(map(mul, wanted, vector)), str(video), meta['title'], chunk))
+            scored.append((sum(map(mul, wanted, vector)), str(video), meta['title'], chunk,
+                           qa.is_document(meta)))
     best = heapq.nlargest(limit, scored, key=lambda item: item[0])
     return [{'video': video, 'title': title, 'start': chunk['start'], 'end': chunk['end'],
-             'text': chunk['text'], 'score': round(score, 4)}
-            for score, video, title, chunk in best]
+             'text': chunk['text'], 'score': round(score, 4), 'document': document}
+            for score, video, title, chunk, document in best]

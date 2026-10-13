@@ -25,21 +25,25 @@ def srt_time(seconds):
 def render(session, fmt):
     """Tek videonun transkripti istenen bicimde (metin)."""
     title = session.get('title') or 'Transkript'
+    document = qa.is_document(session)
     if fmt == 'srt':
+        if document:
+            raise ValueError('Belgeler SRT olarak dışa aktarılamaz: ' + title)
         cues = []
         for number, segment in enumerate(session['segments'], 1):
             end = max(float(segment['end']), float(segment['start']) + 0.5)
             cues.append(f'{number}\n{srt_time(segment["start"])} --> {srt_time(end)}\n'
                         f'{segment["text"]}\n')
         return '\n'.join(cues)
-    lines = qa.compact_lines(session['segments'])
+    lines = qa.lines_of(session)
     if fmt == 'md':
         overview = (session.get('overview') or {}).get('summary', '')
-        body = '\n'.join(f'**[{qa.format_time(line["start"])}]** {line["text"]}  ' for line in lines)
+        body = '\n'.join(f'**[{qa.format_position(line["start"], document)}]** {line["text"]}  '
+                         for line in lines)
         return (f'# {title}\n\n' + (f'> {overview}\n\n' if overview else '')
                 + '## Transkript\n\n' + body + '\n')
     if fmt == 'txt':
-        return f'{title}\n\n{qa.format_lines(lines)}\n'
+        return f'{title}\n\n{qa.format_lines(lines, document)}\n'
     raise ValueError('Bilinmeyen biçim: ' + str(fmt))
 
 
@@ -90,5 +94,10 @@ def export_many(videos, folder, fmt, base=None):
         if session is None:
             missing.append(Path(video).name)
             continue
-        written.append(write(unique_path(folder, Path(video).stem, fmt), render(session, fmt)))
+        try:
+            text = render(session, fmt)
+        except ValueError:  # ornegin belge -> SRT
+            missing.append(Path(video).name)
+            continue
+        written.append(write(unique_path(folder, Path(video).stem, fmt), text))
     return written, missing

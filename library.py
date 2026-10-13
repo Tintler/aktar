@@ -20,6 +20,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+import documents
 import media
 import qa
 import search_index
@@ -29,8 +30,8 @@ from app_core import APP_DIR, FileLock, load_config, read, save_json, tr_lower
 from media import VIDEO_EXTENSIONS
 
 VERSION = 1
-# Ileride: 'pdf', 'text', 'image', 'table' (her tur kendi metin cikaricisiyla).
-KINDS = {'video': VIDEO_EXTENSIONS}
+# Ileride: 'image', 'table' (her tur kendi metin cikaricisiyla).
+KINDS = {'video': VIDEO_EXTENSIONS, 'document': documents.SUFFIXES}
 SKIPPED_DIRS = {'$recycle.bin', 'system volume information', '__pycache__', 'node_modules'}
 
 
@@ -378,10 +379,13 @@ def describe(entry, base=None, cfg=None):
     """
     if entry['missing']:
         return {'status': 'missing', 'source': '', 'duration': 0.0, 'lines': []}
-    sessions = qa.cached_sessions(entry['path'], base) if entry['kind'] == 'video' else []
+    sessions = qa.cached_sessions(entry['path'], base)
     if not sessions:
-        probed = cached_probe(entry['path'], base) if entry['kind'] == 'video' else None
-        if probed is None:
+        probed = cached_probe(entry['path'], base)
+        if probed is not None and probed.get('no_text'):
+            return {'status': 'no_text', 'source': '', 'duration': probed['duration'],
+                    'lines': []}
+        if probed is None or entry['kind'] != 'video':
             return {'status': 'pending', 'source': '', 'duration': 0.0, 'lines': []}
         return {'status': 'pending' if probed['subtitles'] else 'no_subtitle', 'source': '',
                 'duration': probed['duration'], 'lines': []}
@@ -389,11 +393,15 @@ def describe(entry, base=None, cfg=None):
     source = best['source']
     if source.get('kind') == 'subtitle':
         label = 'Altyazı' + (' · ' + source['language'] if source.get('language') else '')
+    elif source.get('kind') == 'pdf':
+        label = 'PDF metni'
+    elif source.get('kind') == 'text':
+        label = 'Metin dosyası'
     else:
         label = 'Whisper' + (' · ' + source['model'] if source.get('model') else '')
     indexed = is_indexed(entry['path'], best, _embedding_cfg(cfg), base)
     lines = [{'start': line['start'], 'text': line['text'], 'folded': fold(line['text'])}
-             for line in qa.compact_lines(best['segments'])]
+             for line in qa.lines_of(best)]
     return {'status': 'ready' if indexed else 'transcript', 'source': label,
             'duration': float(best.get('duration') or 0.0), 'lines': lines}
 
@@ -487,6 +495,18 @@ def probe(path, base=None):
     return copy.deepcopy(value)
 
 
+def mark_no_text(path, base=None):
+    """Metin katmani olmayan belgeyi yoklama onbellegine isaretler (durum: no_text)."""
+    stamp = _stamp(path)
+    with _PROBE_LOCK:
+        store = _probe_store(base)
+        store[stamp] = {'duration': 0.0, 'subtitles': [], 'no_text': True}
+        try:
+            save_json(_probe_file(base), store)
+        except OSError:
+            pass
+
+
 def plan(entries, base=None, progress=None, cancelled=None, cfg=None):
     """Toplu hazirlik plani; gerekirse videolari yoklar.
 
@@ -497,9 +517,9 @@ def plan(entries, base=None, progress=None, cancelled=None, cfg=None):
     olan her video 'ready' sayilir.
     """
     cfg = _embedding_cfg(cfg)
-    result = {'ready': [], 'summary': [], 'index': [], 'subtitle': [], 'whisper': [],
-              'failed': [], 'whisper_seconds': 0.0}
-    videos = [entry for entry in entries if not entry['missing'] and entry['kind'] == 'video']
+    result = {'ready': [], 'summary': [], 'index': [], 'document': [], 'subtitle': [],
+              'whisper': [], 'failed': [], 'whisper_seconds': 0.0}
+    videos = [entry for entry in entries if not entry['missing']]
     for index, entry in enumerate(videos):
         if cancelled and cancelled():
             break
@@ -507,8 +527,15 @@ def plan(entries, base=None, progress=None, cancelled=None, cfg=None):
         if session is not None:
             indexed = (not str(cfg.get('embedding_model', '')).strip()
                        or is_indexed(entry['path'], session, cfg, base))
-            group = 'index' if not indexed else 'ready' if session.get('overview') else 'summary'
+            summarized = session.get('overview') or entry['kind'] != 'video'
+            group = 'index' if not indexed else 'ready' if summarized else 'summary'
             result[group].append(entry)
+        elif entry['kind'] == 'document':
+            probed = cached_probe(entry['path'], base)
+            if probed is not None and probed.get('no_text'):
+                result['failed'].append((entry, 'Belgede okunabilir metin yok.'))
+            else:
+                result['document'].append(entry)
         else:
             try:
                 info = probe(entry['path'], base)
@@ -529,12 +556,19 @@ def transcribe(entry, cfg, allow_whisper=True, base=None, log=print, progress=No
                cancelled=None):
     """Tek videonun transkriptini qa onbellegine yazar.
 
-    Donen: 'cached' (zaten vardi) | 'subtitle' | 'whisper' | 'skipped' (altyazi yok,
+    Donen: 'cached' (zaten vardi) | 'document' | 'subtitle' | 'whisper' | 'skipped' (altyazi yok,
     Whisper izni yok). Soru Sor paneli ayni onbellegi kullanir (ayni akis secimi).
     """
     path = entry['path']
     if qa.cached_sessions(path, base):
         return 'cached'
+    if entry['kind'] == 'document':
+        try:
+            documents.load_session(path, base, log)
+        except documents.NoTextError:
+            mark_no_text(path, base)  # sonraki planlarda tekrar denenmez
+            raise
+        return 'document'
     info = probe(path, base)
     stream = qa.pick_subtitle_stream(info['subtitles'])
     if stream is not None:

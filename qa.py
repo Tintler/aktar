@@ -129,8 +129,38 @@ def compact_lines(segments, max_seconds=LINE_SECONDS, max_chars=LINE_CHARS):
     return lines
 
 
-def format_lines(lines):
-    return '\n'.join(f'[{format_time(line["start"])}] {line["text"]}' for line in lines)
+def format_lines(lines, document=False):
+    return '\n'.join(f'[{format_position(line["start"], document)}] {line["text"]}'
+                     for line in lines)
+
+
+# --- belgeler (F64): konum zaman yerine sayfa numarasidir --------------------
+DOCUMENT_KINDS = ('pdf', 'text')
+
+
+def is_document(data):
+    return (data.get('source') or {}).get('kind') in DOCUMENT_KINDS
+
+
+def format_position(value, document=False):
+    """Video icin 'm:ss', belge icin 's.<sayfa>'."""
+    return f's.{int(value)}' if document else format_time(value)
+
+
+def lines_of(data):
+    """Oturumun satirlari: video icin compact_lines; belgede yalnizca ayni sayfadaki
+    paragraflar birlesir (sayfa numarasi atif icin korunur)."""
+    if not is_document(data):
+        return compact_lines(data['segments'])
+    lines = []
+    for segment in data['segments']:
+        current = lines[-1] if lines else None
+        if (current and current['start'] == segment['start']
+                and len(current['text']) + 1 + len(segment['text']) <= LINE_CHARS):
+            current['text'] += ' ' + segment['text']
+        else:
+            lines.append(dict(segment))
+    return lines
 
 
 # --- bolumler -------------------------------------------------------------
@@ -273,7 +303,10 @@ def build_data(video, segments, source, info=None):
 
 
 def source_key(source):
-    """Oturum kaynagindan onbellek anahtari: 'subtitle:2' / 'whisper:<model>:<dil>[:a<iz>]'."""
+    """Oturum kaynagindan onbellek anahtari: 'subtitle:2' / 'whisper:<model>:<dil>[:a<iz>]' /
+    'document:pdf'."""
+    if source.get('kind') in DOCUMENT_KINDS:
+        return f'document:{source["kind"]}'
     if source.get('kind') == 'subtitle':
         return f'subtitle:{int(source["stream"])}'
     track = source.get('audio_track')

@@ -48,14 +48,17 @@ HITS_MAX_HEIGHT = 190
 CITE_BG = '#18210a'  # atif rozeti zemini (tasarim taslagindaki koyu lime)
 REPEATED_ERROR_LIMIT = 3  # ust uste ayni hata: kuyruk durur
 WARN = '#f0b44c'  # onay bekleyen (Whisper) durumlar; tasarim taslagindaki amber
-KIND_LABELS = {'video': 'Video'}
-KIND_ICONS = {'video': 'video'}
+KIND_LABELS = {'video': 'Video', 'document': 'Belge'}
+KIND_ICONS = {'video': 'video', 'document': 'document'}
 STATUS_TEXT = {'ready': 'Hazır', 'transcript': 'Metin hazır', 'pending': 'Bekliyor',
-               'no_subtitle': 'Altyazı yok · Whisper bekliyor', 'missing': 'Bulunamadı'}
+               'no_subtitle': 'Altyazı yok · Whisper bekliyor',
+               'no_text': 'Metin yok (taranmış PDF)', 'missing': 'Bulunamadı'}
 META_TEXT = {'ready': 'hazır', 'transcript': 'metin hazır', 'pending': 'bekliyor',
-             'no_subtitle': 'Whisper bekliyor', 'missing': 'bulunamadı'}
+             'no_subtitle': 'Whisper bekliyor', 'no_text': 'metinsiz belge',
+             'missing': 'bulunamadı'}
 STATUS_COLOR = {'ready': THEME['text'], 'transcript': THEME['secondary'],
-                'pending': THEME['muted'], 'no_subtitle': WARN, 'missing': THEME['disabled']}
+                'pending': THEME['muted'], 'no_subtitle': WARN, 'no_text': WARN,
+                'missing': THEME['disabled']}
 
 LIBRARY_STYLE = """
 QFrame#libSide {{ background:{chrome}; border:0; border-right:1px solid {border}; }}
@@ -172,8 +175,8 @@ class PrepareDialog(QDialog):
         column = QVBoxLayout(self)
         column.setContentsMargins(24, 22, 24, 20)
         column.setSpacing(14)
-        videos = sum(1 for entry in entries if not entry['missing'] and entry['kind'] == 'video')
-        title = QLabel(f'{videos} videoyu hazırla')
+        files = sum(1 for entry in entries if not entry['missing'])
+        title = QLabel(f'{files} dosyayı hazırla')
         title.setObjectName('libDropTitle')
         column.addWidget(title)
 
@@ -185,6 +188,8 @@ class PrepareDialog(QDialog):
                  'Transkript ve indeks hazır; özet seçeneği kapalıysa atlanır'),
                 ('index', 'terms', THEME['secondary'], 'Yalnızca indekslenecek',
                  'Transkript hazır; embedding ile aranabilir yapılır'),
+                ('document', 'document', THEME['secondary'], 'Belgelerden metin',
+                 'PDF metin katmanı ve .txt/.md dosyaları; taranmış PDF şimdilik okunmaz'),
                 ('subtitle', 'subtitles', THEME['secondary'], 'Gömülü altyazıdan',
                  'Hızlı · şarkı/yazı izleri atlanır, en uygun akış seçilir'),
                 ('whisper', 'audio', WARN, 'Altyazı yok → Whisper',
@@ -208,7 +213,7 @@ class PrepareDialog(QDialog):
         self.plan_bar = QProgressBar()
         self.plan_bar.setTextVisible(False)
         column.addWidget(self.plan_bar)
-        self.plan_label = QLabel('Videolar yoklanıyor…')
+        self.plan_label = QLabel('Dosyalar yoklanıyor…')
         self.plan_label.setObjectName('hint')
         column.addWidget(self.plan_label)
 
@@ -263,8 +268,8 @@ class PrepareDialog(QDialog):
             result = library.plan(entries, progress=self.plan_progress.emit,
                                   cancelled=self._cancel.is_set)
         except Exception as error:  # yoklama hatasi pencereyi kilitlemesin
-            result = {'ready': [], 'summary': [], 'index': [], 'subtitle': [], 'whisper': [],
-                      'whisper_seconds': 0.0,
+            result = {'ready': [], 'summary': [], 'index': [], 'document': [], 'subtitle': [],
+                      'whisper': [], 'whisper_seconds': 0.0,
                       'failed': [(None, str(error))]}
         if not self._cancel.is_set():
             self.planned.emit(result)
@@ -272,18 +277,18 @@ class PrepareDialog(QDialog):
     def _on_progress(self, done, total):
         self.plan_bar.setMaximum(max(1, total))
         self.plan_bar.setValue(done)
-        self.plan_label.setText(f'Videolar yoklanıyor {done}/{total}…')
+        self.plan_label.setText(f'Dosyalar yoklanıyor {done}/{total}…')
 
     def _on_planned(self, result):
         self.result_plan = result
         self.plan_bar.hide()
         failed = result['failed']
-        self.plan_label.setText(f'{len(failed)} video okunamadı ve atlanacak: '
+        self.plan_label.setText(f'{len(failed)} dosya okunamadı ve atlanacak: '
                                 + ', '.join(entry['path'].name for entry, _error in failed[:3]
                                             if entry is not None)
                                 if failed else '')
         self.plan_label.setVisible(bool(failed))
-        for key in ('summary', 'index', 'subtitle', 'whisper'):
+        for key in ('summary', 'index', 'document', 'subtitle', 'whisper'):
             self.count_labels[key][0].setText(str(len(result[key])))
         seconds = result['whisper_seconds']
         if seconds:
@@ -298,7 +303,7 @@ class PrepareDialog(QDialog):
                                                   else len(self.result_plan['summary']))
         self.count_labels['ready'][0].setText(str(ready))
         count = len(self.queue())
-        self.start_button.setText(f'Hazırlamayı başlat ({count} video)')
+        self.start_button.setText(f'Hazırlamayı başlat ({count} dosya)')
         self.start_button.setEnabled(count > 0)
 
     def allow_whisper(self):
@@ -312,7 +317,8 @@ class PrepareDialog(QDialog):
         if self.result_plan is None:
             return []
         return ((list(self.result_plan['summary']) if self.summaries() else [])
-                + list(self.result_plan['index']) + list(self.result_plan['subtitle'])
+                + list(self.result_plan['index']) + list(self.result_plan['document'])
+                + list(self.result_plan['subtitle'])
                 + (list(self.result_plan['whisper']) if self.allow_whisper() else []))
 
     def done(self, code):
@@ -361,7 +367,9 @@ class QueueWorker(QObject):
             probed = library.cached_probe(entry['path'])
             whisper = probed is not None and not qa.pick_subtitle_stream(probed['subtitles'])
             has_text = bool(qa.cached_sessions(entry['path']))
+            document = entry['kind'] == 'document'
             self.started.emit(index, path, 'indeksleniyor' if has_text
+                              else 'belgeden metin' if document
                               else 'Whisper ile transkript' if whisper else 'altyazıdan metin')
             try:
                 outcome = library.transcribe(entry, cfg, self.allow_whisper, log=log,
@@ -372,7 +380,7 @@ class QueueWorker(QObject):
                         self.started.emit(index, path, 'indeksleniyor')
                     library.index(entry, cfg, log=log, cancelled=self.cancel_event.is_set,
                                   client=client)
-                if outcome != 'skipped' and self.summaries:
+                if outcome != 'skipped' and self.summaries and not document:
                     self.started.emit(index, path, 'özetleniyor')
                     collection_qa.summarize_video(entry['path'], log=log,
                                                   progress=self.summary_progress.emit,
@@ -518,6 +526,7 @@ class LibraryPanel(QWidget):
         self._generation = 0
         self.qa_panel = None
         self._qa_retired = []  # geri donulunce/baska video acilinca isi suren eski paneller
+        self.doc_view = None    # F64: acik belge goruntuleyici
         self._rows = {}        # dosya anahtari -> tablo satiri
         self._check_folders = set()  # yeni eklenen klasorler: taramadan sonra bos mu bakilir
         self._queue = None     # (thread, worker): toplu transkript isi
@@ -728,7 +737,7 @@ class LibraryPanel(QWidget):
         self.table.customContextMenuRequested.connect(self._table_menu)
         self.table.itemSelectionChanged.connect(self._update_chat_state)
         inner.addWidget(self.table, 1)
-        foot = QLabel('Çift tıkla: oynatıcı ve soru sor · Sağ tık: altyazı çevir, '
+        foot = QLabel('Çift tıkla: aç (video: oynatıcı ve soru sor) · Sağ tık: altyazı çevir, '
                       'dışa aktar, konumu aç, koleksiyondan çıkar')
         foot.setObjectName('hint')
         foot.setContentsMargins(14, 8, 14, 9)
@@ -1112,7 +1121,8 @@ class LibraryPanel(QWidget):
             counts[info['status']] = counts.get(info['status'], 0) + 1
         parts = [f'{len(self.entries)} dosya']
         parts += [f'{counts[key]} {META_TEXT[key]}'
-                  for key in ('ready', 'transcript', 'pending', 'no_subtitle', 'missing')
+                  for key in ('ready', 'transcript', 'pending', 'no_subtitle', 'no_text',
+                              'missing')
                   if counts.get(key)]
         self.meta_label.setText(' · '.join(parts))
 
@@ -1126,8 +1136,13 @@ class LibraryPanel(QWidget):
         folder = QTableWidgetItem(self._where(entry))
         folder.setToolTip(str(Path(entry['path']).parent))
         folder.setForeground(QColor(THEME['muted']))
-        length = QTableWidgetItem(format_duration(info['duration']) if info['duration']
-                                  else ('—' if entry['missing'] else format_size(entry['path'])))
+        if info['duration'] and entry['kind'] == 'document':
+            size = f'{int(info["duration"])} sayfa'
+        elif info['duration']:
+            size = format_duration(info['duration'])
+        else:
+            size = '—' if entry['missing'] else format_size(entry['path'])
+        length = QTableWidgetItem(size)
         length.setForeground(QColor(THEME['secondary'] if info['duration'] else THEME['muted']))
         source = QTableWidgetItem(info['source'] or '—')
         source.setForeground(QColor(THEME['secondary'] if info['source'] else THEME['muted']))
@@ -1194,14 +1209,14 @@ class LibraryPanel(QWidget):
             self.hits_label.setText('Transkriptlerde eşleşme yok.')
             return
         for hit in hits:
-            item = QListWidgetItem(f'{hit["path"].stem}  ·  {qa.format_time(hit["start"])}   '
-                                   f'{hit["text"]}')
-            item.setToolTip(f'{hit["path"].name} · {qa.format_time(hit["start"])}\n{hit["text"]}')
+            where = qa.format_position(hit['start'], library.kind_of(hit['path']) == 'document')
+            item = QListWidgetItem(f'{hit["path"].stem}  ·  {where}   {hit["text"]}')
+            item.setToolTip(f'{hit["path"].name} · {where}\n{hit["text"]}')
             item.setData(Qt.UserRole, (str(hit['path']), hit['start']))
             self.hits_list.addItem(item)
         more = ' (ilk %d gösteriliyor)' % HIT_LIMIT if len(hits) >= HIT_LIMIT else ''
         self.hits_label.setText(f'Transkriptlerde {len(hits)} eşleşme · {len(matched)} dosya'
-                                f'{more} — tıklayınca video o anda açılır')
+                                f'{more} — tıklayınca o anda / o sayfada açılır')
         self.hits_label.show()
         row = self.hits_list.sizeHintForRow(0) or 30
         self.hits_list.setFixedHeight(min(HITS_MAX_HEIGHT, row * len(hits) + 12))
@@ -1224,7 +1239,8 @@ class LibraryPanel(QWidget):
         entry = self.entries[row]
         menu = QMenu(self)
         single = len(rows) == 1 and not entry['missing']
-        action = menu.addAction('Oynat ve soru sor', lambda: self.open_row(row))
+        action = menu.addAction('Aç' if entry['kind'] == 'document' else 'Oynat ve soru sor',
+                                lambda: self.open_row(row))
         action.setEnabled(single)
         action = menu.addAction('Altyazıyı çevir…',
                                 lambda: self.translate_requested.emit(str(entry['path'])))
@@ -1294,7 +1310,7 @@ class LibraryPanel(QWidget):
         except (OSError, ValueError) as error:
             self._warn('Dışa aktarılamadı: ' + str(error))
             return
-        self._log(f'Koleksiyon dışa aktarıldı ({len(videos)} video): {target}')
+        self._log(f'Koleksiyon dışa aktarıldı ({len(videos)} dosya): {target}')
 
     @staticmethod
     def _export_format(target, chosen):
@@ -1312,13 +1328,21 @@ class LibraryPanel(QWidget):
         if 0 <= row < len(self.entries):
             self.open_detail(self.entries[row])
 
-    def open_detail(self, entry):
+    def open_detail(self, entry, page=None):
         if entry['missing'] or not entry['path'].is_file():
             self._warn('Dosya bulunamadı: ' + str(entry['path']))
             return
-        if entry['kind'] != 'video':
+        if entry['kind'] == 'document':
+            if not self._show_document(entry['path'], page):
+                return
+        elif entry['kind'] != 'video':
             return
-        if self.qa_panel is None or self.qa_panel.video != entry['path']:
+        else:
+            self._close_document()
+            if self.qa_panel is not None:
+                self.qa_panel.show()
+        if entry['kind'] == 'video' and (self.qa_panel is None
+                                         or self.qa_panel.video != entry['path']):
             try:
                 # Lazy import: QtMultimedia yalnizca bir video acilinca yuklenir.
                 from qa_panel import VideoQAPanel
@@ -1332,6 +1356,34 @@ class LibraryPanel(QWidget):
         self.back_button.setText(self.data['title'] if self.data else 'Kütüphane')
         self.detail_title.setText(entry['path'].name)
         self.pages.setCurrentIndex(PAGE_DETAIL)
+        if entry['kind'] == 'document' and page and self.doc_view is not None:
+            # Gorunum ekrana yerlesince atla (metin duzeni ancak o zaman hesaplanir).
+            view = self.doc_view
+            QTimer.singleShot(0, lambda: _alive(view) and view.go_to_page(int(page)))
+
+    def _show_document(self, path, page=None):
+        """Belgeyi ayrinti sayfasinda acar (video paneli gizlenir, video duraklar)."""
+        if self.doc_view is None or self.doc_view.path != Path(path):
+            try:
+                from doc_view import DocumentView
+                view = DocumentView(path)
+            except (ImportError, OSError, ValueError) as error:
+                self._warn('Belge açılamadı: ' + str(error))
+                return False
+            self._close_document()
+            self.doc_view = view
+            self.detail_host.addWidget(view, 1)
+        if self.qa_panel is not None:
+            self.qa_panel.hide()
+        self.doc_view.show()
+        return True
+
+    def _close_document(self):
+        view, self.doc_view = self.doc_view, None
+        if view is not None:
+            self.detail_host.removeWidget(view)
+            view.shutdown()
+            view.deleteLater()
 
     def close_detail(self):
         """Listeye doner; panel (ve hazirligi) kalir, video gizlenince duraklar."""
@@ -1384,12 +1436,12 @@ class LibraryPanel(QWidget):
         if not model:
             note = 'Embedding modeli seçilmedi: Ayarlar → Kütüphane indeksi.'
         elif not ready:
-            note = 'Henüz indeksli video yok: önce "Hepsini hazırla".'
+            note = 'Henüz indeksli dosya yok: önce "Hepsini hazırla".'
         elif not videos:
-            note = 'Seçili dosyalar arasında hazır video yok.'
+            note = 'Seçili dosyalar arasında hazır dosya yok.'
         else:
             waiting = len(self.entries) - ready
-            note = f'{len(videos)} hazır video' + (
+            note = f'{len(videos)} hazır dosya' + (
                 f' · {waiting} dosya henüz hazır değil'
                 if waiting and self.scope_combo.currentText() == SCOPE_ALL else '')
         self.chat_note.setText('Cevap hazırlanıyor…' if busy else note)
@@ -1480,12 +1532,15 @@ class LibraryPanel(QWidget):
         self.open_cite(path, start)
 
     def open_cite(self, path, seconds):
-        """Atiftaki videoyu acar ve o ana gider (video yuklenince)."""
+        """Atiftaki videoyu acar ve o ana gider (video yuklenince); belgede o sayfaya."""
         key = library._key(path)
         entry = next((item for item in self.entries if library._key(item['path']) == key), None)
         if entry is None:  # baska koleksiyona gecildiyse
             entry = {'path': Path(path), 'kind': library.kind_of(path) or 'video', 'root': None,
                      'missing': not Path(path).is_file(), 'new': False}
+        if entry['kind'] == 'document':
+            self.open_detail(entry, page=seconds)
+            return
         self.open_detail(entry)
         if self.qa_panel is not None and self.qa_panel.video == entry['path']:
             self.qa_panel.seek_when_ready(int(float(seconds) * 1000))
@@ -1496,7 +1551,7 @@ class LibraryPanel(QWidget):
             return
         entries = [entry for entry in self.entries if not entry['missing']]
         if not entries:
-            self._warn('Koleksiyonda hazırlanacak video yok.')
+            self._warn('Koleksiyonda hazırlanacak dosya yok.')
             return
         dialog = PrepareDialog(entries, self)
         if dialog.exec() != QDialog.Accepted:
@@ -1534,7 +1589,7 @@ class LibraryPanel(QWidget):
         self.prepare_button.setEnabled(False)
         for entry in entries:
             self._set_status_cell(entry['path'], 'Sırada', THEME['muted'])
-        self._log(f'Toplu hazırlık başladı: {len(entries)} video'
+        self._log(f'Toplu hazırlık başladı: {len(entries)} dosya'
                   + (' (Whisper açık).' if allow_whisper else '.'))
         thread.start()
 
@@ -1590,7 +1645,7 @@ class LibraryPanel(QWidget):
         self._queue = None
         self.queue_strip.hide()
         self.prepare_button.setEnabled(True)
-        message = (f'Toplu hazırlık {"durduruldu" if stopped else "bitti"}: {done} video hazır'
+        message = (f'Toplu hazırlık {"durduruldu" if stopped else "bitti"}: {done} dosya hazır'
                    + (f', {failed} hata ({", ".join(self._queue_failed[:5])}).' if failed else '.'))
         self._log(message)
         self.rescan()
@@ -1633,6 +1688,7 @@ class LibraryPanel(QWidget):
             worker.resume_event.set()
             thread.quit()
             thread.wait(5000)
+        self._close_document()
         if self._ask_job is not None:
             self._ask_job[0].quit()
             self._ask_job[0].wait(3000)
