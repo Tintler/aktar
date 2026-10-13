@@ -527,7 +527,7 @@ def plan(entries, base=None, progress=None, cancelled=None, cfg=None):
         if session is not None:
             indexed = (not str(cfg.get('embedding_model', '')).strip()
                        or is_indexed(entry['path'], session, cfg, base))
-            summarized = session.get('overview') or entry['kind'] != 'video'
+            summarized = session.get('overview')
             group = 'index' if not indexed else 'ready' if summarized else 'summary'
             result[group].append(entry)
         elif entry['kind'] == 'document':

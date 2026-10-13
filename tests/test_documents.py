@@ -129,8 +129,32 @@ class DocumentTests(unittest.TestCase):
         self.assertIn('**[s.2]** Bakım', transcript_export.render(session, 'md'))
         with self.assertRaises(ValueError):
             transcript_export.render(session, 'srt')
-        self.assertIsNone(collection_qa.summarize_video(self.pdf, lambda: dict(cfg), QUIET,
-                                                        base=self.work))
+        # F67: belge ozeti (kisa belge: tek istek; uzun belge: once parca ozetleri).
+        replies = []
+
+        def chat(_self, messages):
+            replies.append(messages)
+            return ('{"summary": "Parça özeti."}' if 'one part' in messages[0]['content'] else
+                    '{"summary": "Süpürge kılavuzu.", "topics": ["bakım"], "questions": ["q?"]}')
+
+        with mock.patch('app_core.Client.chat', chat):
+            overview = collection_qa.summarize_video(self.pdf, lambda: dict(cfg), QUIET,
+                                                     base=self.work)
+            self.assertEqual(overview['summary'], 'Süpürge kılavuzu.')
+            self.assertEqual(len(replies), 1)
+            self.assertIn('[s.2] Bakım', replies[0][1]['content'])
+            self.assertEqual(collection_qa.video_summaries([self.pdf], self.work)[0]['summary'],
+                             'Süpürge kılavuzu.')
+            session = search_index.primary_session(self.pdf, self.work)
+            session['overview'] = None
+            session['segments'] += [{'start': 3.0, 'end': 3.0, 'text': 'Uzun metin. ' * 22}
+                                    for _ in range(30)]  # ~8 bin karakter: tek istege sigmaz
+            replies.clear()
+            with mock.patch('qa.SECTION_CHARS', 40):
+                collection_qa.summarize_document(session, self.root / 'uzun.json',
+                                                 lambda: dict(cfg, qa_context_chars=1000), QUIET)
+            self.assertGreater(len(replies), 1)
+            self.assertIn('[s.1-1] Parça özeti.', replies[-1][1]['content'])
 
     def test_single_short_document_is_answered_without_index(self):
         """F66: tek belgeye soru; metin baglama sigiyorsa embedding/indeks gerekmez."""

@@ -308,7 +308,7 @@ class CollectionQA:
 
 
 # --- ozetler (F61) ----------------------------------------------------------------
-OVERVIEW_PROMPT = '''You receive short summaries of the videos in a collection (for example a lecture series), in collection order. Reply with a JSON object only, no other text:
+OVERVIEW_PROMPT = '''You receive short summaries of the videos and documents in a collection (for example a lecture series or a set of manuals), in collection order. Reply with a JSON object only, no other text:
 {"summary": "<Turkish, 4-8 sentences: what the collection covers overall, how it progresses and its main takeaways>",
  "topics": ["<Turkish short topic>", ...],
  "questions": ["<Turkish question a viewer might ask about the whole collection>", ...]}
@@ -322,14 +322,85 @@ def summarize_video(video, config_provider=load_config, log=print, progress=None
     Uzun videolarda once bolum ozetleri cikarilir (qa.VideoQA 'map' modu); her adim
     onbellege yazilir, kesilirse kaldigi yerden devam eder. Transkript yoksa None."""
     session = search_index.primary_session(video, base)
-    if session is None or qa.is_document(session):
-        return None  # belgeler icin ozet simdilik yok (F64)
+    if session is None:
+        return None
     if session.get('overview'):
         return session['overview']
     path = qa.cache_path(video, qa.source_key(session['source']), base)
+    if qa.is_document(session):
+        return summarize_document(session, path, config_provider, log, progress, cancelled)
     worker = qa.VideoQA(session, config_provider=config_provider, log=log,
                         save=lambda data: save_json(path, data))
     return worker.prepare(progress=progress, cancelled=cancelled)
+
+
+DOCUMENT_OVERVIEW_PROMPT = '''You receive the text of a document (page markers like [s.3]; for spreadsheets a page is a sheet, for e-books a chapter) or the page-by-page summaries of a long document. Reply with a JSON object only, no other text:
+{"summary": "<Turkish, 3-6 sentences: what the document is about, its main points and conclusions>",
+ "topics": ["<Turkish short topic>", ...],
+ "questions": ["<Turkish question a reader might ask about this document>", ...]}
+Give 3-6 topics and exactly 4 questions answerable from the document. Use only the given text.'''
+
+DOCUMENT_PART_PROMPT = '''You receive one part of a document's text (page markers like [s.3]). Reply with a JSON object only, no other text:
+{"summary": "<Turkish, 2-5 sentences with the concrete facts, numbers, names, instructions and conclusions of this part>"}
+Use only the text.'''
+
+
+def summarize_document(session, path, config_provider=load_config, log=print, progress=None,
+                       cancelled=None):
+    """Belge ozeti (F67): sigarsa tum metinden tek istek; sigmazsa once parca ozetleri.
+
+    Parca ozetleri oturuma ('part_summaries') yazilir; kesilirse kaldigi yerden devam eder."""
+    cfg = config_provider()
+    client = Client(cfg, log=log)
+    lines = qa.lines_of(session)
+    budget = max(4000, int(cfg.get('qa_context_chars', 24000)) - 1500)
+    text = qa.format_lines(lines, True)
+    title = session.get('title') or Path(path).stem
+    if len(text) > budget:
+        parts, current = [], []
+        for line in lines:
+            if current and sum(len(item['text']) + 12 for item in current) + len(line['text']) \
+                    > qa.SECTION_CHARS:
+                parts.append(current)
+                current = []
+            current.append(line)
+        if current:
+            parts.append(current)
+        done = session.setdefault('part_summaries', {})
+        for number, part in enumerate(parts, 1):
+            if cancelled and cancelled():
+                from app_core import GracefulStop
+                raise GracefulStop('Özet durduruldu; tamamlanan bölümler kaydedildi.')
+            span = f'{int(part[0]["start"])}-{int(part[-1]["start"])}'
+            if span not in done:
+                value = _ask_json(client, cfg, DOCUMENT_PART_PROMPT,
+                                  f'DOCUMENT: {title}\nPAGES {span}\n\n'
+                                  + qa.format_lines(part, True), log)
+                done[span] = ' '.join(str(value.get('summary', '')).split())
+                save_json(path, session)
+            if progress:
+                progress(number, len(parts) + 1)
+        text = '\n'.join(f'[s.{span}] {summary}' for span, summary in done.items())
+    overview = qa.normalize_overview(_ask_json(client, cfg, DOCUMENT_OVERVIEW_PROMPT,
+                                               f'DOCUMENT: {title}\n\n{text}', log))
+    session['overview'] = overview
+    save_json(path, session)
+    if progress:
+        progress(1, 1)
+    return overview
+
+
+def _ask_json(client, cfg, system, user, log):
+    retries = int(cfg.get('auto_retry_count', 2))
+    for attempt in range(retries + 1):
+        try:
+            return qa.parse_json_object(client.chat([{'role': 'system', 'content': system},
+                                                     {'role': 'user', 'content': user}]))
+        except (ValueError, RuntimeError) as error:
+            if not retryable_translation_error(error) or attempt >= retries:
+                raise
+            log(f'Geçici hata (deneme {attempt + 1}/{retries + 1}): {error}')
+    raise RuntimeError('Model isteği tamamlanamadı.')
 
 
 def video_summaries(videos, base=None):

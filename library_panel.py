@@ -225,7 +225,7 @@ class PrepareDialog(QDialog):
         self.plan_label.setObjectName('hint')
         column.addWidget(self.plan_label)
 
-        self.summary_check = ToggleSwitch('Video özetleri ve koleksiyon özeti çıkar')
+        self.summary_check = ToggleSwitch('Dosya özetleri ve koleksiyon özeti çıkar')
         self.summary_check.setChecked(True)
         self.summary_check.setToolTip(
             f'Sohbet modeliyle ({cfg["model"]}): genel sorular ve sohbetin başındaki özet için. '
@@ -388,7 +388,7 @@ class QueueWorker(QObject):
                         self.started.emit(index, path, 'indeksleniyor')
                     library.index(entry, cfg, log=log, cancelled=self.cancel_event.is_set,
                                   client=client)
-                if outcome != 'skipped' and self.summaries and not document:
+                if outcome != 'skipped' and self.summaries:
                     self.started.emit(index, path, 'özetleniyor')
                     collection_qa.summarize_video(entry['path'], log=log,
                                                   progress=self.summary_progress.emit,
@@ -1478,8 +1478,7 @@ class LibraryPanel(QWidget):
     def start_queue(self, entries, allow_whisper, summaries=False):
         if not entries and not summaries:
             return
-        videos = [entry['path'] for entry in self.entries
-                  if not entry['missing'] and entry['kind'] == 'video']
+        videos = [entry['path'] for entry in self.entries if not entry['missing']]
         worker = QueueWorker(entries, allow_whisper, summaries,
                              (self.slug, self.data['title'], videos) if self.data else None)
         worker.summary_progress.connect(self._summary_progress)
