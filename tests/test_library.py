@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 
 import library  # noqa: E402
 import qa  # noqa: E402
+import search_index  # noqa: E402
 from app_core import save_json  # noqa: E402
 
 
@@ -117,12 +118,15 @@ class LibraryTests(unittest.TestCase):
         data = qa.build_data(video, [{'start': 0.0, 'end': 2.0, 'text': 'merhaba'}], source,
                              {'duration': 95.0, 'chapters': []})
         save_json(qa.cache_path(video, qa.source_key(source), work), data)
-        info = library.describe(entry, work)
+        cfg = {'embedding_model': 'emb', 'embedding_document_template': 'title: {title} | text: {text}'}
+        info = library.describe(entry, work, cfg=cfg)
         self.assertEqual((info['status'], info['source'], info['duration']),
                          ('transcript', 'Altyazı · eng', 95.0))
-        data['overview'] = {'summary': 'x', 'topics': [], 'questions': []}
-        save_json(qa.cache_path(video, qa.source_key(source), work), data)
-        self.assertEqual(library.describe(entry, work)['status'], 'ready')
+        # F57: 'Hazir' = transkript + embedding indeksi.
+        save_json(search_index.index_path(video, data, cfg, work), {})
+        self.assertEqual(library.describe(entry, work, cfg=cfg)['status'], 'ready')
+        self.assertEqual(library.describe(entry, work, cfg={'embedding_model': ''})['status'],
+                         'transcript')
         missing = dict(entry, missing=True)
         self.assertEqual(library.describe(missing, work)['status'], 'missing')
 
@@ -160,13 +164,18 @@ class LibraryTests(unittest.TestCase):
                    self._entry(os.path.join('alt', 'Ders 3.webm')),
                    dict(self._entry('yok.mkv'), missing=True)]
         with mock.patch('media.probe_summary', side_effect=lambda path: summaries[path.name]):
-            result = library.plan(entries, work)
+            result = library.plan(entries, work, cfg={'embedding_model': ''})
+            indexed = library.plan(entries, work, cfg={
+                'embedding_model': 'emb', 'embedding_document_template': '{text}'})
         names = {key: [item['path'].name for item in result[key]]
-                 for key in ('ready', 'subtitle', 'whisper')}
-        self.assertEqual(names, {'ready': ['Ders 10.mkv'], 'subtitle': ['Ders 2.mp4'],
+                 for key in ('ready', 'index', 'subtitle', 'whisper')}
+        self.assertEqual(names, {'ready': ['Ders 10.mkv'], 'index': [], 'subtitle': ['Ders 2.mp4'],
                                  'whisper': ['Ders 3.webm']})
         self.assertEqual(result['whisper_seconds'], 90.0)
-        whisper = library.describe(entries[2], work)
+        # Embedding modeli seciliyse transkripti olup indeksi olmayan video indekslenecek.
+        self.assertEqual([item['path'].name for item in indexed['index']], ['Ders 10.mkv'])
+        self.assertEqual(indexed['ready'], [])
+        whisper = library.describe(entries[2], work, cfg={'embedding_model': ''})
         self.assertEqual(whisper['status'], 'no_subtitle')
 
     def test_transcribe_uses_subtitle_then_whisper_only_when_allowed(self):

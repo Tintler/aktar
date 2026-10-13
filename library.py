@@ -22,9 +22,10 @@ from pathlib import Path
 
 import media
 import qa
+import search_index
 import series
 import speech
-from app_core import APP_DIR, FileLock, read, save_json
+from app_core import APP_DIR, FileLock, load_config, read, save_json
 from media import VIDEO_EXTENSIONS
 
 VERSION = 1
@@ -286,11 +287,31 @@ def scan(data):
     return sorted(entries.values(), key=order), changed
 
 
-def describe(entry, base=None):
+def _embedding_cfg(cfg):
+    """describe/plan icin ayarlar; okunamazsa indeks kapali sayilir."""
+    if cfg is not None:
+        return cfg
+    try:
+        return load_config()
+    except (OSError, ValueError, RuntimeError):
+        return {'embedding_model': ''}
+
+
+def is_indexed(video, session, cfg, base=None):
+    if not str(cfg.get('embedding_model', '')).strip() or session is None:
+        return False
+    try:
+        return search_index.index_path(video, session, cfg, base).exists()
+    except OSError:
+        return False
+
+
+def describe(entry, base=None, cfg=None):
     """Tablo icin durum: {'status', 'source', 'duration'}.
 
-    status: 'missing' | 'ready' (ozet hazir) | 'transcript' (metin hazir) |
-    'no_subtitle' (yoklandi, metin altyazi yok: Whisper bekliyor) | 'pending'.
+    status: 'missing' | 'ready' (transkript + indeks) | 'transcript' (metin hazir,
+    indeks yok ya da embedding modeli secilmedi) | 'no_subtitle' (yoklandi, metin
+    altyazi yok: Whisper bekliyor) | 'pending'.
     """
     if entry['missing']:
         return {'status': 'missing', 'source': '', 'duration': 0.0}
@@ -301,13 +322,14 @@ def describe(entry, base=None):
             return {'status': 'pending', 'source': '', 'duration': 0.0}
         return {'status': 'pending' if probed['subtitles'] else 'no_subtitle', 'source': '',
                 'duration': probed['duration']}
-    best = max(sessions, key=lambda item: bool(item.get('overview')))
+    best = search_index.pick_session(sessions)
     source = best['source']
     if source.get('kind') == 'subtitle':
         label = 'Altyazı' + (' · ' + source['language'] if source.get('language') else '')
     else:
         label = 'Whisper' + (' · ' + source['model'] if source.get('model') else '')
-    return {'status': 'ready' if best.get('overview') else 'transcript', 'source': label,
+    indexed = is_indexed(entry['path'], best, _embedding_cfg(cfg), base)
+    return {'status': 'ready' if indexed else 'transcript', 'source': label,
             'duration': float(best.get('duration') or 0.0)}
 
 
@@ -371,19 +393,26 @@ def probe(path, base=None):
     return copy.deepcopy(value)
 
 
-def plan(entries, base=None, progress=None, cancelled=None):
+def plan(entries, base=None, progress=None, cancelled=None, cfg=None):
     """Toplu hazirlik plani; gerekirse videolari yoklar.
 
-    Donen: {'ready': [entry], 'subtitle': [entry], 'whisper': [entry],
-            'failed': [(entry, hata)], 'whisper_seconds': float}.
+    Donen: {'ready': [entry], 'index': [entry] (transkript var, indeks yok),
+            'subtitle': [entry], 'whisper': [entry], 'failed': [(entry, hata)],
+            'whisper_seconds': float}. Embedding modeli secili degilse transkripti
+    olan her video 'ready' sayilir.
     """
-    result = {'ready': [], 'subtitle': [], 'whisper': [], 'failed': [], 'whisper_seconds': 0.0}
+    cfg = _embedding_cfg(cfg)
+    result = {'ready': [], 'index': [], 'subtitle': [], 'whisper': [], 'failed': [],
+              'whisper_seconds': 0.0}
     videos = [entry for entry in entries if not entry['missing'] and entry['kind'] == 'video']
     for index, entry in enumerate(videos):
         if cancelled and cancelled():
             break
-        if qa.cached_sessions(entry['path'], base):
-            result['ready'].append(entry)
+        session = search_index.pick_session(qa.cached_sessions(entry['path'], base))
+        if session is not None:
+            indexed = (not str(cfg.get('embedding_model', '')).strip()
+                       or is_indexed(entry['path'], session, cfg, base))
+            result['ready' if indexed else 'index'].append(entry)
         else:
             try:
                 info = probe(entry['path'], base)
@@ -425,3 +454,15 @@ def transcribe(entry, cfg, allow_whisper=True, base=None, log=print, progress=No
                                    cuda_dir=cfg.get('whisper_cuda_dir', ''))
     qa.load_whisper_session(path, result, base, log)
     return 'whisper'
+
+
+def index(entry, cfg, base=None, log=print, cancelled=None, client=None):
+    """Transkripti olan videoyu embedding ile indeksler (F57).
+
+    Donen: 'indexed' | 'skipped' (embedding modeli secilmedi) | 'no_transcript'.
+    """
+    if not str(cfg.get('embedding_model', '')).strip():
+        return 'skipped'
+    path = search_index.build(entry['path'], cfg, client=client, base=base, log=log,
+                              cancelled=cancelled)
+    return 'indexed' if path is not None else 'no_transcript'

@@ -27,11 +27,12 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QDialog, QFileDi
 import library
 import qa
 import speech
-from app_core import GracefulStop, load_config
+from app_core import Client, GracefulStop, load_config
 from gui import (THEME, HoverIconButton, ToggleSwitch, _alive, card, highlight_rows,
                  tinted_icon, window_icon)
 
 PAGE_EMPTY, PAGE_LIST, PAGE_DETAIL = 0, 1, 2
+REPEATED_ERROR_LIMIT = 3  # ust uste ayni hata: kuyruk durur
 WARN = '#f0b44c'  # onay bekleyen (Whisper) durumlar; tasarim taslagindaki amber
 KIND_LABELS = {'video': 'Video'}
 KIND_ICONS = {'video': 'video'}
@@ -151,8 +152,9 @@ class PrepareDialog(QDialog):
         title = QLabel(f'{videos} videoyu hazırla')
         title.setObjectName('libDropTitle')
         column.addWidget(title)
-        intro = QLabel('Her videonun transkripti çıkarılıp önbelleğe yazılır; sonra soru-cevapta '
-                       'beklemeden kullanılır. İstediğin an durdurabilirsin, kaldığı yerden devam eder.')
+        intro = QLabel('Her videonun transkripti çıkarılır ve aranabilir indekse eklenir; sonra '
+                       'soru-cevapta beklemeden kullanılır. İstediğin an durdurabilirsin, kaldığı '
+                       'yerden devam eder.')
         intro.setObjectName('libChatNote')
         intro.setWordWrap(True)
         column.addWidget(intro)
@@ -161,6 +163,8 @@ class PrepareDialog(QDialog):
         self.count_labels = {}
         for key, icon, color, text, hint in (
                 ('ready', 'check', THEME['accent'], 'Zaten hazır', 'Önbellekten gelir, tekrar işlenmez'),
+                ('index', 'terms', THEME['secondary'], 'Yalnızca indekslenecek',
+                 'Transkript hazır; embedding ile aranabilir yapılır'),
                 ('subtitle', 'subtitles', THEME['secondary'], 'Gömülü altyazıdan',
                  'Hızlı · şarkı/yazı izleri atlanır, en uygun akış seçilir'),
                 ('whisper', 'audio', WARN, 'Altyazı yok → Whisper', '')):
@@ -197,6 +201,16 @@ class PrepareDialog(QDialog):
         self.whisper_check.setEnabled(self.whisper_ready)
         self.whisper_check.toggled.connect(self._update_start)
         column.addWidget(self.whisper_check)
+        embedding = str(cfg.get('embedding_model', '')).strip()
+        self.index_label = QLabel(
+            f'İndeks: {embedding} (LM Studio). Transkriptler parçalara bölünüp aranabilir yapılır.'
+            if embedding else 'Embedding modeli seçilmedi: yalnızca transkript çıkarılır, '
+                              'koleksiyona soru sormak için indeks gerekir (Ayarlar → Kütüphane indeksi).')
+        self.index_label.setObjectName('hint')
+        self.index_label.setWordWrap(True)
+        if not embedding:
+            self.index_label.setStyleSheet('color:%s;' % WARN)
+        column.addWidget(self.index_label)
         model = QLabel(f'Whisper: {cfg["whisper_model"]} · cihaz: {cfg["whisper_device"]} '
                        '(Ayarlar\'dan değiştirilir). Kapalıysa bu videolar atlanır.'
                        if self.whisper_ready else whisper_hint)
@@ -231,7 +245,8 @@ class PrepareDialog(QDialog):
             result = library.plan(entries, progress=self.plan_progress.emit,
                                   cancelled=self._cancel.is_set)
         except Exception as error:  # yoklama hatasi pencereyi kilitlemesin
-            result = {'ready': [], 'subtitle': [], 'whisper': [], 'whisper_seconds': 0.0,
+            result = {'ready': [], 'index': [], 'subtitle': [], 'whisper': [],
+                      'whisper_seconds': 0.0,
                       'failed': [(None, str(error))]}
         if not self._cancel.is_set():
             self.planned.emit(result)
@@ -250,7 +265,7 @@ class PrepareDialog(QDialog):
                                             if entry is not None)
                                 if failed else '')
         self.plan_label.setVisible(bool(failed))
-        for key in ('ready', 'subtitle', 'whisper'):
+        for key in ('ready', 'index', 'subtitle', 'whisper'):
             self.count_labels[key][0].setText(str(len(result[key])))
         seconds = result['whisper_seconds']
         self.count_labels['whisper'][1].setText(
@@ -269,10 +284,10 @@ class PrepareDialog(QDialog):
         return self.whisper_ready and self.whisper_check.isChecked()
 
     def queue(self):
-        """Islenecek sira: once altyazilar (hizli), sonra Whisper."""
+        """Islenecek sira: once yalnizca indeks ve altyazilar (hizli), sonra Whisper."""
         if self.result_plan is None:
             return []
-        return (list(self.result_plan['subtitle'])
+        return (list(self.result_plan['index']) + list(self.result_plan['subtitle'])
                 + (list(self.result_plan['whisper']) if self.allow_whisper() else []))
 
     def done(self, code):
@@ -305,28 +320,42 @@ class QueueWorker(QObject):
     @Slot()
     def run(self):
         done = failed = 0
+        last_error, repeats = '', 0
         cfg = load_config()
+        client = Client(cfg, log=self.log.emit)  # indeksleme icin tek istemci
         for index, entry in enumerate(self.entries):
             self._wait_if_paused()
             if self.cancel_event.is_set():
                 break
             path = str(entry['path'])
+            log = (lambda message, name=entry['path'].name: self.log.emit(f'[{name}] {message}'))
             probed = library.cached_probe(entry['path'])
             whisper = probed is not None and not qa.pick_subtitle_stream(probed['subtitles'])
-            self.started.emit(index, path, 'Whisper ile transkript' if whisper
-                              else 'altyazıdan metin')
+            has_text = bool(qa.cached_sessions(entry['path']))
+            self.started.emit(index, path, 'indeksleniyor' if has_text
+                              else 'Whisper ile transkript' if whisper else 'altyazıdan metin')
             try:
-                outcome = library.transcribe(entry, cfg, self.allow_whisper,
-                                             log=lambda message, name=entry['path'].name:
-                                             self.log.emit(f'[{name}] {message}'),
+                outcome = library.transcribe(entry, cfg, self.allow_whisper, log=log,
                                              progress=self.progress.emit,
                                              cancelled=self.cancel_event.is_set)
+                if outcome != 'skipped' and str(cfg.get('embedding_model', '')).strip():
+                    if not has_text:
+                        self.started.emit(index, path, 'indeksleniyor')
+                    library.index(entry, cfg, log=log, cancelled=self.cancel_event.is_set,
+                                  client=client)
             except GracefulStop:
                 break
             except Exception as error:  # tek videonun hatasi kuyrugu durdurmasin
                 failed += 1
                 self.item_done.emit(path, 'failed', str(error))
+                # Ayni hata ust uste tekrarlaniyorsa (LM Studio kapali vb.) bosuna surdurme.
+                repeats = repeats + 1 if str(error) == last_error else 1
+                last_error = str(error)
+                if repeats >= REPEATED_ERROR_LIMIT:
+                    self.log.emit(f'Aynı hata {repeats} kez üst üste: kuyruk durduruldu. {error}')
+                    break
                 continue
+            repeats = 0
             done += 1
             self.item_done.emit(path, outcome, '')
         self.finished.emit(done, failed, self.cancel_event.is_set())
@@ -683,7 +712,8 @@ class LibraryPanel(QWidget):
         def work():
             try:
                 entries, changed = library.scan(data)
-                infos = [library.describe(entry) for entry in entries]
+                cfg = library._embedding_cfg(None)
+                infos = [library.describe(entry, cfg=cfg) for entry in entries]
             except Exception as error:  # tarama hatasi arayuzu dusurmesin
                 self.scanned.emit(generation, slug, None, [], str(error), False)
                 return

@@ -18,6 +18,7 @@ Ceviri/checkpoint/glossary mantigi app_core'da tek yerde tutulur; buraya kopyala
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import threading
@@ -740,6 +741,7 @@ def _alive(widget):
 
 VIDEO_FILTER = 'Video (' + ' '.join('*' + item for item in VIDEO_EXTENSIONS) + ')'
 NONE_SERIES = '(Seri yok)'
+EMBEDDING_OFF = '(kapalı)'
 NEW_SERIES = '+ Yeni seri...'
 
 
@@ -1162,6 +1164,19 @@ class SettingsDialog(QDialog):
         model_row.addWidget(self.model_hint, 1)
         layout.addRow('', model_row)
 
+        index_section = QLabel('Kütüphane indeksi')
+        index_section.setObjectName('settingsSection')
+        layout.addRow(index_section)
+        embedding = DropdownCombo()
+        embedding.setEditable(False)
+        self._fill_embedding(embedding, self.loaded_models,
+                             str(config.get('embedding_model', '')).strip())
+        embedding.setToolTip('Transkriptleri aranabilir yapan LM Studio embedding modeli '
+                             '(ör. text-embedding-embeddinggemma-2). Kapalıysa yalnızca '
+                             'transkript çıkarılır.')
+        self.fields['embedding_model'] = embedding
+        layout.addRow('Embedding modeli', embedding)
+
         engine_section = QLabel('Çeviri davranışı')
         engine_section.setObjectName('settingsSection')
         layout.addRow(engine_section)
@@ -1335,7 +1350,26 @@ class SettingsDialog(QDialog):
         index = self.fields['model'].findText(current)
         if index >= 0:
             self.fields['model'].setCurrentIndex(index)
+        embedding = self.fields['embedding_model']
+        self._fill_embedding(embedding, names, self._combo_value('embedding_model', embedding))
         self.model_hint.setText(f'{len(names)} model bulundu.')
+
+    @staticmethod
+    def _fill_embedding(combo, names, current):
+        """'(kapalı)' + adinda 'embed' gecen modeller once; secili deger korunur."""
+        names = [str(name) for name in names]
+        ordered = ([name for name in names if 'embed' in name.lower()]
+                   + [name for name in names if 'embed' not in name.lower()])
+        if current and current not in ordered:
+            ordered.insert(0, current)
+        combo.clear()
+        combo.addItems([EMBEDDING_OFF] + ordered)
+        combo.setCurrentIndex(max(0, combo.findText(current)) if current else 0)
+
+    @staticmethod
+    def _combo_value(key, field):
+        text = field.currentText().strip()
+        return '' if key == 'embedding_model' and text == EMBEDDING_OFF else text
 
     def reset_defaults(self):
         for key, field in self.fields.items():
@@ -1358,7 +1392,7 @@ class SettingsDialog(QDialog):
             if isinstance(field, QLineEdit):
                 result[key] = field.text().strip()
             elif isinstance(field, QComboBox):
-                result[key] = field.currentText().strip()
+                result[key] = self._combo_value(key, field)
             elif isinstance(field, QCheckBox):
                 result[key] = field.isChecked()
             elif isinstance(field, QDoubleSpinBox):
@@ -2326,7 +2360,14 @@ class MainWindow(QMainWindow):
         if dialog.exec() != QDialog.Accepted:
             return
         try:
-            value = dialog.value()
+            # Pencerede alani olmayan anahtarlar (orn. embedding sablonlari) korunur.
+            # Dogrulamasiz okunur: gecersiz bir config.json pencereden duzeltilebilsin.
+            value = dict(DEFAULT_CONFIG)
+            try:
+                value.update(json.loads(read(APP_DIR / 'config.json')))
+            except (OSError, ValueError):
+                pass
+            value.update(dialog.value())
             validate_config(value)
             save_json(APP_DIR / 'config.json', value)
         except (RuntimeError, ValueError, OSError) as error:

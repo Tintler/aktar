@@ -56,6 +56,11 @@ DEFAULT_CONFIG = {
     'whisper_language': '',
     # Baska programlarla ortak cuBLAS 12 / cuDNN 9 DLL klasoru (bos: pip/paket icinden).
     'whisper_cuda_dir': '',
+    # Kutuphane indeksi (F57): LM Studio'daki embedding modeli (bos: indeksleme kapali).
+    # Sablonlar EmbeddingGemma bicimindedir; baska model icin config.json'da degistirilir.
+    'embedding_model': '',
+    'embedding_query_template': 'task: search result | query: {query}',
+    'embedding_document_template': 'title: {title} | text: {text}',
     # Reasoning/thinking ureten modellerde dusunmeyi kapatma denemesi
     # (LM Studio chat_template_kwargs desteklerse). Desteklenmezse yok sayilir;
     # o durumda LM Studio model preset'inden thinking kapatilmalidir.
@@ -199,6 +204,12 @@ def validate_config(cfg):
         raise ValueError('whisper_language boş (otomatik) veya dil kodu (örn. en) olmalı.')
     if not isinstance(cfg.get('whisper_cuda_dir', ''), str):
         raise ValueError('whisper_cuda_dir klasör yolu (metin) olmalı.')
+    if not isinstance(cfg.get('embedding_model', ''), str):
+        raise ValueError('embedding_model model adı (metin) olmalı.')
+    for key, field in (('embedding_query_template', '{query}'),
+                       ('embedding_document_template', '{text}')):
+        if field not in str(cfg.get(key, DEFAULT_CONFIG[key])):
+            raise ValueError(f'{key} içinde {field} bulunmalı.')
     if not 1 <= int(cfg['auto_retry_count']) <= 100:
         raise ValueError('auto_retry_count 1 ile 100 arasında olmalı.')
     if not 0 <= float(cfg['temperature']) <= 2:
@@ -532,6 +543,24 @@ class Client:
     def models(self):
         value = self.request('/models')
         return [item['id'] for item in value.get('data', []) if item.get('id')]
+
+    def embed(self, texts):
+        """Metinleri `embedding_model` ile vektore cevirir (giris sirasiyla)."""
+        model = str(self.cfg.get('embedding_model', '')).strip()
+        if not model:
+            raise ValueError('Embedding modeli seçilmedi (Ayarlar → Kütüphane indeksi).')
+        texts = [str(text) for text in texts]
+        if not texts:
+            return []
+        value = self.request('/embeddings', {'model': model, 'input': texts})
+        try:
+            items = sorted(value['data'], key=lambda item: int(item.get('index', 0)))
+            vectors = [[float(number) for number in item['embedding']] for item in items]
+        except (KeyError, TypeError, ValueError):
+            raise ValueError('Beklenmeyen embedding API çıktısı.') from None
+        if len(vectors) != len(texts) or not all(vectors):
+            raise ValueError('Embedding API eksik vektör döndürdü.')
+        return vectors
 
     def generate(self, system, user, temperature=None, max_tokens=None):
         return self.chat([{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
