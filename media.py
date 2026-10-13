@@ -79,7 +79,7 @@ def _no_window():
     return getattr(subprocess, 'CREATE_NO_WINDOW', 0) if os.name == 'nt' else 0
 
 
-def _probe_streams(video):
+def _probe(video):
     video = Path(video)
     if not video.exists():
         raise ValueError('Video bulunamadı: ' + str(video))
@@ -89,10 +89,26 @@ def _probe_streams(video):
     if result.returncode != 0:
         raise RuntimeError('ffprobe videoyu okuyamadı: ' + (result.stderr or '').strip())
     try:
-        value = json.loads(result.stdout or '{}')
+        return json.loads(result.stdout or '{}')
     except json.JSONDecodeError as error:
         raise RuntimeError('ffprobe çıktısı okunamadı.') from error
-    return value.get('streams', []) or []
+
+
+def _probe_streams(video):
+    return _probe(video).get('streams', []) or []
+
+
+def probe_summary(video):
+    """Tek ffprobe cagrisiyla sure + altyazi akislari (kutuphane hazirligi icin).
+
+    Donen: {'duration': float, 'subtitles': subtitle_streams ile ayni kayitlar}.
+    """
+    value = _probe(video)
+    try:
+        duration = float((value.get('format') or {}).get('duration') or 0.0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    return {'duration': duration, 'subtitles': _subtitles_of(value.get('streams', []) or [])}
 
 
 def audio_streams(video):
@@ -135,8 +151,12 @@ def subtitle_streams(video):
     tabanli mi). `-map 0:s:N` subtitle SIRASINA gore indeksledigi icin cikarma
     isleminde GLOBAL index kullanilir.
     """
+    return _subtitles_of(_probe_streams(video))
+
+
+def _subtitles_of(probed):
     streams = []
-    for stream in _probe_streams(video):
+    for stream in probed:
         if stream.get('codec_type') != 'subtitle':
             continue
         codec = str(stream.get('codec_name', '')).lower()

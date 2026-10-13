@@ -238,6 +238,21 @@ class TranscribeTests(unittest.TestCase):
                                        log=logs.append, **kwargs)
         return result, logs
 
+    def test_downloaded_model_loads_from_local_folder_without_network(self):
+        """F56: model diskteyse WhisperModel'e yerel klasor verilir (Hugging Face'e sorulmaz)."""
+        module, calls = fake_whisper_module()
+        asked = []
+
+        def download_model(name, local_files_only=False, cache_dir=None):
+            asked.append((name, local_files_only, cache_dir))
+            return 'C:/models/turbo-snapshot'
+
+        utils = types.SimpleNamespace(download_model=download_model)
+        with mock.patch.dict(sys.modules, {'faster_whisper.utils': utils}):
+            self.run_transcribe(module, device='cpu')
+        self.assertTrue(asked and asked[0][1], 'yalnizca yerel kopya aranmali')
+        self.assertEqual(calls[0][0], 'C:/models/turbo-snapshot')
+
     def test_gpu_failure_falls_back_to_cpu_and_caches(self):
         module, calls = fake_whisper_module(fail_devices=('cuda',))
         progress = []

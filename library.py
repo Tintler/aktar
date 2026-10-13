@@ -12,14 +12,18 @@ silmek yalnizca JSON kaydini siler.
 """
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
+import threading
 from datetime import datetime
 from pathlib import Path
 
+import media
 import qa
 import series
+import speech
 from app_core import APP_DIR, FileLock, read, save_json
 from media import VIDEO_EXTENSIONS
 
@@ -285,13 +289,18 @@ def scan(data):
 def describe(entry, base=None):
     """Tablo icin durum: {'status', 'source', 'duration'}.
 
-    status: 'missing' | 'ready' (ozet hazir) | 'transcript' (metin hazir) | 'pending'.
+    status: 'missing' | 'ready' (ozet hazir) | 'transcript' (metin hazir) |
+    'no_subtitle' (yoklandi, metin altyazi yok: Whisper bekliyor) | 'pending'.
     """
     if entry['missing']:
         return {'status': 'missing', 'source': '', 'duration': 0.0}
     sessions = qa.cached_sessions(entry['path'], base) if entry['kind'] == 'video' else []
     if not sessions:
-        return {'status': 'pending', 'source': '', 'duration': 0.0}
+        probed = cached_probe(entry['path'], base) if entry['kind'] == 'video' else None
+        if probed is None:
+            return {'status': 'pending', 'source': '', 'duration': 0.0}
+        return {'status': 'pending' if probed['subtitles'] else 'no_subtitle', 'source': '',
+                'duration': probed['duration']}
     best = max(sessions, key=lambda item: bool(item.get('overview')))
     source = best['source']
     if source.get('kind') == 'subtitle':
@@ -300,3 +309,119 @@ def describe(entry, base=None):
         label = 'Whisper' + (' · ' + source['model'] if source.get('model') else '')
     return {'status': 'ready' if best.get('overview') else 'transcript', 'source': label,
             'duration': float(best.get('duration') or 0.0)}
+
+
+# --- yoklama onbellegi + toplu transkript (F56) ---------------------------------
+_PROBE_LOCK = threading.Lock()
+_PROBE_STORES = {}  # depo dosyasi -> {damga: ozet}; ayni surecte tek kopya
+
+
+def _probe_file(base=None):
+    return Path(base or qa.work_dir()) / 'library' / 'probe.json'
+
+
+def _stamp(path):
+    """Dosya degisirse (boyut/tarih) eski yoklama gecersiz olsun."""
+    stat = Path(path).stat()
+    return f'{_key(path)}|{stat.st_size}|{int(stat.st_mtime)}'
+
+
+def _probe_store(base):
+    file = str(_probe_file(base))
+    store = _PROBE_STORES.get(file)
+    if store is None:
+        try:
+            store = json.loads(read(file))
+        except (OSError, ValueError):
+            store = {}
+        if not isinstance(store, dict):
+            store = {}
+        _PROBE_STORES[file] = store
+    return store
+
+
+def cached_probe(path, base=None):
+    """Daha once yoklanmissa {'duration', 'subtitles'}; ffprobe calistirmaz."""
+    try:
+        stamp = _stamp(path)
+    except OSError:
+        return None
+    with _PROBE_LOCK:
+        value = _probe_store(base).get(stamp)
+    return copy.deepcopy(value) if isinstance(value, dict) else None
+
+
+def probe(path, base=None):
+    """Sure + altyazi akislari (onbellekli; yoksa tek ffprobe cagrisi)."""
+    cached = cached_probe(path, base)
+    if cached is not None:
+        return cached
+    value = media.probe_summary(path)
+    stamp = _stamp(path)
+    prefix = _key(path) + '|'
+    with _PROBE_LOCK:
+        store = _probe_store(base)
+        for old in [item for item in store if item.startswith(prefix)]:
+            del store[old]
+        store[stamp] = value
+        try:
+            save_json(_probe_file(base), store)
+        except OSError:
+            pass  # onbellek yazilamazsa yalnizca bir dahaki sefere tekrar yoklanir
+    return copy.deepcopy(value)
+
+
+def plan(entries, base=None, progress=None, cancelled=None):
+    """Toplu hazirlik plani; gerekirse videolari yoklar.
+
+    Donen: {'ready': [entry], 'subtitle': [entry], 'whisper': [entry],
+            'failed': [(entry, hata)], 'whisper_seconds': float}.
+    """
+    result = {'ready': [], 'subtitle': [], 'whisper': [], 'failed': [], 'whisper_seconds': 0.0}
+    videos = [entry for entry in entries if not entry['missing'] and entry['kind'] == 'video']
+    for index, entry in enumerate(videos):
+        if cancelled and cancelled():
+            break
+        if qa.cached_sessions(entry['path'], base):
+            result['ready'].append(entry)
+        else:
+            try:
+                info = probe(entry['path'], base)
+            except (RuntimeError, ValueError, OSError) as error:
+                result['failed'].append((entry, str(error)))
+                info = None
+            if info is not None and qa.pick_subtitle_stream(info['subtitles']):
+                result['subtitle'].append(entry)
+            elif info is not None:
+                result['whisper'].append(entry)
+                result['whisper_seconds'] += info['duration']
+        if progress:
+            progress(index + 1, len(videos))
+    return result
+
+
+def transcribe(entry, cfg, allow_whisper=True, base=None, log=print, progress=None,
+               cancelled=None):
+    """Tek videonun transkriptini qa onbellegine yazar.
+
+    Donen: 'cached' (zaten vardi) | 'subtitle' | 'whisper' | 'skipped' (altyazi yok,
+    Whisper izni yok). Soru Sor paneli ayni onbellegi kullanir (ayni akis secimi).
+    """
+    path = entry['path']
+    if qa.cached_sessions(path, base):
+        return 'cached'
+    info = probe(path, base)
+    stream = qa.pick_subtitle_stream(info['subtitles'])
+    if stream is not None:
+        qa.load_subtitle_session(path, stream, base, log)
+        return 'subtitle'
+    result = speech.load_cached(path, cfg['whisper_model'], cfg['whisper_language'], base)
+    if result is None:
+        if not allow_whisper:
+            return 'skipped'
+        result = speech.transcribe(path, cfg['whisper_model'], cfg['whisper_device'],
+                                   cfg['whisper_language'], base=base, progress=progress,
+                                   cancelled=cancelled, log=log,
+                                   cuda_dir=cfg.get('whisper_cuda_dir', ''))
+    qa.load_whisper_session(path, result, base, log)
+    return 'whisper'

@@ -179,7 +179,10 @@ Videolarınızı **koleksiyonlarda** toplar (ör. "Makine Öğrenmesi", "Konfera
 - **Dosya tablosu:** Dosya adı, bulunduğu alt klasör, süre (hazırlanmamışsa dosya boyutu), metin kaynağı (Altyazı · dil / Whisper · model) ve durum (**Hazır**: özet çıkarılmış; **Metin hazır**: transkript var; **Bekliyor**; **Bulunamadı**). Arama kutusu dosya adında süzer.
 - **Videoya çift tıklayınca** oynatıcı ve soru-cevap açılır (bkz. 3.6); sol üstteki geri düğmesi listeye döndürür.
 - **Sağ tık menüsü:** **Oynat ve soru sor**, **Altyazıyı çevir…** (videoyu Altyazı Çevir sekmesinde açar), **Dosya konumunu aç**, **Koleksiyondan çıkar** (dosya diskte kalır; birden çok satır seçilebilir).
-- **Hepsini hazırla** ve sağdaki **Koleksiyona sor** paneli henüz etkin değildir; toplu hazırlık ve tüm koleksiyona soru sorma sonraki sürümlerde gelecek.
+- **Hepsini hazırla:** Koleksiyondaki tüm videoların transkriptini sırayla çıkarır. Açılan pencere videoları yoklar ve üç gruba ayırır: **Zaten hazır** (önbellekte, tekrar işlenmez), **Gömülü altyazıdan** (hızlı; şarkı/yazı izleri atlanır) ve **Altyazı yok → Whisper** (toplam ses süresiyle). Whisper yalnızca bu penceredeki **Altyazısız videolarda Whisper kullan** anahtarı açıksa çalışır; kapalıysa bu videolar atlanır ve tabloda **Altyazı yok · Whisper bekliyor** olarak görünür. Sıra: önce altyazılı videolar, sonra Whisper.
+  - Çalışırken tablonun üstündeki şerit ilerlemeyi gösterir; satırlarda **Sırada**, **İşleniyor…**, **Whisper %42** gibi durumlar görünür. **Duraklat** sıradaki videodan önce bekler (Whisper bir videoyu bitirmeden durmaz); **Durdur** işi keser, yarım kalan video bir sonraki sefere baştan yapılır. Hazırlanan transkriptler önbelleğe yazılır; videoya çift tıklayınca beklemeden kullanılır.
+  - Hata veren videolar (ör. seste konuşma yoksa) atlanır ve sonunda listelenir; ayrıntılar Altyazı Çevir sekmesindeki konsoldadır.
+- Sağdaki **Koleksiyona sor** paneli henüz etkin değildir; tüm koleksiyona soru sorma sonraki sürümlerde gelecek.
 
 Koleksiyonlar uygulama dizinindeki `library\` klasöründe tutulur.
 

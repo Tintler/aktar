@@ -306,6 +306,20 @@ def transcribe(video, model_name=DEFAULT_MODEL, device='auto', language='', base
     return result
 
 
+def _local_model(model_name, download_root):
+    """Model daha once indirildiyse yerel klasoru (ag kullanmadan); yoksa None.
+
+    WhisperModel'e model ADI verilince faster-whisper her yuklemede Hugging Face'e
+    surum sorar; ag yavas ya da kapaliysa model diskte olsa bile yukleme dakikalarca
+    takilir (F56 toplu kuyrukta goruldu). Yerel kopya varken ag hic kullanilmaz.
+    """
+    try:
+        from faster_whisper.utils import download_model
+        return download_model(model_name, local_files_only=True, cache_dir=download_root)
+    except Exception:  # indirilmemis (LocalEntryNotFoundError) ya da eski surum
+        return None
+
+
 def run_whisper(audio, model_name=DEFAULT_MODEL, device='auto', language='', progress=None,
                 cancelled=None, log=print, download_root=None, cuda_dir=''):
     """WAV'i faster-whisper ile cozer; GPU calismazsa bir sonraki cihaza (CPU) duser.
@@ -325,11 +339,13 @@ def run_whisper(audio, model_name=DEFAULT_MODEL, device='auto', language='', pro
                                     else 'bulunamadı (Ayarlar\'da GPU kütüphane klasörü '
                                          'gösterilmedi, nvidia-cublas-cu12 / nvidia-cudnn-cu12 '
                                          'de kurulu değil); GPU varsa yine de denenecek.'))
+    download_root = download_root or str(model_dir())
+    source = _local_model(model_name, download_root) or model_name
     errors = []
     for target, compute_type in _device_plan(device):
         try:
-            model = WhisperModel(model_name, device=target, compute_type=compute_type,
-                                 download_root=download_root or str(model_dir()))
+            model = WhisperModel(source, device=target, compute_type=compute_type,
+                                 download_root=download_root)
             result = _run_model(model, audio, language, progress, cancelled)
         except GracefulStop:
             raise

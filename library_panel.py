@@ -16,24 +16,31 @@ import copy
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QUrl, Signal
+from PySide6.QtCore import QObject, QSize, Qt, QThread, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QDesktopServices
-from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QFileDialog, QFrame,
+from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QDialog, QFileDialog, QFrame,
                                QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit,
-                               QListWidget, QListWidgetItem, QMenu, QMessageBox, QPushButton,
-                               QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout,
-                               QWidget)
+                               QListWidget, QListWidgetItem, QMenu, QMessageBox, QProgressBar,
+                               QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem,
+                               QVBoxLayout, QWidget)
 
 import library
-from gui import THEME, HoverIconButton, _alive, card, highlight_rows, tinted_icon, window_icon
+import qa
+import speech
+from app_core import GracefulStop, load_config
+from gui import (THEME, HoverIconButton, ToggleSwitch, _alive, card, highlight_rows,
+                 tinted_icon, window_icon)
 
 PAGE_EMPTY, PAGE_LIST, PAGE_DETAIL = 0, 1, 2
+WARN = '#f0b44c'  # onay bekleyen (Whisper) durumlar; tasarim taslagindaki amber
 KIND_LABELS = {'video': 'Video'}
 KIND_ICONS = {'video': 'video'}
 STATUS_TEXT = {'ready': 'Hazır', 'transcript': 'Metin hazır', 'pending': 'Bekliyor',
-               'missing': 'Bulunamadı'}
+               'no_subtitle': 'Altyazı yok · Whisper bekliyor', 'missing': 'Bulunamadı'}
+META_TEXT = {'ready': 'hazır', 'transcript': 'metin hazır', 'pending': 'bekliyor',
+             'no_subtitle': 'Whisper bekliyor', 'missing': 'bulunamadı'}
 STATUS_COLOR = {'ready': THEME['text'], 'transcript': THEME['secondary'],
-                'pending': THEME['muted'], 'missing': THEME['disabled']}
+                'pending': THEME['muted'], 'no_subtitle': WARN, 'missing': THEME['disabled']}
 
 LIBRARY_STYLE = """
 QFrame#libSide {{ background:{chrome}; border:0; border-right:1px solid {border}; }}
@@ -118,6 +125,213 @@ class DropFrame(QFrame):
             self.dropped.emit(paths)
 
 
+class PrepareDialog(QDialog):
+    """'Hepsini hazirla' onayi: videolari yoklar, kaynaga gore sayar, Whisper iznini sorar.
+
+    Yoklama (ffprobe) arka plan thread'indedir ve onbellege yazilir; pencere
+    kapatilirsa durur. Whisper bu pencerede acikca onaylanmadikca calismaz."""
+
+    planned = Signal(object)        # library.plan sonucu
+    plan_progress = Signal(int, int)
+
+    def __init__(self, entries, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('Aktar - Toplu hazırlık')
+        self.setWindowIcon(window_icon())
+        self.setMinimumWidth(560)
+        self.result_plan = None
+        self._cancel = threading.Event()
+        self.whisper_ready, whisper_hint = speech.available()
+        cfg = load_config()
+
+        column = QVBoxLayout(self)
+        column.setContentsMargins(24, 22, 24, 20)
+        column.setSpacing(14)
+        videos = sum(1 for entry in entries if not entry['missing'] and entry['kind'] == 'video')
+        title = QLabel(f'{videos} videoyu hazırla')
+        title.setObjectName('libDropTitle')
+        column.addWidget(title)
+        intro = QLabel('Her videonun transkripti çıkarılıp önbelleğe yazılır; sonra soru-cevapta '
+                       'beklemeden kullanılır. İstediğin an durdurabilirsin, kaldığı yerden devam eder.')
+        intro.setObjectName('libChatNote')
+        intro.setWordWrap(True)
+        column.addWidget(intro)
+
+        self.counts_card, counts = card(spacing=0, margins=(0, 0, 0, 0), shadow=False)
+        self.count_labels = {}
+        for key, icon, color, text, hint in (
+                ('ready', 'check', THEME['accent'], 'Zaten hazır', 'Önbellekten gelir, tekrar işlenmez'),
+                ('subtitle', 'subtitles', THEME['secondary'], 'Gömülü altyazıdan',
+                 'Hızlı · şarkı/yazı izleri atlanır, en uygun akış seçilir'),
+                ('whisper', 'audio', WARN, 'Altyazı yok → Whisper', '')):
+            row = QHBoxLayout()
+            row.setContentsMargins(14, 11, 14, 11)
+            row.setSpacing(12)
+            mark = QLabel()
+            mark.setPixmap(tinted_icon(icon, color, 16).pixmap(16, 16))
+            row.addWidget(mark)
+            texts = QVBoxLayout()
+            texts.setSpacing(2)
+            name = QLabel(text)
+            texts.addWidget(name)
+            detail = QLabel(hint)
+            detail.setObjectName('hint')
+            texts.addWidget(detail)
+            row.addLayout(texts, 1)
+            value = QLabel('…')
+            value.setObjectName('progressValue')
+            row.addWidget(value)
+            self.count_labels[key] = (value, detail)
+            counts.addLayout(row)
+        column.addWidget(self.counts_card)
+
+        self.plan_bar = QProgressBar()
+        self.plan_bar.setTextVisible(False)
+        column.addWidget(self.plan_bar)
+        self.plan_label = QLabel('Videolar yoklanıyor…')
+        self.plan_label.setObjectName('hint')
+        column.addWidget(self.plan_label)
+
+        self.whisper_check = ToggleSwitch('Altyazısız videolarda Whisper kullan')
+        self.whisper_check.setChecked(self.whisper_ready)
+        self.whisper_check.setEnabled(self.whisper_ready)
+        self.whisper_check.toggled.connect(self._update_start)
+        column.addWidget(self.whisper_check)
+        model = QLabel(f'Whisper: {cfg["whisper_model"]} · cihaz: {cfg["whisper_device"]} '
+                       '(Ayarlar\'dan değiştirilir). Kapalıysa bu videolar atlanır.'
+                       if self.whisper_ready else whisper_hint)
+        model.setObjectName('hint')
+        model.setWordWrap(True)
+        column.addWidget(model)
+        order = QLabel('Sıra: önce altyazılı videolar, sonra Whisper. Whisper bir videoyu '
+                       'bitirmeden duraklamaz; durdurunca yarım kalan video baştan yapılır.')
+        order.setObjectName('hint')
+        order.setWordWrap(True)
+        column.addWidget(order)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        cancel = QPushButton('İptal')
+        cancel.clicked.connect(self.reject)
+        buttons.addWidget(cancel)
+        self.start_button = QPushButton('Hazırlamayı başlat')
+        self.start_button.setObjectName('primary')
+        self.start_button.setEnabled(False)
+        self.start_button.clicked.connect(self.accept)
+        buttons.addWidget(self.start_button)
+        column.addLayout(buttons)
+
+        self.planned.connect(self._on_planned)
+        self.plan_progress.connect(self._on_progress)
+        threading.Thread(target=self._plan, args=(list(entries),),
+                         name='aktar-library-plan', daemon=True).start()
+
+    def _plan(self, entries):
+        try:
+            result = library.plan(entries, progress=self.plan_progress.emit,
+                                  cancelled=self._cancel.is_set)
+        except Exception as error:  # yoklama hatasi pencereyi kilitlemesin
+            result = {'ready': [], 'subtitle': [], 'whisper': [], 'whisper_seconds': 0.0,
+                      'failed': [(None, str(error))]}
+        if not self._cancel.is_set():
+            self.planned.emit(result)
+
+    def _on_progress(self, done, total):
+        self.plan_bar.setMaximum(max(1, total))
+        self.plan_bar.setValue(done)
+        self.plan_label.setText(f'Videolar yoklanıyor {done}/{total}…')
+
+    def _on_planned(self, result):
+        self.result_plan = result
+        self.plan_bar.hide()
+        failed = result['failed']
+        self.plan_label.setText(f'{len(failed)} video okunamadı ve atlanacak: '
+                                + ', '.join(entry['path'].name for entry, _error in failed[:3]
+                                            if entry is not None)
+                                if failed else '')
+        self.plan_label.setVisible(bool(failed))
+        for key in ('ready', 'subtitle', 'whisper'):
+            self.count_labels[key][0].setText(str(len(result[key])))
+        seconds = result['whisper_seconds']
+        self.count_labels['whisper'][1].setText(
+            f'Toplam {format_duration(seconds)} ses · süre GPU\'ya bağlı' if seconds
+            else 'Konuşma sesten metne çevrilir')
+        self._update_start()
+
+    def _update_start(self):
+        if self.result_plan is None:
+            return
+        count = len(self.queue())
+        self.start_button.setText(f'Hazırlamayı başlat ({count} video)')
+        self.start_button.setEnabled(count > 0)
+
+    def allow_whisper(self):
+        return self.whisper_ready and self.whisper_check.isChecked()
+
+    def queue(self):
+        """Islenecek sira: once altyazilar (hizli), sonra Whisper."""
+        if self.result_plan is None:
+            return []
+        return (list(self.result_plan['subtitle'])
+                + (list(self.result_plan['whisper']) if self.allow_whisper() else []))
+
+    def done(self, code):
+        self._cancel.set()
+        super().done(code)
+
+
+class QueueWorker(QObject):
+    """Toplu transkript isi: siradaki videolari library.transcribe ile isler."""
+
+    started = Signal(int, str, str)    # (sira, yol, adim)
+    progress = Signal(int, int)        # Whisper: (islenen saniye, toplam saniye)
+    item_done = Signal(str, str, str)  # (yol, sonuc, hata)
+    log = Signal(str)
+    finished = Signal(int, int, bool)  # (tamamlanan, hatali, durduruldu)
+
+    def __init__(self, entries, allow_whisper):
+        super().__init__()
+        self.entries = entries
+        self.allow_whisper = allow_whisper
+        self.cancel_event = threading.Event()
+        self.resume_event = threading.Event()
+        self.resume_event.set()
+
+    def _wait_if_paused(self):
+        while not self.resume_event.wait(0.2):
+            if self.cancel_event.is_set():
+                return
+
+    @Slot()
+    def run(self):
+        done = failed = 0
+        cfg = load_config()
+        for index, entry in enumerate(self.entries):
+            self._wait_if_paused()
+            if self.cancel_event.is_set():
+                break
+            path = str(entry['path'])
+            probed = library.cached_probe(entry['path'])
+            whisper = probed is not None and not qa.pick_subtitle_stream(probed['subtitles'])
+            self.started.emit(index, path, 'Whisper ile transkript' if whisper
+                              else 'altyazıdan metin')
+            try:
+                outcome = library.transcribe(entry, cfg, self.allow_whisper,
+                                             log=lambda message, name=entry['path'].name:
+                                             self.log.emit(f'[{name}] {message}'),
+                                             progress=self.progress.emit,
+                                             cancelled=self.cancel_event.is_set)
+            except GracefulStop:
+                break
+            except Exception as error:  # tek videonun hatasi kuyrugu durdurmasin
+                failed += 1
+                self.item_done.emit(path, 'failed', str(error))
+                continue
+            done += 1
+            self.item_done.emit(path, outcome, '')
+        self.finished.emit(done, failed, self.cancel_event.is_set())
+
+
 class LibraryPanel(QWidget):
     """Kutuphane sekmesi: koleksiyon secimi, dosya tablosu ve oynatici ayrintisi."""
 
@@ -135,6 +349,10 @@ class LibraryPanel(QWidget):
         self._generation = 0
         self.qa_panel = None
         self._qa_retired = []  # geri donulunce/baska video acilinca isi suren eski paneller
+        self._rows = {}        # dosya anahtari -> tablo satiri
+        self._queue = None     # (thread, worker): toplu transkript isi
+        self._queue_total = 0
+        self._queue_name = ''
         self.setStyleSheet(LIBRARY_STYLE.format(**THEME))
         self.scanned.connect(self._scan_finished)
         self._build()
@@ -265,11 +483,12 @@ class LibraryPanel(QWidget):
         head.addWidget(add_files, 0, Qt.AlignBottom)
         self.prepare_button = QPushButton('Hepsini hazırla')
         self.prepare_button.setObjectName('primary')
-        self.prepare_button.setEnabled(False)
-        self.prepare_button.setToolTip('Toplu transkript ve hazırlık bir sonraki sürümde gelecek. '
-                                       'Şimdilik videoya çift tıklayıp tek tek hazırlayabilirsiniz.')
+        self.prepare_button.setToolTip('Koleksiyondaki tüm videoların transkriptini çıkarır '
+                                       '(altyazıdan; altyazısızlarda onayla Whisper).')
+        self.prepare_button.clicked.connect(self.prepare_all)
         head.addWidget(self.prepare_button, 0, Qt.AlignBottom)
         column.addLayout(head)
+        column.addWidget(self._build_queue_strip())
 
         tools = QHBoxLayout()
         tools.setSpacing(8)
@@ -320,6 +539,39 @@ class LibraryPanel(QWidget):
         inner.addWidget(foot)
         column.addWidget(frame, 1)
         return center
+
+    def _build_queue_strip(self):
+        """Toplu hazirlik seridi: '<n>/<toplam> · dosya — adim', ilerleme, duraklat/durdur."""
+        self.queue_strip, row = card(spacing=14, margins=(14, 10, 14, 10), horizontal=True,
+                                     shadow=False)
+        texts = QVBoxLayout()
+        texts.setSpacing(7)
+        self.queue_label = QLabel('')
+        texts.addWidget(self.queue_label)
+        bar_row = QHBoxLayout()
+        bar_row.setSpacing(10)
+        self.queue_bar = QProgressBar()
+        self.queue_bar.setTextVisible(False)
+        bar_row.addWidget(self.queue_bar, 1)
+        self.queue_value = QLabel('')
+        self.queue_value.setObjectName('progressValue')
+        bar_row.addWidget(self.queue_value)
+        texts.addLayout(bar_row)
+        row.addLayout(texts, 1)
+        self.queue_pause = HoverIconButton('')
+        self.queue_pause.setObjectName('iconOnly')
+        self.queue_pause.setTintedIcon('pause', THEME['text'])
+        self.queue_pause.setToolTip('Duraklat (sıradaki dosyadan önce)')
+        self.queue_pause.clicked.connect(self.toggle_queue_pause)
+        row.addWidget(self.queue_pause)
+        self.queue_stop = HoverIconButton('')
+        self.queue_stop.setObjectName('iconOnly')
+        self.queue_stop.setTintedIcon('stop', THEME['text'])
+        self.queue_stop.setToolTip('Durdur')
+        self.queue_stop.clicked.connect(self.stop_queue)
+        row.addWidget(self.queue_stop)
+        self.queue_strip.hide()
+        return self.queue_strip
 
     def _build_chat(self):
         chat = QFrame()
@@ -602,38 +854,64 @@ class LibraryPanel(QWidget):
             self.chips.button(0).setChecked(True)
 
     def _fill_table(self):
+        self._update_meta()
+        self.table.setRowCount(len(self.entries))
+        self._rows = {library._key(entry['path']): row for row, entry in enumerate(self.entries)}
+        for row in range(len(self.entries)):
+            self._fill_row(row)
+        self._apply_filter()
+
+    def _update_meta(self):
         counts = {}
         for info in self.infos:
             counts[info['status']] = counts.get(info['status'], 0) + 1
         parts = [f'{len(self.entries)} dosya']
-        parts += [f'{counts[key]} {STATUS_TEXT[key].lower()}'
-                  for key in ('ready', 'transcript', 'pending', 'missing') if counts.get(key)]
+        parts += [f'{counts[key]} {META_TEXT[key]}'
+                  for key in ('ready', 'transcript', 'pending', 'no_subtitle', 'missing')
+                  if counts.get(key)]
         self.meta_label.setText(' · '.join(parts))
-        self.table.setRowCount(len(self.entries))
-        for row, (entry, info) in enumerate(zip(self.entries, self.infos)):
-            kind = QTableWidgetItem(tinted_icon(KIND_ICONS.get(entry['kind'], 'film'),
-                                                THEME['secondary'], 16), '')
-            kind.setToolTip(KIND_LABELS.get(entry['kind'], entry['kind']))
-            name = QTableWidgetItem(entry['path'].name + ('  · yeni' if entry['new'] else ''))
-            name.setToolTip(str(entry['path']))
-            folder = QTableWidgetItem(self._where(entry))
-            folder.setToolTip(str(Path(entry['path']).parent))
-            folder.setForeground(QColor(THEME['muted']))
-            length = QTableWidgetItem(format_duration(info['duration']) if info['duration']
-                                      else ('—' if entry['missing'] else format_size(entry['path'])))
-            length.setForeground(QColor(THEME['secondary'] if info['duration'] else THEME['muted']))
-            source = QTableWidgetItem(info['source'] or '—')
-            source.setForeground(QColor(THEME['secondary'] if info['source'] else THEME['muted']))
-            status = QTableWidgetItem(STATUS_TEXT[info['status']])
-            status.setForeground(QColor(STATUS_COLOR[info['status']]))
-            if entry['missing']:
-                name.setForeground(QColor(THEME['disabled']))
-            elif entry['new']:
-                name.setForeground(QColor(THEME['accent']))
-            for column, item in enumerate((kind, name, folder, length, source, status)):
-                item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-                self.table.setItem(row, column, item)
-        self._apply_filter()
+
+    def _fill_row(self, row):
+        entry, info = self.entries[row], self.infos[row]
+        kind = QTableWidgetItem(tinted_icon(KIND_ICONS.get(entry['kind'], 'film'),
+                                            THEME['secondary'], 16), '')
+        kind.setToolTip(KIND_LABELS.get(entry['kind'], entry['kind']))
+        name = QTableWidgetItem(entry['path'].name + ('  · yeni' if entry['new'] else ''))
+        name.setToolTip(str(entry['path']))
+        folder = QTableWidgetItem(self._where(entry))
+        folder.setToolTip(str(Path(entry['path']).parent))
+        folder.setForeground(QColor(THEME['muted']))
+        length = QTableWidgetItem(format_duration(info['duration']) if info['duration']
+                                  else ('—' if entry['missing'] else format_size(entry['path'])))
+        length.setForeground(QColor(THEME['secondary'] if info['duration'] else THEME['muted']))
+        source = QTableWidgetItem(info['source'] or '—')
+        source.setForeground(QColor(THEME['secondary'] if info['source'] else THEME['muted']))
+        status = QTableWidgetItem(STATUS_TEXT[info['status']])
+        status.setForeground(QColor(STATUS_COLOR[info['status']]))
+        if entry['missing']:
+            name.setForeground(QColor(THEME['disabled']))
+        elif entry['new']:
+            name.setForeground(QColor(THEME['accent']))
+        for column, item in enumerate((kind, name, folder, length, source, status)):
+            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            self.table.setItem(row, column, item)
+
+    def _set_status_cell(self, path, text, color):
+        """Kuyruk calisirken tek satirin durum hucresi (acik koleksiyonda varsa)."""
+        row = self._rows.get(library._key(path))
+        item = self.table.item(row, 5) if row is not None else None
+        if item is not None:
+            item.setText(text)
+            item.setForeground(QColor(color))
+
+    def _refresh_entry(self, path):
+        """Islenen dosyanin durumunu onbellekten yeniden okuyup satiri gunceller."""
+        row = self._rows.get(library._key(path))
+        if row is None or row >= len(self.entries):
+            return
+        self.infos[row] = library.describe(self.entries[row])
+        self._fill_row(row)
+        self._update_meta()
 
     @staticmethod
     def _where(entry):
@@ -724,7 +1002,124 @@ class LibraryPanel(QWidget):
             self._qa_retired.append(panel)
         panel.retire()
 
+    # --- toplu hazirlik (F56) ------------------------------------------------
+    def prepare_all(self):
+        if self._queue is not None:
+            return
+        entries = [entry for entry in self.entries if not entry['missing']]
+        if not entries:
+            self._warn('Koleksiyonda hazırlanacak video yok.')
+            return
+        dialog = PrepareDialog(entries, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        self.start_queue(dialog.queue(), dialog.allow_whisper())
+
+    def start_queue(self, entries, allow_whisper):
+        if not entries:
+            return
+        worker = QueueWorker(entries, allow_whisper)
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.started.connect(self._queue_started)
+        worker.progress.connect(self._queue_progress)
+        worker.item_done.connect(self._queue_item_done)
+        worker.log.connect(self._log)
+        worker.finished.connect(self._queue_finished)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(thread.deleteLater)
+        self._queue = (thread, worker)
+        self._queue_total = len(entries)
+        self._queue_index = 0
+        self._queue_failed = []
+        self.queue_bar.setMaximum(len(entries))
+        self.queue_bar.setValue(0)
+        self.queue_value.setText(f'0 / {len(entries)}')
+        self._set_queue_paused(False)
+        self.queue_strip.show()
+        self.prepare_button.setEnabled(False)
+        for entry in entries:
+            self._set_status_cell(entry['path'], 'Sırada', THEME['muted'])
+        self._log(f'Toplu hazırlık başladı: {len(entries)} video'
+                  + (' (Whisper açık).' if allow_whisper else '.'))
+        thread.start()
+
+    def _queue_started(self, index, path, step):
+        self._queue_name = Path(path).name
+        self._queue_index = index
+        self.queue_label.setText(f'Hazırlanıyor {index + 1}/{self._queue_total} · '
+                                 f'{self._queue_name} — {step}')
+        self._set_status_cell(path, 'İşleniyor…', THEME['accent'])
+
+    def _queue_progress(self, done, total):
+        """Whisper ilerlemesi (saniye): satirda ve seritte yuzde."""
+        if total <= 0 or self._queue is None:
+            return
+        percent = int(100 * done / total)
+        worker = self._queue[1]
+        path = worker.entries[self._queue_index]['path']
+        self._set_status_cell(path, f'Whisper %{percent}', THEME['accent'])
+        self.queue_value.setText(f'{self._queue_index} / {self._queue_total} · %{percent}')
+
+    def _queue_item_done(self, path, outcome, error):
+        done = self.queue_bar.value() + 1
+        self.queue_bar.setValue(done)
+        self.queue_value.setText(f'{done} / {self._queue_total}')
+        if outcome == 'failed':
+            self._queue_failed.append(Path(path).name)
+            self._log(f'HATA [{Path(path).name}]: {error}')
+            self._set_status_cell(path, 'Hata', THEME['disabled'])
+            return
+        self._refresh_entry(path)
+
+    def _queue_finished(self, done, failed, stopped):
+        self._queue = None
+        self.queue_strip.hide()
+        self.prepare_button.setEnabled(True)
+        message = (f'Toplu hazırlık {"durduruldu" if stopped else "bitti"}: {done} video hazır'
+                   + (f', {failed} hata ({", ".join(self._queue_failed[:5])}).' if failed else '.'))
+        self._log(message)
+        self.rescan()
+        if failed:
+            self._warn(message + ' Ayrıntılar Altyazı Çevir sekmesindeki konsolda.')
+
+    def toggle_queue_pause(self):
+        if self._queue is None:
+            return
+        worker = self._queue[1]
+        paused = worker.resume_event.is_set()
+        if paused:
+            worker.resume_event.clear()
+        else:
+            worker.resume_event.set()
+        self._set_queue_paused(paused)
+
+    def _set_queue_paused(self, paused):
+        name = 'play' if paused else 'pause'
+        self.queue_pause.setIcon(tinted_icon(name, THEME['text']))
+        self.queue_pause.setHoverIcon(tinted_icon(name, THEME['accent']))
+        self.queue_pause.setToolTip('Devam' if paused else 'Duraklat (sıradaki dosyadan önce)')
+        if paused:
+            self.queue_label.setText(f'Duraklatıldı · {self._queue_name} bitince bekler')
+        elif self._queue is not None and self._queue_name:
+            self.queue_label.setText('Devam ediliyor…')
+
+    def stop_queue(self):
+        if self._queue is None:
+            return
+        worker = self._queue[1]
+        worker.cancel_event.set()
+        worker.resume_event.set()
+        self.queue_label.setText('Durduruluyor…')
+
     def shutdown(self):
+        if self._queue is not None:
+            thread, worker = self._queue
+            worker.cancel_event.set()
+            worker.resume_event.set()
+            thread.quit()
+            thread.wait(5000)
         for panel in [self.qa_panel] + self._qa_retired:
             if panel is not None and _alive(panel):
                 panel.shutdown()

@@ -126,6 +126,70 @@ class LibraryTests(unittest.TestCase):
         missing = dict(entry, missing=True)
         self.assertEqual(library.describe(missing, work)['status'], 'missing')
 
+    def _entry(self, name):
+        return {'path': self.media / name, 'kind': 'video', 'root': None,
+                'missing': False, 'new': False}
+
+    SUB = {'index': 2, 'codec': 'subrip', 'language': 'eng', 'title': '', 'supported': True,
+           'image': False, 'extension': 'srt'}
+
+    def test_probe_is_cached_until_file_changes(self):
+        work = self.root / 'work'
+        target = self.media / 'Ders 2.mp4'
+        summary = {'duration': 61.0, 'subtitles': [self.SUB]}
+        with mock.patch('media.probe_summary', return_value=summary) as probed:
+            self.assertIsNone(library.cached_probe(target, work))
+            self.assertEqual(library.probe(target, work)['duration'], 61.0)
+            library.probe(target, work)
+            self.assertEqual(probed.call_count, 1)
+            os.utime(target, (1_000_000, 1_000_000))
+            library.probe(target, work)
+            self.assertEqual(probed.call_count, 2)
+        info = library.describe(self._entry('Ders 2.mp4'), work)
+        self.assertEqual((info['status'], info['duration']), ('pending', 61.0))
+
+    def test_plan_groups_by_transcript_source(self):
+        work = self.root / 'work'
+        source = {'kind': 'subtitle', 'stream': 2, 'language': 'eng', 'title': ''}
+        ready = self.media / 'Ders 10.mkv'
+        save_json(qa.cache_path(ready, qa.source_key(source), work),
+                  qa.build_data(ready, [], source, {'duration': 1.0, 'chapters': []}))
+        summaries = {'Ders 2.mp4': {'duration': 10.0, 'subtitles': [self.SUB]},
+                     'Ders 3.webm': {'duration': 90.0, 'subtitles': []}}
+        entries = [self._entry('Ders 10.mkv'), self._entry('Ders 2.mp4'),
+                   self._entry(os.path.join('alt', 'Ders 3.webm')),
+                   dict(self._entry('yok.mkv'), missing=True)]
+        with mock.patch('media.probe_summary', side_effect=lambda path: summaries[path.name]):
+            result = library.plan(entries, work)
+        names = {key: [item['path'].name for item in result[key]]
+                 for key in ('ready', 'subtitle', 'whisper')}
+        self.assertEqual(names, {'ready': ['Ders 10.mkv'], 'subtitle': ['Ders 2.mp4'],
+                                 'whisper': ['Ders 3.webm']})
+        self.assertEqual(result['whisper_seconds'], 90.0)
+        whisper = library.describe(entries[2], work)
+        self.assertEqual(whisper['status'], 'no_subtitle')
+
+    def test_transcribe_uses_subtitle_then_whisper_only_when_allowed(self):
+        work = self.root / 'work'
+        cfg = {'whisper_model': 'small', 'whisper_language': '', 'whisper_device': 'cpu'}
+        entry = self._entry('Ders 2.mp4')
+        with mock.patch('media.probe_summary',
+                        return_value={'duration': 5.0, 'subtitles': [self.SUB]}), \
+                mock.patch('qa.load_subtitle_session') as load:
+            self.assertEqual(library.transcribe(entry, cfg, base=work), 'subtitle')
+            self.assertEqual(load.call_args.args[1]['index'], 2)
+        silent = self._entry('Ders 10.mkv')
+        result = {'segments': [{'start': 0.0, 'end': 1.0, 'text': 'x'}], 'model': 'small'}
+        with mock.patch('media.probe_summary', return_value={'duration': 5.0, 'subtitles': []}), \
+                mock.patch('speech.transcribe', return_value=result) as run, \
+                mock.patch('qa.load_whisper_session') as load:
+            self.assertEqual(library.transcribe(silent, cfg, allow_whisper=False, base=work),
+                             'skipped')
+            run.assert_not_called()
+            self.assertEqual(library.transcribe(silent, cfg, base=work), 'whisper')
+            run.assert_called_once()
+            self.assertIs(load.call_args.args[1], result)
+
     def test_default_title(self):
         self.assertEqual(library.default_title([self.media]), 'media')
         self.assertEqual(library.default_title([self.media / 'Ders 2.mp4']), 'media')

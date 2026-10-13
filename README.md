@@ -17,7 +17,7 @@ Video dosyalarındaki **metin tabanlı altyazıları** çıkarıp, **yerel bir y
 
 ## Öne çıkan özellikler
 
-- **Kütüphane (açılış sayfası):** Klasörleri ve videoları adlandırılmış koleksiyonlarda toplar. Klasörler alt klasörleriyle taranır, koleksiyon her açıldığında yeni eklenen videolar bulunur. Tabloda her videonun transkript kaynağı ve hazırlık durumu görünür; videoya çift tıklayınca oynatıcı ve soru-cevap açılır.
+- **Kütüphane (açılış sayfası):** Klasörleri ve videoları adlandırılmış koleksiyonlarda toplar. Klasörler alt klasörleriyle taranır, koleksiyon her açıldığında yeni eklenen videolar bulunur. Tabloda her videonun transkript kaynağı ve hazırlık durumu görünür; **Hepsini hazırla** tüm transkriptleri sırayla çıkarır (altyazısız videolarda onayla Whisper). Videoya çift tıklayınca oynatıcı ve soru-cevap açılır.
 - **Zorunlu terim sözlüğü (glossary):** Çeviride belirtilen terimlerin karşılığı Türkçe çekim ekleriyle birlikte denetlenir; eksikse tek düzeltme turu yapılır.
 - **Seri bazlı glossary + süreklilik:** TV dizisi/anime bölümleri arasında isim yazımı, hitap biçimi (sen/siz) ve tekrar eden kalıplar seri düzeyinde saklanır.
 - **Yapay zekâ ön analizi:** Kaynak altyazıdan çevrilebilir kurgu terimleri, unvanlar, yerler ve kalıcı süreklilik kararları için Türkçe öneriler üretir; kullanıcı karşılığı düzenleyip yalnız bölüm veya seri kapsamıyla onaylayabilir.
