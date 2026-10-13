@@ -29,7 +29,9 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QDialog, QFileDi
 import collection_qa
 import library
 import qa
+import search_index
 import speech
+import transcript_export
 from app_core import Client, GracefulStop, load_config
 from gui import (THEME, DropdownCombo, HoverIconButton, ToggleSwitch, _alive, card,
                  highlight_rows, tinted_icon, window_icon)
@@ -41,6 +43,7 @@ CHAT_GREETING = ('Bu koleksiyondaki videolar hakkında soru sorun; cevaplar hang
 MIN_SEARCH_CHARS = 3     # transkript aramasi bu uzunluktan sonra baslar
 HIT_LIMIT = 200          # listede gosterilen en fazla transkript eslesmesi
 SEARCH_DELAY_MS = 250
+EXPORT_FILTER = 'Metin (*.txt);;Altyazı (*.srt);;Markdown (*.md)'
 HITS_MAX_HEIGHT = 190
 CITE_BG = '#18210a'  # atif rozeti zemini (tasarim taslagindaki koyu lime)
 REPEATED_ERROR_LIMIT = 3  # ust uste ayni hata: kuyruk durur
@@ -738,7 +741,7 @@ class LibraryPanel(QWidget):
         self.table.itemSelectionChanged.connect(self._update_chat_state)
         inner.addWidget(self.table, 1)
         foot = QLabel('Çift tıkla: oynatıcı ve soru sor · Sağ tık: altyazı çevir, '
-                      'konumu aç, koleksiyondan çıkar')
+                      'dışa aktar, konumu aç, koleksiyondan çıkar')
         foot.setObjectName('hint')
         foot.setContentsMargins(14, 8, 14, 9)
         inner.addWidget(foot)
@@ -1001,6 +1004,9 @@ class LibraryPanel(QWidget):
         menu = QMenu(self)
         menu.addAction('Yeniden adlandır', lambda: self.rename_collection(slug))
         menu.addAction('Yeniden tara', lambda: self.show_collection(slug))
+        action = menu.addAction('Koleksiyonu dışa aktar (Markdown)…', self.export_collection)
+        action.setEnabled(slug == self.slug and any(
+            info['status'] in ('ready', 'transcript') for info in self.infos))
         menu.addSeparator()
         menu.addAction('Koleksiyonu sil', lambda: self.delete_collection(slug))
         menu.exec(self.collection_list.mapToGlobal(point))
@@ -1224,10 +1230,80 @@ class LibraryPanel(QWidget):
         action = menu.addAction('Dosya konumunu aç', lambda: QDesktopServices.openUrl(
             QUrl.fromLocalFile(str(entry['path'].parent))))
         action.setEnabled(entry['path'].parent.is_dir())
+        has_text = [row for row in rows if self.infos[row]['status'] in ('ready', 'transcript')]
+        action = menu.addAction('Transkripti dışa aktar…' + (f' ({len(has_text)} dosya)'
+                                                              if len(has_text) > 1 else ''),
+                                lambda: self.export_rows(has_text))
+        action.setEnabled(bool(has_text))
         menu.addSeparator()
         label = 'Koleksiyondan çıkar' + (f' ({len(rows)} dosya)' if len(rows) > 1 else '')
         menu.addAction(label, lambda: self.exclude_rows(rows))
         menu.exec(self.table.viewport().mapToGlobal(point))
+
+    # --- disa aktarma (F62) -------------------------------------------------
+    def export_rows(self, rows):
+        """Secili videolarin transkripti: tek dosyada kayit penceresi, coklu dosyada klasor."""
+        videos = [self.entries[row]['path'] for row in rows if row < len(self.entries)]
+        if not videos:
+            return
+        try:
+            if len(videos) == 1:
+                video = videos[0]
+                target, chosen = QFileDialog.getSaveFileName(
+                    self, 'Transkripti dışa aktar', str(video.with_suffix('.txt')), EXPORT_FILTER)
+                if not target:
+                    return
+                fmt = self._export_format(target, chosen)
+                session = search_index.primary_session(video)
+                if session is None:
+                    raise ValueError('Bu videonun transkripti yok.')
+                target = Path(target).with_suffix('.' + fmt)
+                transcript_export.write(target, transcript_export.render(session, fmt))
+                self._log(f'Transkript dışa aktarıldı: {target}')
+                return
+            names = list(transcript_export.FORMATS.values())
+            name, ok = QInputDialog.getItem(self, 'Transkriptleri dışa aktar',
+                                            f'{len(videos)} dosya · biçim:', names, 0, False)
+            if not ok:
+                return
+            folder = QFileDialog.getExistingDirectory(self, 'Transkriptlerin yazılacağı klasör')
+            if not folder:
+                return
+            fmt = list(transcript_export.FORMATS)[names.index(name)]
+            written, missing = transcript_export.export_many(videos, folder, fmt)
+        except (OSError, ValueError) as error:
+            self._warn('Dışa aktarılamadı: ' + str(error))
+            return
+        self._log(f'{len(written)} transkript dışa aktarıldı: {folder}'
+                  + (f' (transkripti olmayan: {", ".join(missing)})' if missing else ''))
+
+    def export_collection(self):
+        if self.data is None:
+            return
+        target, _chosen = QFileDialog.getSaveFileName(
+            self, 'Koleksiyonu dışa aktar', self.data['title'] + '.md', 'Markdown (*.md)')
+        if not target:
+            return
+        videos = [entry['path'] for entry, info in zip(self.entries, self.infos)
+                  if info['status'] in ('ready', 'transcript')]
+        try:
+            text = transcript_export.render_collection(self.data['title'], videos, self._overview())
+            target = transcript_export.write(Path(target).with_suffix('.md'), text)
+        except (OSError, ValueError) as error:
+            self._warn('Dışa aktarılamadı: ' + str(error))
+            return
+        self._log(f'Koleksiyon dışa aktarıldı ({len(videos)} video): {target}')
+
+    @staticmethod
+    def _export_format(target, chosen):
+        """Dosya uzantisi ya da secilen filtreden bicim (txt/srt/md)."""
+        suffix = Path(target).suffix.lower().lstrip('.')
+        if suffix in transcript_export.FORMATS:
+            return suffix
+        for fmt in transcript_export.FORMATS:
+            if f'*.{fmt}' in chosen:
+                return fmt
+        return 'txt'
 
     # --- ayrinti (oynatici + soru sor) ---------------------------------------
     def open_row(self, row):
