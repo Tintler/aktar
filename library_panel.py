@@ -86,6 +86,11 @@ QListWidget#libHits {{ background:{panel}; border:1px solid {border}; border-rad
     outline:none; padding:4px; }}
 QListWidget#libHits::item {{ color:{secondary}; padding:6px 8px; border-radius:6px; }}
 QListWidget#libHits::item:hover {{ background:{panel_alt}; color:{accent}; }}
+QMenu {{ background:{panel}; border:1px solid {drop_border}; padding:6px; }}
+QMenu::item {{ padding:7px 26px 7px 18px; border-radius:6px; color:{text}; }}
+QMenu::item:selected {{ background:{panel_alt}; color:{accent}; }}
+QMenu::item:disabled {{ color:{muted}; background:transparent; }}
+QMenu::separator {{ height:1px; background:{border}; margin:5px 8px; }}
 QTextBrowser#libChatView {{ background:transparent; border:0; color:{text}; }}
 QFrame#libDrop {{ background:{panel}; border:1.5px dashed {drop_border}; border-radius:16px; }}
 """
@@ -171,12 +176,6 @@ class PrepareDialog(QDialog):
         title = QLabel(f'{videos} videoyu hazırla')
         title.setObjectName('libDropTitle')
         column.addWidget(title)
-        intro = QLabel('Her videonun transkripti çıkarılır ve aranabilir indekse eklenir; sonra '
-                       'soru-cevapta beklemeden kullanılır. İstediğin an durdurabilirsin, kaldığı '
-                       'yerden devam eder.')
-        intro.setObjectName('libChatNote')
-        intro.setWordWrap(True)
-        column.addWidget(intro)
 
         self.counts_card, counts = card(spacing=0, margins=(0, 0, 0, 0), shadow=False)
         self.count_labels = {}
@@ -188,25 +187,21 @@ class PrepareDialog(QDialog):
                  'Transkript hazır; embedding ile aranabilir yapılır'),
                 ('subtitle', 'subtitles', THEME['secondary'], 'Gömülü altyazıdan',
                  'Hızlı · şarkı/yazı izleri atlanır, en uygun akış seçilir'),
-                ('whisper', 'audio', WARN, 'Altyazı yok → Whisper', '')):
+                ('whisper', 'audio', WARN, 'Altyazı yok → Whisper',
+                 'Konuşma sesten metne çevrilir; yalnızca Whisper seçeneği açıksa')):
             row = QHBoxLayout()
             row.setContentsMargins(14, 11, 14, 11)
             row.setSpacing(12)
             mark = QLabel()
             mark.setPixmap(tinted_icon(icon, color, 16).pixmap(16, 16))
             row.addWidget(mark)
-            texts = QVBoxLayout()
-            texts.setSpacing(2)
             name = QLabel(text)
-            texts.addWidget(name)
-            detail = QLabel(hint)
-            detail.setObjectName('hint')
-            texts.addWidget(detail)
-            row.addLayout(texts, 1)
+            name.setToolTip(hint)
+            row.addWidget(name, 1)
             value = QLabel('…')
             value.setObjectName('progressValue')
             row.addWidget(value)
-            self.count_labels[key] = (value, detail)
+            self.count_labels[key] = (value, name)
             counts.addLayout(row)
         column.addWidget(self.counts_card)
 
@@ -219,40 +214,32 @@ class PrepareDialog(QDialog):
 
         self.summary_check = ToggleSwitch('Video özetleri ve koleksiyon özeti çıkar')
         self.summary_check.setChecked(True)
+        self.summary_check.setToolTip(
+            f'Sohbet modeliyle ({cfg["model"]}): genel sorular ve sohbetin başındaki özet için. '
+            'Video başına birkaç model isteği; uzun videolarda dakikalar sürebilir.')
         self.summary_check.toggled.connect(self._update_start)
         column.addWidget(self.summary_check)
-        summary_hint = QLabel(f'Sohbet modeliyle ({cfg["model"]}): genel sorular ("bu seride neler '
-                              'anlatılıyor?") ve sohbetin başındaki özet için. Video başına '
-                              'birkaç model isteği; uzun videolarda dakikalar sürebilir.')
-        summary_hint.setObjectName('hint')
-        summary_hint.setWordWrap(True)
-        column.addWidget(summary_hint)
         self.whisper_check = ToggleSwitch('Altyazısız videolarda Whisper kullan')
+        self.whisper_check.setToolTip(
+            f'Whisper: {cfg["whisper_model"]} · cihaz: {cfg["whisper_device"]} (Ayarlar). '
+            'Bir videoyu bitirmeden duraklamaz; durdurunca yarım kalan video baştan yapılır.')
         self.whisper_check.setChecked(self.whisper_ready)
         self.whisper_check.setEnabled(self.whisper_ready)
         self.whisper_check.toggled.connect(self._update_start)
         column.addWidget(self.whisper_check)
-        embedding = str(cfg.get('embedding_model', '')).strip()
-        self.index_label = QLabel(
-            f'İndeks: {embedding} (LM Studio). Transkriptler parçalara bölünüp aranabilir yapılır.'
-            if embedding else 'Embedding modeli seçilmedi: yalnızca transkript çıkarılır, '
-                              'koleksiyona soru sormak için indeks gerekir (Ayarlar → Kütüphane indeksi).')
-        self.index_label.setObjectName('hint')
-        self.index_label.setWordWrap(True)
-        if not embedding:
-            self.index_label.setStyleSheet('color:%s;' % WARN)
-        column.addWidget(self.index_label)
-        model = QLabel(f'Whisper: {cfg["whisper_model"]} · cihaz: {cfg["whisper_device"]} '
-                       '(Ayarlar\'dan değiştirilir). Kapalıysa bu videolar atlanır.'
-                       if self.whisper_ready else whisper_hint)
-        model.setObjectName('hint')
-        model.setWordWrap(True)
-        column.addWidget(model)
-        order = QLabel('Sıra: önce altyazılı videolar, sonra Whisper. Whisper bir videoyu '
-                       'bitirmeden duraklamaz; durdurunca yarım kalan video baştan yapılır.')
-        order.setObjectName('hint')
-        order.setWordWrap(True)
-        column.addWidget(order)
+        # Yalnizca dikkat gerektiren durumlar yazilir (aciklamalar arac ipucunda).
+        warnings = []
+        if not str(cfg.get('embedding_model', '')).strip():
+            warnings.append('Embedding modeli seçilmedi: yalnızca transkript çıkarılır '
+                            '(Ayarlar → Kütüphane indeksi).')
+        if not self.whisper_ready:
+            warnings.append(whisper_hint)
+        for message in warnings:
+            label = QLabel(message)
+            label.setObjectName('hint')
+            label.setWordWrap(True)
+            label.setStyleSheet('color:%s;' % WARN)
+            column.addWidget(label)
 
         buttons = QHBoxLayout()
         buttons.addStretch(1)
@@ -299,9 +286,9 @@ class PrepareDialog(QDialog):
         for key in ('summary', 'index', 'subtitle', 'whisper'):
             self.count_labels[key][0].setText(str(len(result[key])))
         seconds = result['whisper_seconds']
-        self.count_labels['whisper'][1].setText(
-            f'Toplam {format_duration(seconds)} ses · süre GPU\'ya bağlı' if seconds
-            else 'Konuşma sesten metne çevrilir')
+        if seconds:
+            self.count_labels['whisper'][1].setToolTip(
+                f'Toplam {format_duration(seconds)} ses; süre GPU\'ya bağlı.')
         self._update_start()
 
     def _update_start(self):
@@ -532,6 +519,7 @@ class LibraryPanel(QWidget):
         self.qa_panel = None
         self._qa_retired = []  # geri donulunce/baska video acilinca isi suren eski paneller
         self._rows = {}        # dosya anahtari -> tablo satiri
+        self._check_folders = set()  # yeni eklenen klasorler: taramadan sonra bos mu bakilir
         self._queue = None     # (thread, worker): toplu transkript isi
         self._queue_total = 0
         self._queue_name = ''
@@ -892,6 +880,17 @@ class LibraryPanel(QWidget):
         self._render_chat()
         self.rescan()
 
+    def _warn_empty_folders(self):
+        """Yeni eklenen klasorde desteklenen dosya yoksa kullaniciya soyle."""
+        check, self._check_folders = self._check_folders, set()
+        roots = {entry['root'] for entry in self.entries if entry['root']}
+        empty = [folder for folder in check if folder not in roots]
+        if empty:
+            kinds = ', '.join(sorted(library.supported_suffixes()))
+            self._warn('Şu klasörlerde desteklenen dosya bulunamadı: '
+                       + ', '.join(Path(folder).name for folder in empty)
+                       + f'\n\nDesteklenen türler: {kinds}')
+
     def _fill_folders(self):
         """Kaynak klasorler: klasor adi + dosya sayisi (tam yol arac ipucunda)."""
         self.folder_list.clear()
@@ -901,7 +900,7 @@ class LibraryPanel(QWidget):
                 counts[entry['root']] = counts.get(entry['root'], 0) + 1
         for folder in self.data['folders']:
             name = Path(folder).name or folder
-            item = QListWidgetItem(f'{name}\n{counts[folder]} dosya' if folder in counts else name)
+            item = QListWidgetItem(f'{name}\n{counts.get(folder, 0)} dosya')
             item.setToolTip(folder)
             item.setData(Qt.UserRole, folder)
             self.folder_list.addItem(item)
@@ -944,6 +943,7 @@ class LibraryPanel(QWidget):
             except RuntimeError as error:
                 self._log('UYARI: ' + str(error))
         self.entries, self.infos = entries, infos
+        self._warn_empty_folders()
         self._fill_folders()
         self._fill_chips()
         self._fill_table()  # arama filtresini de yeniden uygular (yeni transkriptler dahil)
@@ -1050,6 +1050,7 @@ class LibraryPanel(QWidget):
                        + (' Atlananlar: ' + ', '.join(skipped[:5]) if skipped else ''))
             return
         if self.data is None:
+            self._check_folders = {library._clean(folder) for folder in folders}
             try:
                 slug, _data = library.create_collection(library.default_title(folders + files),
                                                         folders=folders, files=files)
@@ -1059,6 +1060,7 @@ class LibraryPanel(QWidget):
             self._log('Koleksiyon oluşturuldu: ' + library.load_collection(slug)['title'])
             self.reload(select=slug)
             return
+        self._check_folders = {library._clean(folder) for folder in folders}
         changed = sum(1 for folder in folders if library.add_folder(self.data, folder))
         changed += library.add_files(self.data, files)
         if not changed:
