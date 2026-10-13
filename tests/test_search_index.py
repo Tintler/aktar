@@ -14,6 +14,7 @@ import qa  # noqa: E402
 import search_index  # noqa: E402
 from app_core import DEFAULT_CONFIG, Client, save_json, validate_config  # noqa: E402
 
+QUIET = (lambda _message: None)
 TOPICS = ('regresyon', 'budama', 'ağaç', 'düzenlileştirme')
 
 
@@ -60,9 +61,9 @@ class SearchIndexTests(unittest.TestCase):
         first = self.video('01 Regresyon.mkv', 'doğrusal regresyon', 'regresyon hatası')
         second = self.video('07 Ağaç.mkv', 'karar ağacı budama', 'budama derinliği')
         for path in (first, second):
-            self.assertTrue(search_index.build(path, self.cfg, client, self.work).exists())
+            self.assertTrue(search_index.build(path, self.cfg, client, self.work, log=QUIET).exists())
         calls = len(client.calls)
-        search_index.build(first, self.cfg, client, self.work)
+        search_index.build(first, self.cfg, client, self.work, log=QUIET)
         self.assertEqual(len(client.calls), calls, 'mevcut indeks yeniden uretilmemeli')
         self.assertTrue(all(text.startswith('title: ') for text in client.calls[0]))
         hits = search_index.search([first, second], 'budama nasıl yapılır', self.cfg,
@@ -80,7 +81,7 @@ class SearchIndexTests(unittest.TestCase):
                             search_index.index_path(path, session, other, self.work))
         empty = self.root / 'b.mkv'
         empty.write_bytes(b'x')
-        self.assertIsNone(search_index.build(empty, self.cfg, FakeClient(), self.work))
+        self.assertIsNone(search_index.build(empty, self.cfg, FakeClient(), self.work, log=QUIET))
 
     def test_client_embed_orders_by_index_and_requires_model(self):
         client = Client(dict(DEFAULT_CONFIG, embedding_model='emb'))
