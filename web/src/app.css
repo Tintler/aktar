@@ -1,0 +1,99 @@
+/* Renkler tema paletinden gelir (lib/theme.js, Deeverse'in renk adlari). Buradaki degerler,
+   tema yuklenene kadar gecerli olan yerlesik koyu temadir. */
+:root {
+  color-scheme: dark;
+  --window: #0f1114; --panel: #15181c; --surface: #1d2127; --surface-hover: #262b33;
+  --surface-active: #2f353f; --outline: #2a3038; --text: #f2f4f6; --secondary: #a9b1bc;
+  --dim: #6e7784; --accent: #c8ff00; --accent-hover: #d6ff3d; --on-accent: #0a1200;
+  --danger: #f5717f; --warning: #f2b85c; --overlay: #22272e; --shadow: #0000008c; --ok: #4ade80;
+  --sans: 'Inter Variable', Inter, 'Segoe UI', system-ui, sans-serif;
+  --mono: ui-monospace, 'Cascadia Mono', 'JetBrains Mono', Consolas, monospace;
+  --radius: 8px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, #app { height: 100%; }
+body {
+  background: var(--window); color: var(--text); font: 14px/1.45 var(--sans);
+  overflow: hidden; -webkit-font-smoothing: antialiased; user-select: none;
+}
+input, textarea, select, button { font: inherit; color: inherit; }
+button { background: none; border: 0; cursor: pointer; }
+button:disabled { cursor: default; opacity: .45; }
+.selectable, input, textarea { user-select: text; }
+::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface-active); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--dim); background-clip: padding-box; border: 2px solid transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* Dugmeler: Deeverse/Spotifast hap bicimi. */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 16px;
+  border-radius: 999px; background: var(--surface); font-weight: 600; font-size: 13px; white-space: nowrap; flex: none;
+}
+.btn:not(:disabled):hover { background: var(--surface-hover); }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.btn.primary:not(:disabled):hover { background: var(--accent-hover); }
+.btn.primary.danger { background: var(--danger); color: #fff; }
+.btn.ghost { background: transparent; color: var(--secondary); }
+.btn.ghost:not(:disabled):hover { background: var(--surface-hover); color: var(--text); }
+.btn.danger { color: var(--danger); }
+.btn.lg { height: 44px; padding: 0 24px; font-size: 14px; }
+.btn.sm { height: 30px; padding: 0 12px; font-size: 12px; gap: 6px; }
+.icon-btn { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; color: var(--secondary); flex: none; }
+.icon-btn:not(:disabled):hover { background: var(--surface-hover); color: var(--text); }
+.icon-btn.sm { width: 28px; height: 28px; }
+.icon-btn.filled { background: var(--surface); }
+
+.card { background: var(--panel); border: 1px solid var(--outline); border-radius: 12px; }
+
+/* Hap rozetler ve filtre "chip"leri (Deeverse kitaplik filtreleri gibi). */
+.badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--surface-active); color: var(--secondary); white-space: nowrap; }
+.badge.ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.badge.accent { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.badge.warning { background: color-mix(in srgb, var(--warning) 16%, transparent); color: var(--warning); }
+.badge.danger { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
+.chip { height: 32px; padding: 0 14px; border-radius: 999px; background: var(--surface); font-size: 13px; font-weight: 500; color: var(--text); white-space: nowrap; }
+.chip:hover { background: var(--surface-hover); }
+.chip.on { background: var(--text); color: var(--window); }
+
+.field {
+  height: 36px; border-radius: var(--radius); background: var(--surface); border: 1px solid transparent;
+  padding: 0 12px; font-size: 13px; outline: none; min-width: 0;
+}
+.field:hover { background: var(--surface-hover); }
+.field:focus { border-color: var(--accent); background: var(--surface); }
+.field:disabled { opacity: .5; }
+textarea.field { height: auto; padding: 8px 12px; resize: vertical; }
+select.field { padding-right: 6px; cursor: pointer; }
+select.field option { background: var(--overlay); color: var(--text); }
+input[type='checkbox'], input[type='radio'] { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
+
+.track { height: 4px; border-radius: 4px; background: var(--surface-active); overflow: hidden; flex: 1; }
+.track > i { display: block; height: 100%; background: var(--accent); border-radius: 4px; transition: width .3s; }
+
+.empty { color: var(--dim); text-align: center; padding: 32px 16px; font-size: 13px; }
+.mono { font-family: var(--mono); }
+.dim { color: var(--dim); }
+.secondary { color: var(--secondary); }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* Sayfa iskeleti: baslik + kaydirilan icerik (Deeverse icerik kenar boslugu 32 px). */
+.page { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.page-head { display: flex; align-items: center; gap: 10px; padding: 4px 32px 18px; flex-wrap: wrap; }
+.page-head h1 { font-size: 30px; font-weight: 700; letter-spacing: -.02em; margin-right: auto; }
+.page-body { flex: 1; min-height: 0; overflow: auto; padding: 0 32px 24px; }
+.section-title { font-size: 20px; font-weight: 700; letter-spacing: -.01em; }
+.label { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); font-weight: 600; }
+
+/* Tablolar: satir uzerinde yuzey rengi, cizgisiz (Deeverse satirlari). */
+.table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.table th { text-align: left; font-size: 12px; font-weight: 500; color: var(--dim); padding: 8px 12px; border-bottom: 1px solid var(--outline); position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.table td { padding: 10px 12px; }
+.table tbody tr:hover td { background: var(--surface-hover); }
+.table tbody tr td:first-child { border-radius: 6px 0 0 6px; }
+.table tbody tr td:last-child { border-radius: 0 6px 6px 0; }
+.table tbody tr.on td { background: var(--surface-active); }

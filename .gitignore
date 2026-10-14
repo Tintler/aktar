@@ -17,3 +17,12 @@ GELISTIRME.md
 models/
 .venv/
 AGENTS.md
+
+# Web arayuzu (Svelte) bagimliliklari ve derleme ciktisi
+web/node_modules/
+web/dist/
+
+# Arayuz tercihleri ve kullanici temalari
+ui.json
+/themes/
+.claude/
