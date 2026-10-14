@@ -20,26 +20,40 @@ import transcript_export  # noqa: E402
 from app_core import DEFAULT_CONFIG  # noqa: E402
 
 try:
-    from PySide6.QtGui import QFont, QGuiApplication, QPageSize, QPainter, QPdfWriter
-    from PySide6.QtPdf import QPdfDocument  # noqa: F401
-except ImportError:  # pragma: no cover - PySide6'siz ortam
-    QGuiApplication = None
+    import pypdfium2
+    import pypdfium2.raw as pdfium_raw
+    from PIL import Image
+except ImportError:  # pragma: no cover - pypdfium2/Pillow kurulu degil
+    pypdfium2 = None
+
+FONT_CANDIDATES = (r'C:\Windows\Fonts\arial.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+                   '/usr/share/fonts/dejavu/DejaVuSans.ttf', '/usr/share/fonts/TTF/DejaVuSans.ttf')
+FONT = next((path for path in FONT_CANDIDATES if os.path.exists(path)), None)
 
 QUIET = (lambda _message: None)
 
 
 def write_pdf(path, pages):
-    """Her sayfaya verilen satirlari yazan PDF (bos liste = metinsiz sayfa)."""
-    writer = QPdfWriter(str(path))
-    writer.setPageSize(QPageSize(QPageSize.A4))
-    painter = QPainter(writer)
-    painter.setFont(QFont('Arial', 12))
-    for index, lines in enumerate(pages):
-        if index:
-            writer.newPage()
+    """Her sayfaya verilen satirlari yazan A4 PDF (bos liste = metinsiz sayfa); pdfium ile,
+    Turkce harfler icin TrueType yazi tipi gomulur."""
+    import ctypes
+    document = pypdfium2.PdfDocument.new()
+    data = Path(FONT).read_bytes()
+    font_buffer = (ctypes.c_uint8 * len(data)).from_buffer_copy(data)
+    font = pdfium_raw.FPDFText_LoadFont(document, font_buffer, len(data), pdfium_raw.FPDF_FONT_TRUETYPE, True)
+    for lines in pages:
+        page = document.new_page(595, 842)
         for row, line in enumerate(lines):
-            painter.drawText(300, 300 + row * 300, line)
-    painter.end()
+            item = pdfium_raw.FPDFPageObj_CreateTextObj(document, font, 12.0)
+            text = ctypes.create_string_buffer((line + '\x00').encode('utf-16-le'))
+            pdfium_raw.FPDFText_SetText(item, ctypes.cast(text, ctypes.POINTER(pdfium_raw.FPDF_WCHAR)))
+            pdfium_raw.FPDFPageObj_Transform(item, 1, 0, 0, 1, 60, 780 - row * 24)
+            pdfium_raw.FPDFPage_InsertObject(page, item)
+        pdfium_raw.FPDFPage_GenerateContent(page)
+        page.close()
+    document.save(str(path))
+    pdfium_raw.FPDFFont_Close(font)
+    document.close()
 
 
 class FakeClient:
@@ -52,12 +66,8 @@ class FakeClient:
         return 'Filtre ayda bir yıkanır [V1 s.2]. Yanlış sayfa [V1 s.9], yanlış biçim [V1 0:30].'
 
 
-@unittest.skipIf(QGuiApplication is None, 'PySide6 (QtPdf) gerekli')
+@unittest.skipIf(pypdfium2 is None or FONT is None, 'pypdfium2, Pillow ve bir TrueType yazi tipi gerekli')
 class DocumentTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.app = QGuiApplication.instance() or QGuiApplication(sys.argv)
-
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
@@ -143,11 +153,8 @@ class DocumentTests(unittest.TestCase):
         self.assertEqual(seen[0][0], b'\x89PNG\r\n\x1a\n')
         self.assertEqual(len(qa.cached_sessions(mixed, self.work)), 1)
 
-        from PySide6.QtGui import QColor, QImage
         photo = self.root / 'kombi.jpg'
-        image = QImage(64, 48, QImage.Format_RGB32)
-        image.fill(QColor('red'))
-        self.assertTrue(image.save(str(photo)))
+        Image.new('RGB', (64, 48), 'red').save(photo)
         self.assertEqual(library.kind_of(photo), 'image')
         with mock.patch('library.vision_reader', reader):
             library.transcribe(self.entry(photo), dict(DEFAULT_CONFIG), base=self.work,

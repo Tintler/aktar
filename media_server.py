@@ -17,6 +17,7 @@ import os
 import secrets
 import subprocess
 import threading
+from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -182,10 +183,14 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802 - http.server adi
         parts = urlsplit(self.path)
         segments = parts.path.strip('/').split('/')
-        if len(segments) != 2 or segments[0] not in ('f', 's'):
+        if len(segments) not in (2, 3) or segments[0] not in ('f', 's', 'p'):
             return self._send_error(404)
         path = self.server.owner.files.get(segments[1])
         if path is None or not path.is_file():
+            return self._send_error(404)
+        if segments[0] == 'p' and len(segments) == 3:
+            return self._page(path, segments[2], parse_qs(parts.query))
+        if len(segments) != 2:
             return self._send_error(404)
         if segments[0] == 'f':
             return self._file(path)
@@ -234,6 +239,27 @@ class _Handler(BaseHTTPRequestHandler):
         except (ConnectionError, OSError):
             pass  # oynatici istegi biraktiginda (sarma) baglanti kopar
 
+    def _page(self, path, number, query):
+        """PDF sayfasinin PNG goruntusu (belge goruntuleyici); son cizilenler bellekte tutulur."""
+        try:
+            page = int(number)
+            width = max(200, min(3000, int(query.get('w', ['1400'])[0])))
+        except ValueError:
+            return self._send_error(400)
+        try:
+            data = self.server.owner.page_png(path, page, width)
+        except (ValueError, IndexError, OSError):
+            return self._send_error(404)
+        self.send_response(200)
+        self.send_header('Content-Type', 'image/png')
+        self.send_header('Content-Length', str(len(data)))
+        self.send_header('Cache-Control', 'max-age=3600')
+        self.end_headers()
+        try:
+            self.wfile.write(data)
+        except (ConnectionError, OSError):
+            pass
+
     def _stream(self, path, query):
         def number(key, default=None):
             try:
@@ -275,11 +301,32 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 class MediaServer:
+    PAGE_CACHE = 48   # bellekte tutulan en fazla cizilmis PDF sayfasi
+
     def __init__(self):
         self.files = {}
         self._processes = set()
         self._lock = threading.Lock()
         self._server = None
+        self._pages = OrderedDict()
+
+    def page_png(self, path, page, width):
+        """Belge goruntuleyici icin PDF sayfasi (1'den baslar), uzun kenar ~`width` piksel."""
+        import documents
+        key = (str(path), int(page), int(width))
+        with self._lock:
+            if key in self._pages:
+                self._pages.move_to_end(key)
+                return self._pages[key]
+        data = documents.render_pdf_page(path, int(page) - 1, long_side=int(width))
+        with self._lock:
+            self._pages[key] = data
+            while len(self._pages) > self.PAGE_CACHE:
+                self._pages.popitem(last=False)
+        return data
+
+    def page_url(self, path, page, width=1400):
+        return f'{self.start().base}/p/{self.register(path)}/{int(page)}?w={int(width)}'
 
     def start(self):
         if self._server is None:

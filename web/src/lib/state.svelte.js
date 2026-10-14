@@ -26,6 +26,8 @@ export const app = $state({
   player: null,               // bridge_player._player_state (acik video)
   playerSeek: null,           // {time, play, n}: oynaticiya gidecegi an (atif, arama sonucu)
   playerPositions: {},        // video yolu -> son konum (sayfadan cikip donunce)
+  document: null,             // bridge_document.doc_open (acik belge)
+  docSeek: null,              // {page}: belge goruntuleyicinin gidecegi sayfa
 });
 
 export const toasts = $state([]);
@@ -141,6 +143,9 @@ export async function init() {
   on('chat', ({ slug }) => {
     if (slug === app.library.slug) refreshChat();
   });
+  on('document', ({ path, chat }) => {
+    if (app.document?.path === path) app.document.chat = chat;
+  });
   on('player', (state) => {
     if (state && app.player?.path === state.path) app.player = state;
   });
@@ -219,7 +224,13 @@ export function seekPlayer(time, play = true) {
 export async function openFile(row, at = null) {
   if (row.missing) return toast('Dosya bulunamadı: ' + row.path, 'error');
   if (!VIDEO_EXT.test(row.path)) {
-    toast('Belge görüntüleyici sonraki aşamada yeni arayüze taşınacak.', 'info');
+    if (app.document?.path !== row.path) {
+      const state = await act('doc_open', row.path);
+      if (!state) return;
+      app.document = state;
+    }
+    app.view = 'document';
+    if (at !== null && at !== undefined) app.docSeek = { page: Math.round(Number(at)) || 1 };
     return;
   }
   if (app.player?.path !== row.path) {

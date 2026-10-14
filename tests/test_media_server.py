@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import bridge  # noqa: E402
+import bridge_document  # noqa: E402
 import bridge_library  # noqa: E402
 import bridge_player  # noqa: E402
 import bridge_translate  # noqa: E402
@@ -104,7 +105,8 @@ class MixinTests(unittest.TestCase):
         names = {}
         for module, init in ((bridge_translate.TranslateMixin, '_init_translate'),
                              (bridge_library.LibraryMixin, '_init_library'),
-                             (bridge_player.PlayerMixin, '_init_player')):
+                             (bridge_player.PlayerMixin, '_init_player'),
+                             (bridge_document.DocumentMixin, '_init_document')):
             fake = type('Fake', (), {})()
             getattr(module, init)(fake)
             names[init] = set(vars(fake))
