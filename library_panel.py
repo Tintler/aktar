@@ -1432,7 +1432,7 @@ class LibraryPanel(QWidget):
                                                overview=self._overview())
             fresh.history = session.history if session is not None else list(chat['history'])
             session = chat['session'] = fresh
-        chat['entries'] += [('user', question), ('pending', 'Videolarda aranıyor…')]
+        chat['entries'] += [('user', question), ('pending', 'Dosyalarda aranıyor…')]
         self.ask_input.clear()
         worker = AskWorker(self.slug, session, question)
         thread = QThread(self)

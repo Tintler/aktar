@@ -96,11 +96,14 @@ def list_collections():
     found = {}
     if directory.is_dir():
         for path in directory.glob('*.json'):
+            if '.' in path.stem:
+                continue  # <slug>.chat.json / <slug>.overview.json koleksiyon degildir
             try:
                 value = json.loads(read(path))
             except (ValueError, OSError):
                 continue
-            if isinstance(value, dict) and str(value.get('title', '')).strip():
+            if (isinstance(value, dict) and str(value.get('title', '')).strip()
+                    and isinstance(value.get('folders'), list)):
                 found[path.stem] = value
     return dict(sorted(found.items(), key=lambda item: (natural_key(item[1]['title']),
                                                         natural_key(item[0]))))

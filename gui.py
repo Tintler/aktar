@@ -34,7 +34,8 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame,
     QGraphicsDropShadowEffect, QGraphicsOpacityEffect, QHBoxLayout, QHeaderView,
     QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit,
-    QButtonGroup, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QSplitter, QStackedWidget,
+    QButtonGroup, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter,
+    QStackedWidget,
     QStyle,
     QStyledItemDelegate, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout,
     QWidget,
@@ -1132,8 +1133,14 @@ class SettingsDialog(QDialog):
         self.resize(560, 0)
         self.models_loaded.connect(self._on_models)
         outer = QVBoxLayout(self)
-        layout = QFormLayout()
-        outer.addLayout(layout)
+        # Satirlar ekrana sigmayabilir: form kaydirilabilir alanda, dugmeler altta sabit.
+        form_host = QWidget()
+        layout = QFormLayout(form_host)
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.NoFrame)
+        self._scroll.setWidget(form_host)
+        outer.addWidget(self._scroll, 1)
         self.fields = {}
 
         model_section = QLabel('LM Studio ve model')
@@ -1311,6 +1318,11 @@ class SettingsDialog(QDialog):
             self.cuda_browse.setEnabled(False)
             restore.setEnabled(False)
             buttons.button(QDialogButtonBox.Save).setEnabled(False)
+        # Yukseklik: icerik kadar, ama ekranin %85'ini gecmez (fazlasi kaydirilir).
+        screen = (parent.screen() if parent is not None else QApplication.primaryScreen())
+        available = screen.availableGeometry().height() if screen is not None else 900
+        wanted = form_host.sizeHint().height() + 110
+        self.resize(max(560, form_host.sizeHint().width() + 60), min(wanted, int(available * 0.85)))
 
     def choose_cuda_dir(self):
         current = self.fields['whisper_cuda_dir'].text().strip()

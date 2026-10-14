@@ -240,8 +240,14 @@ class LibraryTests(unittest.TestCase):
         entries = library.load_chat(slug)['entries']
         self.assertEqual(len(entries), 2 * library.CHAT_TURNS)
         self.assertEqual(entries[0], ('user', 'q5'))
+        # Sohbet/ozet kayitlari ayni klasorde durur ama koleksiyon sayilmaz (bos 'hayalet'
+        # koleksiyon olarak listelenmemeli).
+        library.save_overview(slug, {'summary': 'x', 'topics': [], 'questions': [],
+                                     'title': 'ML', 'videos': []})
+        self.assertEqual(list(library.list_collections()), [slug])
         library.delete_collection(slug)
         self.assertFalse(library.chat_path(slug).exists())
+        self.assertFalse(library.overview_path(slug).exists())
 
     def test_default_title(self):
         self.assertEqual(library.default_title([self.media]), 'media')
