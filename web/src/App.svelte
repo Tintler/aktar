@@ -14,7 +14,10 @@
   import VideoChat from './components/VideoChat.svelte';
   import Document from './views/Document.svelte';
   import DocChat from './components/DocChat.svelte';
-  import { app, init, toasts, dismissToast, go } from './lib/state.svelte.js';
+  import Chat from './views/Chat.svelte';
+  import Files from './views/Files.svelte';
+  import Console from './views/Console.svelte';
+  import { app, init, toasts, dismissToast, go, toggleSidebar } from './lib/state.svelte.js';
   import { call } from './lib/api.js';
   import { frame, initFrame, dragArea } from './lib/frame.svelte.js';
 
@@ -22,9 +25,23 @@
   initFrame();
 
   const nav = [
+    ['chat', 'Sohbet', 'message'],
     ['library', 'Kütüphane', 'library'],
+    ['files', 'Dosya incele', 'fileSearch'],
     ['translate', 'Altyazı Çevir', 'languages'],
+    ['console', 'Konsol', 'terminal'],
   ];
+  // Oynatici / belge acikken, dosya nereden acildiysa o menu ogesi vurgulanir.
+  const active = (key) => app.view === key
+    || (['player', 'document'].includes(app.view) && key === (app.fileOrigin === 'files' ? 'files' : 'library'));
+  const issues = $derived(app.view === 'console' ? 0 : app.log.filter((line) => /\b(HATA|Hata|hata)\b/.test(line)).length);
+  let seenIssues = $state(0);
+  $effect(() => {
+    if (app.view === 'console') seenIssues = app.log.filter((line) => /\b(HATA|Hata|hata)\b/.test(line)).length;
+  });
+  $effect(() => {
+    if (app.log.length === 0) seenIssues = 0;
+  });
 
   // Geri/ileri: sayfalar arasinda gezinme gecmisi (Deeverse ust cubugu gibi).
   let history = $state(['library']);
@@ -58,7 +75,8 @@
     event.preventDefault();
     dragging = true;
   }
-  const dropHint = $derived(app.view === 'translate' ? 'Videoyu açmak için bırakın' : 'Koleksiyona eklemek için bırakın');
+  const dropHint = $derived(app.view === 'translate' ? 'Videoyu açmak için bırakın'
+    : app.view === 'files' ? 'İncelemek için bırakın' : 'Koleksiyona eklemek için bırakın');
 
   async function submitReview(values) {
     app.review = null;
@@ -74,16 +92,23 @@
 {/if}
 
 <div class="shell">
-  <aside class="side">
-    <div class="brand" use:dragArea><Logo size={30} /><span>aktar<i>.</i></span></div>
+  <aside class="side" class:mini={app.sideCollapsed}>
+    <div class="brand" use:dragArea>
+      <button class="logo" title={app.sideCollapsed ? 'Menüyü genişlet' : 'Menüyü daralt'} onclick={toggleSidebar}>
+        <Logo size={30} /><span class="word">aktar<i>.</i></span>
+      </button>
+    </div>
     <nav>
       {#each nav as [key, label, icon]}
-        <button class="nav" class:on={app.view === key || (key === 'library' && ['player', 'document'].includes(app.view))} onclick={() => go(key)}><Icon name={icon} size={22} /><span>{label}</span></button>
+        <button class="nav" class:on={active(key)} title={app.sideCollapsed ? label : null} onclick={() => go(key)}>
+          <span class="ic"><Icon name={icon} size={22} />{#if key === 'console' && issues > seenIssues}<i class="badge-dot"></i>{/if}</span>
+          <span class="label-text">{label}</span>
+        </button>
       {/each}
     </nav>
     <div class="rule"></div>
-    <div class="side-body"><Collections /></div>
-    <div class="lm" title={models.message || ''}>
+    <div class="side-body" inert={app.sideCollapsed}><Collections /></div>
+    <div class="lm" title={app.sideCollapsed ? [models.model, models.message].filter(Boolean).join('\n') : models.message || ''}>
       <div class="row">
         <span class="dot {models.state === 'probing' ? 'wait' : models.state === 'failed' ? 'bad' : modelListed ? '' : 'wait'}"></span>
         <span class="st">{models.state === 'probing' ? 'LM Studio sorgulanıyor…' : models.state === 'failed' ? 'LM Studio bağlı değil' : modelListed ? 'LM Studio bağlı' : 'Model listede yok'}</span>
@@ -105,6 +130,9 @@
     </header>
     <div class="view">
       {#if app.view === 'library'}<Library />
+      {:else if app.view === 'chat'}<Chat />
+      {:else if app.view === 'files'}<Files />
+      {:else if app.view === 'console'}<Console />
       {:else if app.view === 'translate'}<Translate />
       {:else if app.view === 'player'}<Player />
       {:else if app.view === 'document'}<Document />
@@ -130,18 +158,31 @@
 
 <style>
   .shell { display: flex; height: 100%; }
-  .side { width: 300px; flex: none; }
+  /* Sol menu: logoya tiklayinca akordiyon gibi yalnizca simgelere daralir. */
+  .side { width: 300px; flex: none; overflow: hidden; white-space: nowrap;
+    transition: width .32s cubic-bezier(.22, .8, .24, 1), padding .32s cubic-bezier(.22, .8, .24, 1); }
   @media (max-width: 1500px) { .side { width: 260px; } }
+  .side.mini { width: 76px; }
   .side { background: var(--panel); display: flex; flex-direction: column; padding: 14px 12px 12px; min-height: 0; }
-  .brand { display: flex; align-items: center; gap: 10px; padding: 4px 14px 18px; font-weight: 700; font-size: 21px; letter-spacing: -.01em; }
-  .brand i { color: var(--accent); font-style: normal; }
+  .brand { display: flex; align-items: center; padding: 0 0 14px; }
+  .logo { display: flex; align-items: center; gap: 10px; padding: 4px 11px; max-width: 100%; overflow: hidden; border-radius: 10px; font-weight: 700; font-size: 21px; letter-spacing: -.01em; }
+  .logo:hover { background: var(--surface-hover); }
+  .logo :global(svg) { flex: none; transition: transform .32s cubic-bezier(.22, .8, .24, 1); }
+  .logo:active :global(svg) { transform: scale(.92); }
+  .logo i { color: var(--accent); font-style: normal; }
+  .word, .label-text, .side-body, .lm .st, .lm .m, .lm .icon-btn, .rule { transition: opacity .2s ease; }
   nav { display: flex; flex-direction: column; gap: 2px; }
   .nav { display: flex; align-items: center; gap: 16px; padding: 10px 14px; border-radius: 8px; color: var(--secondary); font-weight: 700; font-size: 16px; width: 100%; text-align: left; }
   .nav:hover { color: var(--text); }
   .nav.on { color: var(--text); background: var(--surface); }
-  .nav.on :global(svg) { color: var(--accent); }
+  .nav.on .ic :global(svg) { color: var(--accent); }
+  .ic { position: relative; display: grid; flex: none; }
+  .badge-dot { position: absolute; top: -2px; right: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 2px var(--panel); }
   .rule { height: 1px; background: var(--outline); margin: 14px 6px; }
   .side-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .mini .word, .mini .label-text, .mini .side-body, .mini .lm .st, .mini .lm .m, .mini .lm .icon-btn { opacity: 0; pointer-events: none; }
+  .mini .rule { opacity: .6; }
+  .mini .lm { background: transparent; padding-left: 22px; }
   .lm { margin-top: 8px; padding: 10px 12px; border-radius: 10px; background: var(--surface); font-size: 12px; }
   .lm .row { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }
   .lm .st { flex: 1; min-width: 0; }

@@ -65,12 +65,9 @@
   {/if}
   {#if p.failed?.length}<p class="warn">{p.failed.length} dosya okunamadı ve atlanacak: {p.failed.slice(0, 3).join(', ')}</p>{/if}
   <div class="opts">
-    <div class="opt"><Toggle bind:checked={summaries} label="Dosya özetleri ve koleksiyon özeti çıkar" />
-      <small>Sohbet modeliyle ({p.model ?? '…'}). Genel sorular ve sohbetin başındaki özet için; uzun videolarda dakikalar sürebilir.</small></div>
-    <div class="opt"><Toggle bind:checked={vision} label="Taranmış PDF ve görselleri görü modeliyle oku" />
-      <small>Görü modeli: {p.vision_model ?? '…'}. Sayfa başına bir istek; kesilirse okunan sayfalar kaybolmaz.</small></div>
-    <div class="opt"><Toggle bind:checked={whisper} disabled={!p.whisper} label="Altyazısız videolarda Whisper kullan" />
-      <small>Whisper: {p.whisper_model ?? '…'} · cihaz: {p.whisper_device ?? '…'}. Bir videoyu bitirmeden duraklamaz.</small></div>
+    <Toggle bind:checked={summaries} label="Dosya özetleri ve koleksiyon özeti çıkar" />
+    <Toggle bind:checked={vision} label="Taranmış PDF ve görselleri görü modeliyle oku" />
+    <Toggle bind:checked={whisper} disabled={!p.whisper} label="Altyazısız videolarda Whisper kullan" />
   </div>
   {#each p.warnings ?? [] as message}<p class="warn"><Icon name="alert" size={14} />{message}</p>{/each}
   {#snippet footer()}
@@ -92,6 +89,5 @@
   .count b { font-size: 15px; min-width: 32px; text-align: right; }
   .probe { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
   .opts { display: flex; flex-direction: column; gap: 12px; }
-  .opt small { display: block; color: var(--dim); font-size: 11.5px; margin: 2px 0 0 42px; }
   .warn { display: flex; gap: 8px; align-items: center; color: var(--warning); font-size: 12px; }
 </style>

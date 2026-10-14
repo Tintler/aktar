@@ -256,6 +256,27 @@ class LibraryBridgeTests(unittest.TestCase):
         self.assertEqual(chat['entries'][0]['kind'], 'note')
         self.assertEqual(self.bridge.chat_ask('Soru?')['entries'], chat['entries'])
 
+    def test_inspected_files_are_listed_and_forgotten(self):
+        document = self.root / 'rapor.txt'
+        document.write_text('Bütçe 40 bin.', encoding='utf-8')
+        self.assertIn('error', self.bridge.files_touch(str(self.root / 'yok.pdf')))
+        (self.root / 'not.xyz').write_text('x', encoding='utf-8')
+        self.assertIn('error', self.bridge.files_touch(str(self.root / 'not.xyz')))
+        items = self.bridge.files_touch(str(document))['items']
+        self.assertEqual([(item['name'], item['kind'], item['missing']) for item in items],
+                         [('rapor.txt', 'document', False)])
+        self.assertEqual(self.bridge.library_collections(), [])  # koleksiyona eklenmez
+        self.assertEqual(self.bridge.files_forget(str(document))['items'], [])
+        self.assertTrue(document.exists())
+
+    def test_assistant_conversations_start_empty_and_need_text(self):
+        state = self.bridge.assistant_state()
+        self.assertEqual((state['entries'], state['busy'], state['saved']), ([], False, False))
+        self.assertEqual(self.bridge.assistant_ask('   ')['entries'], [])
+        self.assertEqual(self.bridge.assistant_list()['items'], [])
+        self.assertEqual(self.bridge.assistant_new()['id'], state['id'])  # bos sohbet yeniden kullanilir
+        self.assertIn('error', self.bridge.assistant_open('olmayan'))
+
 
 if __name__ == '__main__':
     unittest.main()

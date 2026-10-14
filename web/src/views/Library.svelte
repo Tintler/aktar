@@ -125,7 +125,6 @@
   {:else}
     <div class="page-body">
       <header class="hero">
-        <span class="cover"><Icon name="library" size={44} /></span>
         <div class="titles">
           <span class="label">Koleksiyon</span>
           <h1 class="ellipsis" title={lib.title}>{lib.title}</h1>
@@ -205,7 +204,6 @@
           {/each}
         </tbody>
       </table>
-      <p class="foot dim">Çift tıkla: aç (video: oynatıcı ve soru sor) · Sağ tık: altyazı çevir, dışa aktar, konumu aç, koleksiyondan çıkar · Ctrl/Shift ile çoklu seçim</p>
     </div>
   {/if}
 </section>
@@ -222,8 +220,6 @@
   .tile { width: 72px; height: 72px; border-radius: 16px; display: grid; place-items: center; background: var(--surface); color: var(--accent); }
 
   .hero { display: flex; align-items: flex-end; gap: 24px; padding: 4px 0 20px; }
-  .cover { width: 112px; height: 112px; border-radius: 8px; flex: none; display: grid; place-items: center; color: var(--on-accent);
-    background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 45%, var(--surface))); box-shadow: 0 8px 24px var(--shadow); }
   .titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
   .titles h1 { font-size: clamp(28px, 3.4vw, 44px); font-weight: 800; letter-spacing: -.03em; line-height: 1.15; }
   .meta { color: var(--secondary); font-size: 13px; display: flex; align-items: center; gap: 6px; }
@@ -272,5 +268,4 @@
   tr.missing .name { color: var(--dim); text-decoration: line-through; }
   .nowrap { white-space: nowrap; }
   .plain { color: var(--dim); font-size: 12px; }
-  .foot { font-size: 12px; padding: 12px 4px 0; }
 </style>

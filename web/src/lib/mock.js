@@ -26,6 +26,7 @@ export function createMock(emit) {
     tesseract_path: '', tesseract_lang: 'tur+eng', disable_thinking: true,
   };
   let prefs = { theme: 'system' };
+  let conversation = { id: 'c1', title: '', entries: [], busy: false, stream: null, locked: false, saved: false };
   let translate = {
     video: { path: 'D:\Diziler\One Step Beyond - S00E01 - Extended Pilot.mkv', name: 'One Step Beyond - S00E01 - Extended Pilot.mkv', folder: 'D:\Diziler' },
     streams: [
@@ -93,6 +94,15 @@ export function createMock(emit) {
     check_cuda_dir: async () => ({ message: '' }),
     window_state: async () => ({ custom: true, maximized: false }),
     window_command: async () => true,
+    assistant_state: async () => conversation,
+    assistant_new: async () => (conversation = { ...conversation, id: 'yeni', title: '', entries: [] }),
+    assistant_list: async () => ({ items: [{ id: 'c1', title: 'Regresyon notları', updated: new Date().toISOString() }], current: conversation.id }),
+    assistant_ask: async (text) => {
+      conversation.entries = [...conversation.entries, { kind: 'user', text },
+        { kind: 'assistant', parts: [{ type: 'text', text: 'Bu sahte arka uçtan gelen bir **örnek** cevaptır.\n\n- Madde bir\n- Madde iki' }], sources: [] }];
+      return conversation;
+    },
+    files_recent: async () => ({ items: [{ path: 'D:\\Belgeler\\rapor.pdf', name: 'rapor.pdf', folder: 'D:\\Belgeler', kind: 'document', opened: new Date().toISOString(), missing: false }] }),
     translate_state: async () => translate,
     set_series: async (slug) => ({ ...translate, series_slug: slug }),
     series_data: async () => ({ slug: 'one-step-beyond', title: 'One Step Beyond', glossary: [{ source: 'Bridge of the Ancients', target: 'Kadimlerin Köprüsü' }], decisions: ['Karakterler birbirine "sen" der.'] }),

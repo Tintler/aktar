@@ -106,7 +106,6 @@
           <div class="row-actions">
             <button class="btn sm" onclick={() => act('open_themes_folder')}><Icon name="folderOpen" size={14} />Temalar klasörünü aç</button>
             <button class="btn sm" onclick={reloadThemes}><Icon name="refresh" size={14} />Yeniden yükle</button>
-            <span class="dim small">Her .json dosyası bir temadır: <span class="mono">{'{"base": "dark", "colors": {"accent": "#a238ff"}}'}</span>. Deeverse tema dosyaları da çalışır.</span>
           </div>
         </section>
 
@@ -275,5 +274,4 @@
   .tname { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; padding: 0 2px; }
   .terr { color: var(--danger); font-size: 11px; padding: 0 2px; }
   .row-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .row-actions .small { flex: 1; min-width: 260px; }
 </style>

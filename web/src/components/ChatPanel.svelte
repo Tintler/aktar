@@ -67,7 +67,6 @@
     <input bind:value={question} disabled={!chat?.enabled} placeholder={view.scope === 'selected' ? 'Seçili dosyalara sor…' : 'Tüm dosyalara sor…'} />
     <button class="send" type="submit" title="Gönder" disabled={!chat?.enabled || !question.trim()}><Icon name="send" size={16} /></button>
   </form>
-  <p class="foot">Yapay zekâ yanlış bilgi verebilir; atıflara tıklayıp kaynağında doğrulayın.</p>
 </aside>
 
 <style>
@@ -91,5 +90,4 @@
   .ask input::placeholder { color: var(--dim); }
   .send { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--on-accent); flex: none; }
   .send:disabled { background: var(--surface-active); color: var(--dim); opacity: 1; }
-  .foot { font-size: 11px; color: var(--dim); padding: 8px 4px 0; }
 </style>

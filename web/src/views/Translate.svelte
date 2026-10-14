@@ -2,7 +2,7 @@
   import Icon from '../lib/Icon.svelte';
   import Toggle from '../components/Toggle.svelte';
   import GlossaryModal from '../components/GlossaryModal.svelte';
-  import { app, act, setTranslate, onDrop, toast } from '../lib/state.svelte.js';
+  import { app, act, setTranslate, onDrop, toast, go } from '../lib/state.svelte.js';
   import { prompt, choose, confirm } from '../lib/confirm.svelte.js';
   import { call } from '../lib/api.js';
 
@@ -106,12 +106,6 @@
     if (state) setTranslate(state);
   }
 
-  let consoleEl = $state();
-  $effect(() => {
-    app.log.length;
-    view.tab;
-    if (consoleEl) queueMicrotask(() => (consoleEl.scrollTop = consoleEl.scrollHeight));
-  });
 
   const statusOf = (s) => s.image ? ['Görüntü tabanlı', 'danger'] : s.supported ? [s.extension.toUpperCase(), 'ok'] : ['Desteklenmiyor', ''];
 </script>
@@ -175,18 +169,10 @@
 
         <div class="card side">
           <div class="card-head">
-            <button class="chip" class:on={view.tab === 'console'} onclick={() => (view.tab = 'console')}>Konsol</button>
-            <button class="chip" class:on={view.tab === 'analysis'} onclick={() => (view.tab = 'analysis')}>Ön analiz</button>
-            <span class="grow"></span>
-            {#if view.tab === 'console'}
-              <button class="icon-btn sm" title="Günlüğü temizle" onclick={() => app.log.splice(0)}><Icon name="trash" size={14} /></button>
-            {/if}
+            <b>Ön analiz</b>
+            <button class="btn ghost sm" onclick={() => go('console')} title="Çevirinin ayrıntılı günlüğü"><Icon name="terminal" size={14} />Konsol</button>
           </div>
-          {#if view.tab === 'console'}
-            <pre class="console selectable" bind:this={consoleEl}>{app.log.join('\n')}</pre>
-          {:else}
-            <pre class="console selectable">{t.analysis || 'Ön analiz sonuçları burada görünür.'}</pre>
-          {/if}
+          <pre class="console selectable">{t.analysis || 'Ön analiz sonuçları burada görünür. Çevirinin ayrıntılı günlüğü Konsol sayfasındadır.'}</pre>
         </div>
       </div>
     {/if}
@@ -240,7 +226,7 @@
   .card-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px 10px; }
   .card-head b { font-size: 15px; flex: 1; }
   .card-head .dim { font-size: 12px; }
-  .grow { flex: 1; }
+
   .stream { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 6px; cursor: pointer; }
   .stream:hover { background: var(--surface-hover); }
   .stream.on { background: var(--surface-active); }

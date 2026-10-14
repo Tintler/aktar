@@ -3,7 +3,8 @@ import { applyTheme } from './theme.js';
 import { confirm, notice } from './confirm.svelte.js';
 
 export const app = $state({
-  view: 'library',            // 'library' | 'translate' | 'settings'
+  view: 'library',            // 'chat' | 'library' | 'files' | 'translate' | 'console' | 'settings' | 'player' | 'document'
+  sideCollapsed: false,       // sol menu daraltildi (yalnizca simgeler)
   platform: 'windows',
   themeId: 'system',
   themes: [],
@@ -15,7 +16,7 @@ export const app = $state({
     analysis: '', running: false, paused: false, progress: { done: 0, total: 0 },
   },
   // Altyazi Cevir sayfasinin gorunum durumu (sekme degisince korunur).
-  translateView: { stream: null, analysis: false, tab: 'console' },
+  translateView: { stream: null, analysis: false },
   // Komut satirindan ya da baska sayfadan acilmak uzere bekleyen video (Translate acilinca alir).
   pendingVideo: null,
   library: { collections: [], slug: '', title: '', folders: [], rows: [], meta: '', scanning: false, queue: null, kinds: {} },
@@ -28,7 +29,13 @@ export const app = $state({
   playerPositions: {},        // video yolu -> son konum (sayfadan cikip donunce)
   document: null,             // bridge_document.doc_open (acik belge)
   docSeek: null,              // {page}: belge goruntuleyicinin gidecegi sayfa
+  fileOrigin: 'library',      // acik video/belge nereden acildi: 'library' | 'files' (menude vurgu)
+  files: [],                  // Dosya incele: son incelenen dosyalar
+  assistant: null,            // genel sohbet: acik sohbetin durumu (bridge_assistant)
+  conversations: [],          // genel sohbet listesi [{id, title, updated}]
 });
+
+const VIEWS = ['chat', 'library', 'files', 'translate', 'console'];
 
 export const toasts = $state([]);
 
@@ -47,6 +54,10 @@ export function dismissToast(id) {
 }
 
 const LOG_LIMIT = 5000;
+
+export function clearLog() {
+  app.log.splice(0);
+}
 
 export function log(line) {
   app.log.push(line);
@@ -104,10 +115,7 @@ export async function init() {
   on('models', (data) => (app.models = { names: [], message: '', ...data }));
   on('translate', (state) => setTranslate(state));
   on('progress', (progress) => (app.translate.progress = progress));
-  on('analysis', ({ text }) => {
-    app.translate.analysis = text;
-    app.translateView.tab = 'analysis';
-  });
+  on('analysis', ({ text }) => (app.translate.analysis = text));
   on('review', (data) => (app.review = data));
   on('finished', ({ output, name, error, cancelled }) => {
     app.review = null;
@@ -132,7 +140,7 @@ export async function init() {
     if (!queue) {
       for (const row of app.library.rows) delete row.busy_text;
       if (message) {
-        if (failed) notice('Toplu hazırlık', message + ' Ayrıntılar Altyazı Çevir sayfasındaki konsolda.');
+        if (failed) notice('Toplu hazırlık', message + ' Ayrıntılar Konsol sayfasında.');
         else toast(message, 'ok');
       }
     }
@@ -153,6 +161,14 @@ export async function init() {
     const handler = dropHandlers[app.view] ?? dropHandlers.library;
     handler?.(paths);
   });
+  on('assistant_stream', ({ id, text }) => {
+    if (app.assistant?.id === id) app.assistant.stream = text;
+  });
+  on('assistant', async ({ id }) => {
+    if (app.assistant?.id === id) app.assistant = await call('assistant_state');
+    else if (app.assistant) app.assistant.locked = false;
+    refreshConversations();
+  });
   on('confirm_close', async ({ reason }) => {
     const ok = await confirm({
       title: 'Aktar kapatılsın mı?',
@@ -166,7 +182,8 @@ export async function init() {
   app.platform = start.platform;
   app.themes = start.themes;
   setTheme(start.prefs?.theme ?? 'system', false);
-  if (start.prefs?.view && ['library', 'translate'].includes(start.prefs.view)) app.view = start.prefs.view;
+  if (start.prefs?.view && VIEWS.includes(start.prefs.view)) app.view = start.prefs.view;
+  app.sideCollapsed = !!start.prefs?.sidebar_collapsed;
   app.models = { names: [], message: '', ...start.models };
   setTranslate(start.translate);
   setLibrary(start.library);
@@ -221,8 +238,10 @@ export function seekPlayer(time, play = true) {
 }
 
 // Dosyayi acar: video oynatici + soru sor, belge goruntuleyici. `at`: saniye ya da sayfa.
-export async function openFile(row, at = null) {
+// `origin`: 'files' ise Dosya incele sayfasindan acildi (menude o vurgulanir).
+export async function openFile(row, at = null, origin = 'library') {
   if (row.missing) return toast('Dosya bulunamadı: ' + row.path, 'error');
+  app.fileOrigin = origin;
   if (!VIDEO_EXT.test(row.path)) {
     if (app.document?.path !== row.path) {
       const state = await act('doc_open', row.path);
@@ -249,5 +268,35 @@ export function openInTranslate(path) {
 
 export function go(view) {
   app.view = view;
-  if (view !== 'settings') call('save_ui_prefs', { view });
+  if (VIEWS.includes(view)) call('save_ui_prefs', { view });
+}
+
+export function toggleSidebar() {
+  app.sideCollapsed = !app.sideCollapsed;
+  call('save_ui_prefs', { sidebar_collapsed: app.sideCollapsed });
+}
+
+// --- genel sohbet ---
+export async function refreshConversations() {
+  const result = await call('assistant_list');
+  if (result?.items) app.conversations = result.items;
+}
+
+export async function loadAssistant() {
+  app.assistant = await call('assistant_state');
+  refreshConversations();
+}
+
+// --- dosya incele ---
+export async function refreshFiles() {
+  const result = await call('files_recent');
+  if (result?.items) app.files = result.items;
+}
+
+// Dosyayi listeye ekler ve acar (video: oynatici, belge: goruntuleyici; ikisi de soru sor).
+export async function inspectFile(path, at = null) {
+  const result = await act('files_touch', path);
+  if (!result) return;
+  app.files = result.items;
+  await openFile({ path }, at, 'files');
 }

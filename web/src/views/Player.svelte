@@ -300,7 +300,6 @@
           </div>
         </div>
       </div>
-      <p class="hint dim">Videoya tıkla ya da Boşluk: oynat/duraklat · ←/→: 5 saniye · F: tam ekran · çift tık: tam ekran</p>
     </div>
   {/if}
 </section>
@@ -337,5 +336,4 @@
   .chapter { font-size: 12px; color: var(--secondary); background: var(--surface); padding: 3px 10px; border-radius: 999px; max-width: 260px; }
   .grow { flex: 1; }
   .icon-btn.on { color: var(--accent); }
-  .hint { font-size: 12px; }
 </style>

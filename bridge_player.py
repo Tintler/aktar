@@ -10,6 +10,7 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
+import library
 import media_server
 import qa
 import speech
@@ -59,7 +60,10 @@ class VideoSession:
         self.streams = None           # altyazi akislari
         self.audio = []               # media.audio_streams
         self.session = None           # qa.VideoQA
-        self.entries = [('note', GREETING)]
+        self.key = library.file_chat_key(self.path)
+        saved = library.load_chat(self.key)   # onceki acilistan kalan sohbet
+        self.entries = [('note', GREETING)] + saved['entries']
+        self.history = saved['history']
         self.chips = None             # {'title', 'items': [{label, action, value}]}
         self.status = 'Hazırlanıyor…'
         self.progress = None          # {'done', 'total'} ya da None (belirsiz)
@@ -313,6 +317,7 @@ class PlayerMixin:
                         data, path = qa.load_subtitle_session(video.path, chosen, log=log)
                     video.session = qa.VideoQA(data, config_provider=load_config, log=log,
                                                save=lambda value, path=path: save_json(path, value))
+                    video.session.history = list(video.history)
                     video.status = f'Transkript hazır ({len(data["segments"])} satır). Video özetleniyor…'
                     video.progress = None
                     self._push_player(video)
@@ -386,6 +391,8 @@ class PlayerMixin:
                 return self._player_state()
         video.session = None
         video.entries = [('note', GREETING)]
+        video.history = []
+        library.clear_chat(video.key)  # sohbet eski transkriptin zamanlarina atif yapiyordu
         self._start_prepare(video, stream=stream, whisper=whisper, audio_track=track)
         return self._player_state()
 
@@ -409,10 +416,27 @@ class PlayerMixin:
             else:
                 video.entries = [item for item in video.entries if item[0] != 'pending']
                 video.entries.append(('assistant', turn['parts']))
+            video.history = video.session.history
+            library.save_chat(video.key, video.entries, video.history)
             video.asking = False
             self._push_player(video)
 
         threading.Thread(target=work, name='aktar-video-ask', daemon=True).start()
+        return self._player_state()
+
+    def player_clear_chat(self):
+        """Acik videonun sohbetini ve kayitli gecmisini siler."""
+        video = self._player_video
+        if video is None or video.asking:
+            return self._player_state()
+        library.clear_chat(video.key)
+        video.entries = [('note', GREETING)]
+        video.history = []
+        if video.session is not None:
+            video.session.history = []
+            if video.ready:
+                video.chips = {'title': 'Ne soracağınızı bilmiyor musunuz? Birini seçin:',
+                               'items': [{'label': text, 'action': 'ask'} for text in video.session.questions()]}
         return self._player_state()
 
     def _stop_player_for_close(self):

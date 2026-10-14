@@ -657,6 +657,58 @@ class Client:
             raise ValueError('Yanıt tamamlanmadı: ' + str(choice.get('finish_reason')))
         return text
 
+    def chat_stream(self, messages, on_delta=None, temperature=None, max_tokens=None, cancelled=None):
+        """Akisli sohbet (genel sohbet): her parcada on_delta(simdiye kadarki metin) cagrilir.
+
+        Donen: (metin, finish_reason). Durdurulursa o ana kadarki metin 'cancelled' ile doner;
+        token sinirinda kesilen yanit hata sayilmaz ('length')."""
+        payload = {
+            'model': self.cfg['model'],
+            'messages': list(messages),
+            'temperature': self.cfg['temperature'] if temperature is None else temperature,
+            'max_tokens': self.cfg['max_tokens'] if max_tokens is None else max_tokens,
+            'stream': True,
+        }
+        if self.cfg.get('disable_thinking'):
+            payload['chat_template_kwargs'] = {'enable_thinking': False}
+        headers = {'Content-Type': 'application/json'}
+        token = os.environ.get('LM_STUDIO_API_KEY')
+        if token:
+            headers['Authorization'] = 'Bearer ' + token
+        request = urllib.request.Request(self._url('/chat/completions'),
+                                         data=json.dumps(payload).encode('utf-8'), headers=headers)
+        text, finish = '', None
+        try:
+            with self.opener.open(request, timeout=self.cfg['timeout_seconds']) as response:
+                for raw in response:
+                    if cancelled and cancelled():
+                        return text, 'cancelled'
+                    line = raw.decode('utf-8', 'replace').strip()
+                    if not line.startswith('data:'):
+                        continue
+                    data = line[5:].strip()
+                    if data == '[DONE]':
+                        break
+                    try:
+                        choice = json.loads(data)['choices'][0]
+                    except (ValueError, KeyError, IndexError, TypeError):
+                        continue
+                    piece = (choice.get('delta') or {}).get('content') or ''
+                    if piece:
+                        text += piece
+                        if on_delta:
+                            on_delta(text)
+                    finish = choice.get('finish_reason') or finish
+        except urllib.error.HTTPError as error:
+            raise RuntimeError(f'HTTP {error.code}: LM Studio istegi reddedildi.') from None
+        except urllib.error.URLError as error:
+            if isinstance(error.reason, TimeoutError):
+                raise RuntimeError('LM Studio istegi zaman asimina ugradi.') from None
+            raise RuntimeError('LM Studio baglantisi kurulamadi: ' + str(self.cfg['base_url'])) from None
+        except TimeoutError:
+            raise RuntimeError('LM Studio istegi zaman asimina ugradi.') from None
+        return text, finish
+
 
 def prompt_path():
     external = APP_DIR / 'translation_prompt.txt'

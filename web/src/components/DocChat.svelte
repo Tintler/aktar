@@ -3,6 +3,7 @@
   import Icon from '../lib/Icon.svelte';
   import ChatMessages from './ChatMessages.svelte';
   import { app, act } from '../lib/state.svelte.js';
+  import { confirm } from '../lib/confirm.svelte.js';
   import { dragArea } from '../lib/frame.svelte.js';
 
   const chat = $derived(app.document?.chat);
@@ -21,10 +22,21 @@
     const state = await act('doc_ask', value);
     if (state && app.document) app.document.chat = state;
   }
+
+  async function clear() {
+    const ok = await confirm({ title: 'Sohbeti temizle', message: 'Bu belgenin sohbeti ve kayıtlı geçmişi silinsin mi?', ok: 'Temizle', danger: true });
+    if (!ok) return;
+    const state = await act('doc_clear_chat');
+    if (state && app.document) app.document.chat = state;
+  }
 </script>
 
 <aside class="panel">
-  <div class="head" use:dragArea><span class="pill">Bu belgeye sor</span></div>
+  <div class="head" use:dragArea>
+    <span class="pill">Bu belgeye sor</span>
+    <span class="grow"></span>
+    <button class="icon-btn sm" title="Sohbeti temizle" disabled={!chat || chat.asking || !chat.entries.some((e) => e.kind === 'user')} onclick={clear}><Icon name="trash" size={15} /></button>
+  </div>
   {#if chat}
     <div class="messages" bind:this={scroller}>
       <ChatMessages entries={chat.entries} single oncite={(item) => (app.docSeek = { page: item.start })} />
@@ -34,13 +46,13 @@
       <input bind:value={question} disabled={!chat.enabled} placeholder="Belgeye sor…" />
       <button class="send" type="submit" title="Gönder" disabled={!chat.enabled || !question.trim()}><Icon name="send" size={16} /></button>
     </form>
-    <p class="foot">Yapay zekâ yanlış bilgi verebilir; sayfa atıflarına tıklayıp belgede doğrulayın.</p>
   {/if}
 </aside>
 
 <style>
   .panel { width: 380px; flex: none; height: 100%; background: var(--panel); display: flex; flex-direction: column; padding: 14px 16px 12px; min-height: 0; gap: 10px; }
-  .head { display: flex; align-items: center; padding: 30px 0 4px; }
+  .head { display: flex; align-items: center; gap: 4px; padding: 30px 0 4px; }
+  .grow { flex: 1; }
   .pill { background: var(--text); color: var(--window); font-weight: 600; font-size: 13px; padding: 5px 12px; border-radius: 999px; }
   .messages { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 14px; padding: 4px 4px 8px 0; }
   .note { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--dim); }
@@ -50,5 +62,4 @@
   .ask input::placeholder { color: var(--dim); }
   .send { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--on-accent); flex: none; }
   .send:disabled { background: var(--surface-active); color: var(--dim); opacity: 1; }
-  .foot { font-size: 11px; color: var(--dim); }
 </style>

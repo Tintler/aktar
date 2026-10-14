@@ -26,7 +26,7 @@ import qa
 import search_index
 import series
 import speech
-from app_core import APP_DIR, FileLock, load_config, read, save_json, tr_lower
+from app_core import APP_DIR, FileLock, digest, load_config, read, save_json, tr_lower
 from media import VIDEO_EXTENSIONS
 
 VERSION = 1
@@ -233,6 +233,46 @@ def clear_chat(slug):
         chat_path(slug).unlink()
     except FileNotFoundError:
         pass
+
+
+# --- tekil dosyalar ------------------------------------------------------------
+# Koleksiyona eklenmeden incelenen dosyalar: son acilanlar listesi ve dosya basina sohbet.
+# Adlarinda nokta var; list_collections onlari koleksiyon saymaz.
+RECENT_FILE = 'recent.files.json'
+RECENT_LIMIT = 50
+
+
+def file_chat_key(path):
+    """Tek dosya sohbetinin kayit adi (load_chat/save_chat/clear_chat ile kullanilir)."""
+    return 'file-' + digest(_key(path))[:16]
+
+
+def load_recent():
+    """Son incelenen dosyalar: [{'path', 'opened'}] (yeniden eskiye)."""
+    try:
+        value = json.loads(read(library_dir() / RECENT_FILE))
+    except (OSError, ValueError):
+        return []
+    items = value.get('files', []) if isinstance(value, dict) else []
+    return [{'path': str(item['path']), 'opened': str(item.get('opened', ''))}
+            for item in items if isinstance(item, dict) and item.get('path')]
+
+
+def _save_recent(items):
+    save_json(library_dir() / RECENT_FILE, {'version': VERSION, 'files': items[:RECENT_LIMIT]})
+
+
+def touch_recent(path):
+    """Dosyayi listenin basina alir (zaten varsa tasinir)."""
+    path = _clean(path)
+    items = [item for item in load_recent() if _key(item['path']) != _key(path)]
+    _save_recent([{'path': path, 'opened': _now()}] + items)
+
+
+def forget_recent(path):
+    """Dosyayi listeden ve kayitli sohbetini siler; dosyanin kendisine dokunulmaz."""
+    _save_recent([item for item in load_recent() if _key(item['path']) != _key(path)])
+    clear_chat(file_chat_key(path))
 
 
 def default_title(paths):

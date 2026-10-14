@@ -180,7 +180,7 @@ Bu ayarların hepsi **Ayarlar** penceresinden de değiştirilebilir.
 
 ## 3. Arayüz akışı
 
-Sol menüdeki **Kütüphane** ve **Altyazı Çevir** ile sayfalar arasında geçilir; koleksiyonlar da sol menüde listelenir. Üst çubuktaki **‹ ›** düğmeleri önceki/sonraki sayfaya döner, dişli simgesi **Ayarlar**'ı açar. Uygulama son kullandığınız sayfayla açılır. Pencereye bırakılan dosyalar açık sayfaya gider: Kütüphane'de koleksiyona eklenir, Altyazı Çevir'de video açılır. 3.0 Kütüphaneyi, 3.1–3.5 Altyazı Çevir sayfasını, 3.6 videoya soru sormayı, 3.7 görünümü ve temaları anlatır.
+Sol menüde **Sohbet**, **Kütüphane**, **Dosya incele**, **Altyazı Çevir** ve **Konsol** sayfaları vardır; koleksiyonlar da sol menüde listelenir. **aktar** logosuna tıklayınca menü yalnızca simgelere daralır (tekrar tıklayınca genişler; tercih hatırlanır). Üst çubuktaki **‹ ›** düğmeleri önceki/sonraki sayfaya döner, dişli simgesi **Ayarlar**'ı açar. Uygulama son kullandığınız sayfayla açılır. Pencereye bırakılan dosyalar açık sayfaya gider: Kütüphane'de koleksiyona eklenir, Dosya incele'de açılır, Altyazı Çevir'de video açılır. 3.0 Kütüphaneyi, 3.1–3.5 Altyazı Çevir sayfasını, 3.6 videoya soru sormayı, 3.7 görünümü ve temaları, 3.8 genel sohbeti, 3.9 tek dosya incelemeyi, 3.10 konsolu anlatır.
 
 ### 3.0 Kütüphane
 Videolarınızı ve belgelerinizi **koleksiyonlarda** toplar (ör. "Makine Öğrenmesi", "Kullanım Kılavuzları").
@@ -205,7 +205,7 @@ Videolarınızı ve belgelerinizi **koleksiyonlarda** toplar (ör. "Makine Öğr
 - **Hepsini hazırla:** Belgelerin metni hızlıca çıkarılır (**Belgelerden metin**; taranmış PDF ve görseller **Taranmış PDF / görsel → görü modeli** satırında sayılır ve yalnızca **Taranmış PDF ve görselleri görü modeliyle oku** açıksa okunur). Koleksiyondaki tüm videoların transkriptini sırayla çıkarır ve aranabilir indekse ekler. İndeks için Ayarlar → **Kütüphane indeksi** bölümünden bir embedding modeli seçilmelidir (LM Studio'da indirilmiş olması yeterli; ilk istekte yüklenir). Transkript ~90 saniyelik parçalara bölünür ve her parça vektöre çevrilir; seçilmezse yalnızca transkript çıkarılır. Açılan pencere videoları yoklar ve gruplara ayırır: **Zaten hazır** (tekrar işlenmez), **Yalnızca özeti eksik**, **Yalnızca indekslenecek** (transkript var, indeks yok), **Gömülü altyazıdan** (hızlı; şarkı/yazı izleri atlanır) ve **Altyazı yok → Whisper** (toplam ses süresiyle). Whisper yalnızca bu penceredeki **Altyazısız videolarda Whisper kullan** anahtarı açıksa çalışır; kapalıysa bu videolar atlanır ve tabloda **Altyazı yok · Whisper bekliyor** olarak görünür. Sıra: önce altyazılı videolar, sonra Whisper.
   - Çalışırken tablonun üstündeki şerit ilerlemeyi gösterir; satırlarda **Sırada**, **İşleniyor…**, **Whisper %42** gibi durumlar görünür. **Duraklat** sıradaki videodan önce bekler (Whisper bir videoyu bitirmeden durmaz); **Durdur** işi keser, yarım kalan video bir sonraki sefere baştan yapılır. Hazırlanan transkriptler önbelleğe yazılır; videoya çift tıklayınca beklemeden kullanılır.
   - **Dosya özetleri ve koleksiyon özeti çıkar** (varsayılan açık): her videonun ve belgenin genel özeti sohbet modeliyle çıkarılır (videoya çift tıklayınca açılan ekrandaki özetle aynıdır; orada tekrar beklenmez), en sonda bu özetlerden **koleksiyon özeti** üretilir. Video başına birkaç model isteği yapılır; uzun videolarda önce bölüm özetleri çıkarıldığı için dakikalar sürebilir. Kapalıysa yalnızca transkript ve indeks hazırlanır.
-  - Hata veren videolar (ör. seste konuşma yoksa) atlanır ve sonunda listelenir; ayrıntılar Altyazı Çevir sekmesindeki konsoldadır.
+  - Hata veren videolar (ör. seste konuşma yoksa) atlanır ve sonunda listelenir; ayrıntılar **Konsol** sayfasındadır.
 - **Koleksiyona sor (sağ panel; kapatılırsa üst çubuktaki Koleksiyona sor düğmesiyle açılır):** Koleksiyondaki **Hazır** (indeksli) videoların hepsine birden soru sorarsınız. Soru önce indekste aranır, en ilgili transkript parçaları sohbet modeline verilir; cevap Türkçedir ve iddialar `V3 12:34` gibi atıflarla desteklenir (V3 = koleksiyondaki 3. dosya). Cevabın altındaki **Kaynaklar** satırı hangi videonun kaç kez kaynak gösterildiğini listeler.
   - Atfa tıklayınca o video oynatıcıda açılır ve o ana gider; **‹** düğmesiyle sohbete dönersiniz, sohbet kaybolmaz.
   - **Kapsam:** **Tüm koleksiyon** ya da **Seçili dosyalar** (tabloda seçtiğiniz satırlar). Henüz hazır olmayan dosyalar cevaba dahil edilmez; panelin altındaki not kaç dosyanın beklediğini söyler.
@@ -309,6 +309,21 @@ Kendi temanızı yapmak için `themes\` klasörüne bir `.json` dosyası koyun (
 ```
 
 Renk adları: `window`, `panel`, `surface`, `surface_hover`, `surface_active`, `outline`, `text`, `secondary`, `dim`, `accent`, `accent_hover`, `on_accent`, `danger`, `warning`, `overlay`, `shadow`. Renkler `#RRGGBB` ya da saydamlıkla `#RRGGBBAA` olarak yazılır. Deeverse'in tema dosyaları aynen çalışır. Bozuk dosyalar listede **Bozuk dosya** olarak görünür ve seçilemez.
+
+### 3.8 Sohbet (genel sohbet)
+Sol menünün en üstündeki **Sohbet**, Claude/ChatGPT benzeri serbest bir sohbettir: genel sorulara modelin kendi bilgisiyle cevap verir, yazı, açıklama ve kod gibi işlerde yardımcı olur. Cevaplar yazılırken akış halinde görünür; **■** düğmesi cevabı durdurur. **Enter** gönderir, **Shift+Enter** yeni satır açar.
+
+Her mesajda soru, bütün koleksiyonlardaki ve Dosya incele listesindeki hazır (indeksli) dosyalarda arka planda aranır. Yeterince ilgili bir parça bulunursa modele "kütüphane notu" olarak verilir; model bunu yalnızca soru dosyalarınızla ilgiliyse kullanır ve o zaman `V2 12:34` / `V3 s.5` atıfları yapar (tıklayınca video o anda, belge o sayfada açılır). İlgisiz sorularda kütüphaneden hiç söz etmez. "Kütüphanemde neler var?" gibi sorular için koleksiyon adları ve özetleri de modele verilir. Kütüphane araması için Ayarlar → **Kütüphane indeksi**'nde bir embedding modeli seçili olmalıdır; seçili değilse sohbet yine çalışır ama dosyalara bakmaz.
+
+Sohbetler soldaki listede tarihe göre gruplanır ve `library\conversations\` klasöründe saklanır; sağ tık (ya da **⋯**) ile yeniden adlandırılır veya silinir. **Yeni sohbet** boş bir sohbet açar.
+
+### 3.9 Dosya incele (koleksiyona eklemeden)
+**Dosya incele** sayfasında bir dosyayı seçin ya da sayfaya bırakın: koleksiyona eklenmeden açılır. Video oynatıcıda açılır ve yanında **Bu videoya sor**, belge görüntüleyicide açılır ve yanında **Bu belgeye sor** paneli vardır. Son incelenen dosyalar sayfada listelenir; sohbetleri ve hazırlıkları (transkript, OCR) saklanır, dosyayı yeniden açınca kaldığınız yerden devam edersiniz. Satırın menüsünden **Koleksiyona ekle…**, **Altyazıyı çevir…**, **Dosya konumunu aç** ve **Listeden kaldır** seçilebilir (listeden kaldırmak kayıtlı sohbeti de siler; dosyaya dokunulmaz).
+
+Video ve belge sohbetleri Kütüphane'den açılan dosyalarda da saklanır; panelin üstündeki çöp kutusu simgesi sohbeti temizler.
+
+### 3.10 Konsol
+Sol menüdeki **Konsol**, uygulamanın bütün günlüğünü gösterir: çeviri adımları, toplu hazırlık, OCR, Whisper, sohbet ve hata ayrıntıları. Üstteki kutuyla günlükte arama yapılır, **Hatalar ve uyarılar** yalnızca sorunlu satırları gösterir, **Kopyala** görünen satırları panoya alır. Konsol açık değilken yeni bir hata yazılırsa menüdeki simgede kırmızı bir nokta belirir.
 
 ---
 
@@ -431,5 +446,5 @@ py -3 cevir.py translate "C:\video\Movie.ass" --series game-of-thrones --glossar
 - `base_url` yalnızca yerel adres olabilir.
 - Kaynak video **salt-okunur**: kopyalanmaz, taşınmaz, değiştirilmez, yeniden encode edilmez.
 - Seri sözlükleri uygulama dizinindeki `series\` klasöründe tutulur (kullanıcı verisi; sürüm kontrolüne girmez).
-- Kütüphane koleksiyonları `library\` klasöründe tutulur; yalnızca dosya yollarını içerir, dosyaların kendisi kopyalanmaz.
+- Kütüphane koleksiyonları `library\` klasöründe tutulur; yalnızca dosya yollarını içerir, dosyaların kendisi kopyalanmaz. Genel sohbetler `library\conversations\`, Dosya incele listesi `library\recent.files.json`, dosya sohbetleri `library\file-*.chat.json` dosyalarındadır.
 - Soru Sor transkriptleri, video haritası ve Whisper sonuçları `work_files\qa\` altında, kütüphane indeksi (embedding vektörleri) `work_files\index\` altında önbelleğe alınır. Silmek güvenlidir; gerekirse yeniden üretilir.

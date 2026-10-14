@@ -28,7 +28,10 @@ class DocumentSession:
     def __init__(self, path):
         self.path = Path(path)
         self.kind = documents.kind_of(self.path)
-        self.entries = [('note', GREETING)]
+        self.key = library.file_chat_key(self.path)
+        saved = library.load_chat(self.key)   # onceki acilistan kalan sohbet
+        self.entries = [('note', GREETING)] + saved['entries']
+        self.history = saved['history']
         self.session = None
         self.ready = False
         self.asking = False
@@ -118,6 +121,7 @@ class DocumentMixin:
                 fits = session.whole_hits(cfg) is not None
                 model = str(cfg.get('embedding_model', '')).strip()
                 if fits or model:
+                    session.history = list(doc.history)
                     doc.session = session
                     doc.ready = True
                     doc.note = '' if fits else 'Uzun belge: soruyla ilgili bölümler aranarak cevaplanır.'
@@ -146,10 +150,26 @@ class DocumentMixin:
                 error = str(failure)
             doc.entries = [item for item in doc.entries if item[0] != 'pending']
             doc.entries.append(('assistant', turn) if turn is not None else ('error', 'Cevap alınamadı: ' + error))
+            doc.history = doc.session.history
+            library.save_chat(doc.key, doc.entries, doc.history)
+            if error:
+                self._log('[Belge] Cevap alınamadı: ' + error)
             doc.asking = False
             self._push_doc(doc)
 
         threading.Thread(target=work, name='aktar-doc-ask', daemon=True).start()
+        return self._doc_chat(doc)
+
+    def doc_clear_chat(self):
+        """Acik belgenin sohbetini ve kayitli gecmisini siler."""
+        doc = self._doc
+        if doc is None or doc.asking:
+            return self._doc_chat(doc) if doc else None
+        library.clear_chat(doc.key)
+        doc.entries = [('note', GREETING)]
+        doc.history = []
+        if doc.session is not None:
+            doc.session.history = []
         return self._doc_chat(doc)
 
     def open_external(self, path):
