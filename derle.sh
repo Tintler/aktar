@@ -24,7 +24,13 @@ if ! "$PY" -c 'import ctypes, sysconfig; ctypes.CDLL(sysconfig.get_config_var("I
     exit 1
 fi
 
-set -- --add-data "$ROOT/assets:assets" --add-data "$ROOT/translation_prompt.txt:."
+if ! command -v npm >/dev/null 2>&1; then
+    echo "HATA: npm yok (web arayuzu derlenemez). Kurun: sudo apt install nodejs npm"
+    exit 1
+fi
+(cd web && npm ci && npm run build)
+
+set -- --add-data "$ROOT/assets:assets" --add-data "$ROOT/translation_prompt.txt:."     --add-data "$ROOT/web/dist:web/dist"
 if [ -x bin/ffmpeg ] && [ -x bin/ffprobe ]; then
     mkdir -p build/linux/bin
     cp bin/ffmpeg bin/ffprobe build/linux/bin/
@@ -40,7 +46,9 @@ fi
     --specpath build/linux --workpath build/linux/work \
     "$@" \
     --exclude-module faster_whisper --exclude-module ctranslate2 \
-    gui.py
+    --exclude-module PySide6 --exclude-module PyQt5 --exclude-module PyQt6 \
+    --exclude-module numpy --exclude-module setuptools \
+    desktop.py
 
 echo
 echo "Derleme tamamlandi: dist/Aktar"

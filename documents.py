@@ -4,9 +4,8 @@ Belgeler videolarla ayni hatta girer: metin `qa` onbellegine bir oturum olarak
 yazilir (segment konumu = sayfa numarasi), sonra indekslenir ve koleksiyon
 sohbetinde [V3 s.12] gibi atiflanir.
 
-- PDF: Qt'nin PDF modulu (QtPdf, PySide6 ile gelir) metin katmanini okur. Metin
-  katmani olmayan taranmis PDF'ler simdilik okunamaz (NoTextError); ileride gorsel
-  modelle okunacak.
+- PDF: pdfium (pypdfium2) metin katmanini okur ve sayfalari cizer. Metin katmani
+  olmayan sayfalar gorsel okumaya (OCR / gorsel model) gider.
 - .txt / .md: metin TEXT_PAGE_LINES satirlik "sayfalara" bolunur; atif ve
   goruntuleyicide konum bu sayfa numarasidir.
 - .docx (F68): paragraflar; sayfa sonlari (Word'un kaydettigi isaretler) korunur,
@@ -29,6 +28,7 @@ import json
 import io
 import posixpath
 import re
+import threading
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree
@@ -106,21 +106,41 @@ def paragraphs(text):
     return result
 
 
-def pdf_pages(path):
-    """PDF'in sayfa metinleri (QtPdf; arayuz disi thread'de de calisir)."""
-    from PySide6.QtPdf import QPdfDocument
-    document = QPdfDocument(None)
+# pdfium is parcacigi guvenli degil: tum PDF islemleri (metin, cizim) tek kilitle siralanir.
+_PDFIUM = threading.RLock()
+
+
+def open_pdf(path):
+    """pypdfium2 belgesi; acilamazsa Turkce nedenli ValueError."""
+    import pypdfium2 as pdfium
     try:
-        status = document.load(str(path))
-        if status != QPdfDocument.Error.None_:
-            reason = {QPdfDocument.Error.IncorrectPassword: 'parola korumalı',
-                      QPdfDocument.Error.UnsupportedSecurityScheme: 'desteklenmeyen şifreleme',
-                      QPdfDocument.Error.InvalidFileFormat: 'geçersiz PDF',
-                      QPdfDocument.Error.FileNotFound: 'dosya bulunamadı'}.get(status, status.name)
-            raise ValueError(f'PDF açılamadı ({reason}): {Path(path).name}')
-        return [document.getAllText(page).text() for page in range(document.pageCount())]
-    finally:
-        document.close()
+        return pdfium.PdfDocument(str(path))
+    except FileNotFoundError:
+        raise ValueError(f'PDF açılamadı (dosya bulunamadı): {Path(path).name}') from None
+    except pdfium.PdfiumError as error:
+        message = str(error).lower()
+        reason = ('parola korumalı' if 'password' in message else
+                  'desteklenmeyen şifreleme' if 'security' in message else
+                  'dosya bulunamadı' if 'file' in message else 'geçersiz PDF')
+        raise ValueError(f'PDF açılamadı ({reason}): {Path(path).name}') from None
+
+
+def pdf_pages(path):
+    """PDF'in sayfa metinleri (pdfium; satir sonlari LF)."""
+    with _PDFIUM:
+        document = open_pdf(path)
+        try:
+            pages = []
+            for index in range(len(document)):
+                page = document[index]
+                textpage = page.get_textpage()
+                text = textpage.get_text_range()
+                textpage.close()
+                page.close()
+                pages.append(text.replace('\r\n', '\n').replace('\r', '\n'))
+            return pages
+        finally:
+            document.close()
 
 
 def read_text(path):
@@ -306,69 +326,76 @@ def epub_pages(path):
     return pages or ['']
 
 
-def _png(image, quality=-1):
-    from PySide6.QtCore import QBuffer
-    buffer = QBuffer()
-    buffer.open(QBuffer.WriteOnly)
-    image.save(buffer, 'PNG', quality)
-    return bytes(buffer.data())
+def _png(image, fast=False):
+    """Pillow goruntusu -> PNG baytlari (`fast`: az sikistirma, ~10 kat hizli kodlama)."""
+    buffer = io.BytesIO()
+    image.save(buffer, 'PNG', compress_level=1 if fast else 6)
+    return buffer.getvalue()
 
 
 class PdfRenderer:
     """PDF bir kez acilir, sayfalar sirayla cizilir (her sayfada yeniden yukleme yok)."""
 
     def __init__(self, path):
-        from PySide6.QtPdf import QPdfDocument
-        self.document = QPdfDocument(None)
-        self.document.load(str(path))
+        with _PDFIUM:
+            self.document = open_pdf(path)
 
-    def png(self, page, gray=False):
-        """Beyaz zeminli PNG (QtPdf seffaf cizer; model siyah gorur). `gray`: Tesseract icin
-        gri tonlu ve az sikistirilmis; kodlama ~10 kat hizli."""
-        from PySide6.QtCore import QSize
-        from PySide6.QtGui import QColor, QImage, QPainter
-        size = self.document.pagePointSize(page)
-        scale = RENDER_LONG_SIDE / max(size.width(), size.height(), 1.0)
-        target = QSize(max(1, int(size.width() * scale)), max(1, int(size.height() * scale)))
-        rendered = self.document.render(page, target)
-        image = QImage(rendered.size(), QImage.Format_RGB32)
-        image.fill(QColor('white'))
-        painter = QPainter(image)
-        painter.drawImage(0, 0, rendered)
-        painter.end()
+    def page_count(self):
+        with _PDFIUM:
+            return len(self.document)
+
+    def png(self, page, gray=False, long_side=None):
+        """Beyaz zeminli PNG (seffaf zeminde model siyah gorur). `gray`: Tesseract icin gri
+        tonlu ve az sikistirilmis. `long_side`: uzun kenar piksel (varsayilan RENDER_LONG_SIDE)."""
+        with _PDFIUM:
+            item = self.document[page]
+            try:
+                width, height = item.get_size()
+                scale = (long_side or RENDER_LONG_SIDE) / max(width, height, 1.0)
+                image = item.render(scale=scale, fill_color=(255, 255, 255, 255), grayscale=gray).to_pil()
+            finally:
+                item.close()
         if gray:
-            return _png(image.convertToFormat(QImage.Format_Grayscale8), 90)
-        return _png(image)
+            image = image.convert('L')
+        elif image.mode != 'RGB':
+            image = image.convert('RGB')
+        return _png(image, fast=gray)
 
     def close(self):
-        self.document.close()
+        with _PDFIUM:
+            self.document.close()
 
 
-def render_pdf_page(path, page):
+def render_pdf_page(path, page, long_side=None):
     """PDF sayfasinin beyaz zeminli PNG goruntusu."""
     renderer = PdfRenderer(path)
     try:
-        return renderer.png(page)
+        return renderer.png(page, long_side=long_side)
     finally:
         renderer.close()
 
 
-def image_bytes(path):
-    """Gorsel dosyasi -> modele gidecek PNG (uzun kenar en fazla RENDER_LONG_SIDE)."""
-    from PySide6.QtCore import Qt
-    from PySide6.QtGui import QColor, QImage, QPainter
-    image = QImage(str(path))
-    if image.isNull():
-        raise ValueError('Görsel açılamadı: ' + Path(path).name)
-    if max(image.width(), image.height()) > RENDER_LONG_SIDE:
-        image = image.scaled(RENDER_LONG_SIDE, RENDER_LONG_SIDE, Qt.KeepAspectRatio,
-                             Qt.SmoothTransformation)
-    flat = QImage(image.size(), QImage.Format_RGB32)
-    flat.fill(QColor('white'))
-    painter = QPainter(flat)
-    painter.drawImage(0, 0, image)
-    painter.end()
-    return _png(flat)
+def image_bytes(path, long_side=None):
+    """Gorsel dosyasi -> modele gidecek PNG (uzun kenar en fazla RENDER_LONG_SIDE, beyaz zemin)."""
+    from PIL import Image, ImageOps, UnidentifiedImageError
+    limit = long_side or RENDER_LONG_SIDE
+    try:
+        with Image.open(path) as source:
+            source.seek(0)  # GIF: ilk kare
+            image = ImageOps.exif_transpose(source)
+            image.load()
+    except (OSError, UnidentifiedImageError, ValueError):
+        raise ValueError('Görsel açılamadı: ' + Path(path).name) from None
+    if max(image.size) > limit:
+        image.thumbnail((limit, limit), Image.LANCZOS)
+    if image.mode in ('RGBA', 'LA', 'P', 'PA'):
+        image = image.convert('RGBA')
+        flat = Image.new('RGB', image.size, 'white')
+        flat.paste(image, mask=image.getchannel('A'))
+        image = flat
+    elif image.mode != 'RGB':
+        image = image.convert('RGB')
+    return _png(image)
 
 
 def tesseract_path(cfg=None):

@@ -15,7 +15,9 @@ cd /d Z:\LLM-Files\Projects\Aktar
 py -3 -m pip install -r requirements.txt
 ```
 
-`requirements.txt`: `PySide6`, `PyInstaller`.
+`requirements.txt`: `pywebview` (pencere), `pypdfium2` ve `Pillow` (PDF ve görseller), `PyInstaller`.
+
+Arayüz Svelte ile yazılmış bir web arayüzüdür ve uygulama penceresinde (Windows'ta WebView2, Linux'ta WebKitGTK) açılır. Kaynak koddan çalıştırmak için **Node.js** gerekir ([nodejs.org](https://nodejs.org)): `GUI_BASLAT.cmd` ilk açılışta `web\` klasöründe bağımlılıkları kurar ve arayüzü her açılışta derler (~1 sn). Derlenmiş `Aktar.exe` için Node.js gerekmez.
 
 ### 1.2 FFmpeg / ffprobe
 
@@ -40,7 +42,7 @@ FFmpeg'i [ffmpeg.org](https://ffmpeg.org/download.html) üzerinden indirip `bin`
 
 ### 1.4 aktar.exe derlemesi
 1. İsterseniz `bin` klasörüne `ffmpeg.exe` ve `ffprobe.exe` dosyalarını yerleştirdikten sonra uygulamayı .exe olarak derleyebilirsiniz. FFmpeg lisansından dolayı GitHub sayfasında derlenmiş .exe sunulmuyor.
-2. `DERLE.cmd` dosyasını çalıştırarak `dist\Aktar.exe` dosyasını oluşturabilirsiniz.
+2. `DERLE.cmd` dosyasını çalıştırarak `dist\Aktar.exe` dosyasını oluşturabilirsiniz. Betik önce web arayüzünü derler; bunun için Node.js kurulu olmalıdır.
 3. Konuşmadan metin (Whisper) `Aktar.exe`'ye gömülmez; ayrı bir paket olarak derlenip yanına konur (bkz. 1.5 → "Derlenmiş .exe ile").
 
 ### 1.5 İsteğe bağlı: konuşmadan metin (Whisper)
@@ -90,7 +92,7 @@ Paket boyutu GPU kütüphaneleri olmadan ~270 MB, pakete gömülü NVIDIA kütü
   Cihaz ayarı `auto` iken GPU varsa önce o denenir. Konsolda önce `GPU kütüphaneleri: cublas (...), cudnn (...)` satırı görünür. Kütüphaneler eksikse ya da GPU çalışmazsa nedeni yazılır ve işlemciyle devam edilir (çok daha yavaş).
 
 ### 1.6 Linux (Debian, Ubuntu, Fedora; KDE Plasma, GNOME)
-Aktar Linux'ta kaynak koddan çalışır. Arayüz Qt (PySide6) olduğu için KDE Plasma'da hem Wayland hem X11 oturumunda doğal görünür. Windows betikleri (`.cmd`) yerine aynı işi yapan `.sh` betikleri vardır:
+Aktar Linux'ta kaynak koddan çalışır. Pencere WebKitGTK ile açılır (KDE Plasma ve GNOME'da, Wayland ve X11 oturumunda); videolar GStreamer ile oynatılır. Windows betikleri (`.cmd`) yerine aynı işi yapan `.sh` betikleri vardır:
 
 | Windows | Linux | Ne yapar |
 |---|---|---|
@@ -102,11 +104,13 @@ Aktar Linux'ta kaynak koddan çalışır. Arayüz Qt (PySide6) olduğu için KDE
 **Kurulum (Debian 12/13, Ubuntu 22.04+):**
 
 ```bash
-sudo apt install python3-venv ffmpeg fontconfig libxcb-cursor0
+sudo apt install python3-venv python3-gi gir1.2-webkit2-4.1 nodejs npm ffmpeg fontconfig \
+                 gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
 ./kur.sh --kisayol
 ./baslat.sh
 ```
 
+- `python3-gi` ve `gir1.2-webkit2-4.1` pencereyi, `gstreamer1.0-libav` H.264/AAC videoların oynatılmasını sağlar. `kur.sh` sanal ortamı sistem paketlerini görecek şekilde (`--system-site-packages`) kurar; eski bir `.venv` varsa silip yeniden kurun. `nodejs`/`npm` arayüzü derlemek içindir.
 - Debian/Ubuntu sistem Python'una doğrudan `pip install` yaptırmaz; bu yüzden `kur.sh` paketleri proje klasöründeki `.venv` içine kurar. `baslat.sh` bu ortamı kendiliğinden kullanır.
 - `--kisayol`, uygulama menüsüne **Aktar** kısayolu ekler. Dosya yöneticisinde (Dolphin) bir videoya sağ tıklayıp **Birlikte Aç → Aktar** dediğinizde video doğrudan açılır.
 - `--whisper` konuşmadan metni (faster-whisper) kurar. `--gpu` buna ek olarak NVIDIA CUDA 12 kütüphanelerini (cuBLAS, cuDNN) `.venv` içine kurar. Seçenekler birlikte verilebilir: `./kur.sh --gpu --kisayol`.
@@ -176,7 +180,7 @@ Bu ayarların hepsi **Ayarlar** penceresinden de değiştirilebilir.
 
 ## 3. Arayüz akışı
 
-Başlık şeridindeki **Kütüphane | Altyazı Çevir** seçicisiyle iki sekme arasında geçilir. Uygulama Kütüphane sekmesiyle açılır. Video Seç, Seri, Terim ve Süreklilik düğmeleri yalnızca Altyazı Çevir sekmesinde görünür. 3.0 Kütüphaneyi, 3.1–3.5 Altyazı Çevir sekmesini, 3.6 videoya soru sormayı anlatır.
+Sol menüdeki **Kütüphane** ve **Altyazı Çevir** ile sayfalar arasında geçilir; koleksiyonlar da sol menüde listelenir. Üst çubuktaki **‹ ›** düğmeleri önceki/sonraki sayfaya döner, dişli simgesi **Ayarlar**'ı açar. Uygulama son kullandığınız sayfayla açılır. Pencereye bırakılan dosyalar açık sayfaya gider: Kütüphane'de koleksiyona eklenir, Altyazı Çevir'de video açılır. 3.0 Kütüphaneyi, 3.1–3.5 Altyazı Çevir sayfasını, 3.6 videoya soru sormayı, 3.7 görünümü ve temaları anlatır.
 
 ### 3.0 Kütüphane
 Videolarınızı ve belgelerinizi **koleksiyonlarda** toplar (ör. "Makine Öğrenmesi", "Kullanım Kılavuzları").
@@ -190,20 +194,20 @@ Videolarınızı ve belgelerinizi **koleksiyonlarda** toplar (ör. "Makine Öğr
 **Tesseract (klasik OCR):** Tesseract kuruluysa taranmış PDF'ler varsayılan olarak onunla okunur (Ayarlar → **OCR motoru** → **Otomatik**); sayfalar LM Studio yerine bilgisayardaki Tesseract ile okunur; işlemci çekirdeği sayısına göre birkaç sayfa (en fazla 8) aynı anda işlenir. Çok sütunlu sayfalarda sütunlar zaman zaman birbirine karışabilir, ama metin uydurulmaz. **Uyarı:** Gemma gibi genel görü modelleri küçük yazılı sayfalarda (dergi, künye) okuyamadığı yeri kendi tahminiyle doldurabilir ya da aynı cümleyi tekrar tekrar yazabilir; Aktar tekrarları keser ve günlükte uyarır. Görü modeli kullanılacaksa OCR için eğitilmiş küçük bir model (ör. GLM-OCR) daha güvenilirdir. Görseller (fotoğraf, ekran görüntüsü) tarif gerektirdiği için her zaman görü modeliyle okunur. Kurulum: Windows'ta UB Mannheim Tesseract kurulum dosyası (kurulumda **Turkish** dil verisini işaretleyin); Linux'ta `sudo apt install tesseract-ocr tesseract-ocr-tur`. Ayarlar penceresi Tesseract'ın bulunup bulunmadığını gösterir. 
 
 - **İlk açılış:** Henüz koleksiyon yoksa ortada **Klasör veya dosya bırak** alanı görünür. Bir klasör bırakın ya da **Klasör seç** / **Dosya seç** ile seçin; klasörün adıyla bir koleksiyon oluşur.
-- **Koleksiyonlar (sol):** Koleksiyona tıklayınca içeriği açılır. **Yeni koleksiyon** ile boş bir koleksiyon oluşturulur. Sağ tık: **Yeniden adlandır**, **Yeniden tara**, **Koleksiyonu dışa aktar (Markdown)…** (açık koleksiyonun tüm transkriptleri tek dosyada; koleksiyon ve video özetleri varsa başlarında), **Koleksiyonu sil**. Silme yalnızca koleksiyon kaydını siler; dosyalarınız diskte kalır.
-- **Kaynak klasörler (sol alt):** Klasörler alt klasörleriyle birlikte taranır (gizli ve sistem klasörleri atlanır). Koleksiyon her açıldığında klasörler yeniden taranır: yeni bulunan videolar adının yanında **yeni** ile işaretlenir, diskten silinen ya da takılı olmayan diskteki videolar **Bulunamadı** olarak listede kalır. Sağ tık: **Klasörü aç**, **Koleksiyondan kaldır**.
+- **Koleksiyonlar (sol menü):** Koleksiyona tıklayınca içeriği açılır. **+** ile boş bir koleksiyon oluşturulur. Sağ tık: **Yeniden adlandır**, **Yeniden tara**, **Koleksiyonu dışa aktar (Markdown)…** (açık koleksiyonun tüm transkriptleri tek dosyada; koleksiyon ve video özetleri varsa başlarında), **Koleksiyonu sil**. Silme yalnızca koleksiyon kaydını siler; dosyalarınız diskte kalır.
+- **Kaynak klasörler (koleksiyon başlığının altında, sağda):** Klasörler alt klasörleriyle birlikte taranır (gizli ve sistem klasörleri atlanır). Koleksiyon her açıldığında klasörler yeniden taranır: yeni bulunan videolar adının yanında **yeni** ile işaretlenir, diskten silinen ya da takılı olmayan diskteki videolar **Bulunamadı** olarak listede kalır. Sağ tık: **Klasörü aç**, **Koleksiyondan kaldır**.
 - **Klasör ekle / Dosya ekle:** Açık koleksiyona klasör veya tek tek video ekler. Klasör ve videolar sayfaya sürüklenerek de eklenebilir.
 - **Dosya tablosu:** Dosya adı, bulunduğu alt klasör, süre (hazırlanmamışsa dosya boyutu), metin kaynağı (Altyazı · dil / Whisper · model) ve durum (**Hazır**: transkript çıkarılmış ve aranabilir indekse eklenmiş; **Metin hazır**: transkript var, indeks yok ya da embedding modeli seçilmemiş; **Bekliyor**; **Altyazı yok · Whisper bekliyor**; **Bulunamadı**). 
 - **Arama kutusu:** Dosya adında ve transkriptlerde model kullanmadan anında arar (en az 3 harf). Büyük/küçük harf ve Türkçe karakter farkı yok sayılır (`asiri` = `aşırı`); birden çok kelime yazılırsa hepsi aynı satırda geçmelidir. Eşleşen transkript satırları tablonun üstünde listelenir (video · dakika · metin); tıklayınca video o anda açılır. Tablo da yalnızca adı ya da transkripti eşleşen dosyalara süzülür.
-- **Videoya çift tıklayınca** oynatıcı ve soru-cevap açılır (bkz. 3.6); sol üstteki geri düğmesi listeye döndürür.
+- **Videoya çift tıklayınca** oynatıcı ve soru-cevap açılır (bkz. 3.6); üst çubuktaki **‹** düğmesi listeye döndürür. Tabloda Ctrl/Shift ile birden çok satır seçilir, Ctrl+A hepsini seçer.
 - **Sağ tık menüsü:** **Oynat ve soru sor**, **Altyazıyı çevir…** (videoyu Altyazı Çevir sekmesinde açar), **Dosya konumunu aç**, **Transkripti dışa aktar…**, **Koleksiyondan çıkar** (dosya diskte kalır; birden çok satır seçilebilir). Çıkarılan dosya (ya da kaldırılan klasörün dosyaları) sohbette artık kullanılmaz: sohbetin model geçmişi sıfırlanır ve koleksiyon özeti kalan dosyalardan arka planda yeniden üretilir.
 - **Transkripti dışa aktar:** Transkripti olan videolar için. Tek video seçiliyse kayıt penceresinde biçim seçilir: **Metin** (`[m:ss] satır`), **Altyazı (SRT)** (zamanlı altyazı; oynatıcılarda açılabilir) veya **Markdown** (video özeti varsa başta). Birden çok video seçiliyse önce biçim, sonra klasör sorulur; her video `<video adı>.<uzantı>` olarak yazılır, var olan dosyanın üzerine yazılmaz (`(2)` eklenir). Kaynak videolara dokunulmaz.
 - **Hepsini hazırla:** Belgelerin metni hızlıca çıkarılır (**Belgelerden metin**; taranmış PDF ve görseller **Taranmış PDF / görsel → görü modeli** satırında sayılır ve yalnızca **Taranmış PDF ve görselleri görü modeliyle oku** açıksa okunur). Koleksiyondaki tüm videoların transkriptini sırayla çıkarır ve aranabilir indekse ekler. İndeks için Ayarlar → **Kütüphane indeksi** bölümünden bir embedding modeli seçilmelidir (LM Studio'da indirilmiş olması yeterli; ilk istekte yüklenir). Transkript ~90 saniyelik parçalara bölünür ve her parça vektöre çevrilir; seçilmezse yalnızca transkript çıkarılır. Açılan pencere videoları yoklar ve gruplara ayırır: **Zaten hazır** (tekrar işlenmez), **Yalnızca özeti eksik**, **Yalnızca indekslenecek** (transkript var, indeks yok), **Gömülü altyazıdan** (hızlı; şarkı/yazı izleri atlanır) ve **Altyazı yok → Whisper** (toplam ses süresiyle). Whisper yalnızca bu penceredeki **Altyazısız videolarda Whisper kullan** anahtarı açıksa çalışır; kapalıysa bu videolar atlanır ve tabloda **Altyazı yok · Whisper bekliyor** olarak görünür. Sıra: önce altyazılı videolar, sonra Whisper.
   - Çalışırken tablonun üstündeki şerit ilerlemeyi gösterir; satırlarda **Sırada**, **İşleniyor…**, **Whisper %42** gibi durumlar görünür. **Duraklat** sıradaki videodan önce bekler (Whisper bir videoyu bitirmeden durmaz); **Durdur** işi keser, yarım kalan video bir sonraki sefere baştan yapılır. Hazırlanan transkriptler önbelleğe yazılır; videoya çift tıklayınca beklemeden kullanılır.
   - **Dosya özetleri ve koleksiyon özeti çıkar** (varsayılan açık): her videonun ve belgenin genel özeti sohbet modeliyle çıkarılır (videoya çift tıklayınca açılan ekrandaki özetle aynıdır; orada tekrar beklenmez), en sonda bu özetlerden **koleksiyon özeti** üretilir. Video başına birkaç model isteği yapılır; uzun videolarda önce bölüm özetleri çıkarıldığı için dakikalar sürebilir. Kapalıysa yalnızca transkript ve indeks hazırlanır.
   - Hata veren videolar (ör. seste konuşma yoksa) atlanır ve sonunda listelenir; ayrıntılar Altyazı Çevir sekmesindeki konsoldadır.
-- **Koleksiyona sor (sağ panel):** Koleksiyondaki **Hazır** (indeksli) videoların hepsine birden soru sorarsınız. Soru önce indekste aranır, en ilgili transkript parçaları sohbet modeline verilir; cevap Türkçedir ve iddialar `V3 12:34` gibi atıflarla desteklenir (V3 = koleksiyondaki 3. dosya). Cevabın altındaki **Kaynaklar** satırı hangi videonun kaç kez kaynak gösterildiğini listeler.
-  - Atfa tıklayınca o video oynatıcıda açılır ve o ana gider; geri düğmesiyle sohbete dönersiniz, sohbet kaybolmaz.
+- **Koleksiyona sor (sağ panel; kapatılırsa üst çubuktaki Koleksiyona sor düğmesiyle açılır):** Koleksiyondaki **Hazır** (indeksli) videoların hepsine birden soru sorarsınız. Soru önce indekste aranır, en ilgili transkript parçaları sohbet modeline verilir; cevap Türkçedir ve iddialar `V3 12:34` gibi atıflarla desteklenir (V3 = koleksiyondaki 3. dosya). Cevabın altındaki **Kaynaklar** satırı hangi videonun kaç kez kaynak gösterildiğini listeler.
+  - Atfa tıklayınca o video oynatıcıda açılır ve o ana gider; **‹** düğmesiyle sohbete dönersiniz, sohbet kaybolmaz.
   - **Kapsam:** **Tüm koleksiyon** ya da **Seçili dosyalar** (tabloda seçtiğiniz satırlar). Henüz hazır olmayan dosyalar cevaba dahil edilmez; panelin altındaki not kaç dosyanın beklediğini söyler.
   - Önceki sorular hatırlanır; "peki neden?" gibi devam soruları çalışır. Her koleksiyonun sohbeti ayrıdır ve `library\` klasörüne kaydedilir (son 50 soru); uygulama yeniden açılınca kaldığı yerden devam eder. Panelin sağ üstündeki çöp kutusu sohbeti ve kaydını siler; koleksiyon silinince sohbeti de silinir.
   - Soru-cevap için Ayarlar'daki **Soru-cevap modeli** (boşsa analiz modeli), arama için embedding modeli kullanılır; ikisi de LM Studio'da aynı adresten çalışır. Koleksiyon özeti çıkarıldıysa sohbetin başında bir kartta görünür (genel özet, konular ve tıklanınca sorulan önerilen sorular); bu özet ve video özetleri her soruda modele de verilir, böylece "bu derslerde neler anlatılıyor?" gibi genel sorular da bütün koleksiyona göre cevaplanır. Özet yoksa genel sorular yalnızca soruya en yakın parçalarla cevaplanır.
@@ -287,6 +291,24 @@ Video hakkında yerel modelle soru sormanızı sağlar: solda video oynatıcı, 
 - **Sesten (Whisper):** Whisper transkripti varsa seçilebilir; yoksa **Sesten oluştur...** ile çıkarılır. Birden fazla ses parçası varsa **Sesten oluştur** alt menüsünden Whisper'a gidecek parça seçilir.
 
 ASS altyazılarda stil ve konum gösterilmez, yalnızca metin görünür. Ekranda gösterilen altyazı ile soru-cevabın kullandığı transkript birbirinden bağımsızdır.
+
+**Oynatıcı kısayolları:** Boşluk oynat/duraklat, ←/→ 5 saniye, **F** ya da videoya çift tıklama tam ekran. Arama çubuğunun üzerine gelince zaman ve bölüm adı görünür. Sayfadan çıkıp aynı videoya dönünce kaldığı yerden açılır.
+
+**Belgeler:** PDF sayfaları uygulama içinde gösterilir (sayfa gezinme, yakınlaştırma); diğer belgeler sayfa başlıklarıyla düz metin olarak açılır. Sağdaki **Bu belgeye sor** cevaplarındaki `s.N` atfı belgeyi o sayfaya götürür. **Varsayılan uygulamada aç** dosyayı bilgisayarınızdaki programla açar.
+
+### 3.7 Görünüm ve temalar
+**Ayarlar → Görünüm** bölümünde tema önizlemeleriyle seçilir:
+- **Sistem:** Windows/Linux'un açık-koyu tercihini izler.
+- **Koyu / Açık:** Aktar'ın yerleşik temaları.
+- **Hazır temalar:** Acid, Apricot Dawn, Apricot Dusk, Celadon Dune, Cossack, Etruscan Night, Mossfire, Oled, Sepia Ember. İlk açılışta uygulama klasöründeki `themes\` klasörüne bir kez yazılır; silerseniz geri gelmez, düzenlerseniz üzerine yazılmaz.
+
+Kendi temanızı yapmak için `themes\` klasörüne bir `.json` dosyası koyun (**Temalar klasörünü aç** düğmesi klasörü açar, **Yeniden yükle** listeyi yeniler). Dosya bir temel (`dark` ya da `light`) ve değiştirmek istediğiniz renkleri içerir; verilmeyen renkler temelden gelir:
+
+```json
+{"base": "dark", "colors": {"accent": "#a238ff", "accent_hover": "#b55cff", "on_accent": "#ffffff"}}
+```
+
+Renk adları: `window`, `panel`, `surface`, `surface_hover`, `surface_active`, `outline`, `text`, `secondary`, `dim`, `accent`, `accent_hover`, `on_accent`, `danger`, `warning`, `overlay`, `shadow`. Renkler `#RRGGBB` ya da saydamlıkla `#RRGGBBAA` olarak yazılır. Deeverse'in tema dosyaları aynen çalışır. Bozuk dosyalar listede **Bozuk dosya** olarak görünür ve seçilemez.
 
 ---
 
@@ -380,7 +402,7 @@ Başarılı olunca konsolda `cihaz: cuda` yazar. GPU'suz bilgisayarda Ayarlar'da
 Derlenmiş `Aktar.exe` (Linux'ta `Aktar`) kullanıyorsunuz ve yanında `aktar-whisper` klasörü yok. 1.5'teki "Derlenmiş .exe ile" adımlarını izleyin. Paket varsa ama hata veriyorsa mesajın sonundaki ayrıntıya bakın; paketin kendi hata çıktısı oraya eklenir.
 
 ### 6.13 Soru Sor: video oynatılmıyor
-Oynatıcı Qt Multimedia'nın FFmpeg altyapısını kullanır. Hata mesajı sohbet alanına yazılır. Videonun başka bir oynatıcıda açıldığını kontrol edin. Soru-cevap ve altyazı çıkarma oynatma olmadan da çalışır.
+MP4/WebM (H.264, VP9, AV1 + AAC/MP3/Opus) videolar doğrudan oynatılır. Diğerleri (MKV, AVI, AC3/DTS ses, ikinci ses parçası) FFmpeg ile anında dönüştürülür; oynatıcıda **dönüştürülerek** rozeti görünür. Görüntü kopyalanır, yalnızca ses AAC'ye çevrilir; tarayıcı görüntüyü de çözemezse (ör. 10 bit H.264, HEVC, MPEG-4) görüntü x264 ile yeniden kodlanır ve işlemci kullanımı artar. Dönüştürülen videoda indirilmiş kısımda anında sarılır; daha ileriye sarınca akış o andan yeniden başlar (bir-iki saniye bekleme). Hata mesajı videonun üzerinde görünür. FFmpeg'in (`bin\ffmpeg.exe`) bulunduğunu kontrol edin. Linux'ta `gstreamer1.0-libav` kurulu olmalıdır. Soru-cevap ve altyazı çıkarma oynatma olmadan da çalışır.
 
 ---
 

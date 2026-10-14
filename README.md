@@ -11,7 +11,7 @@ Video dosyalarındaki **metin tabanlı altyazıları** çıkarıp, **yerel bir y
 
 > **Gizlilik:** Hiçbir veri internet üzerinden gönderilmez. Çeviri ve soru-cevap tamamen yerel ağdaki LM Studio sunucusunda (`127.0.0.1`) yapılır. Kaynak video dosyası **salt-okunur** kabul edilir; kopyalanmaz, taşınmaz, değiştirilmez veya yeniden encode edilmez.
 
-> **English:** Aktar is a cross-platform (Windows, Linux) PySide6 desktop app (with a companion CLI) that extracts text subtitles from video files and translates them to Turkish with a local LLM served by LM Studio. Everything runs locally and the source video is treated as read-only. The program preserves subtitle structure, timings, order and ASS tags — while the model only ever sees plain text, and it enforces a glossary for consistent terminology across episodes. The **Library** home page groups folders and videos into named collections (rescanned on open); opening a video gives a built-in player plus a chat that answers questions about your own videos with clickable timestamp citations, using embedded subtitles or optional local speech-to-text (faster-whisper).
+> **English:** Aktar is a cross-platform (Windows, Linux) desktop app (pywebview window with a themeable Svelte interface, plus a companion CLI) that extracts text subtitles from video files and translates them to Turkish with a local LLM served by LM Studio. Everything runs locally and the source video is treated as read-only. The program preserves subtitle structure, timings, order and ASS tags — while the model only ever sees plain text, and it enforces a glossary for consistent terminology across episodes. The **Library** home page groups folders and videos into named collections (rescanned on open); opening a video gives a built-in player plus a chat that answers questions about your own videos with clickable timestamp citations, using embedded subtitles or optional local speech-to-text (faster-whisper).
 
 ---
 
@@ -26,6 +26,8 @@ Video dosyalarındaki **metin tabanlı altyazıları** çıkarıp, **yerel bir y
 - **Videoya soru sor (Kütüphane → video):** Yerleşik oynatıcının yanında videonun içeriği hakkında yerel modelle sohbet eder; özet gibi genel sorular da belirli ayrıntılar da cevaplanır. Cevaptaki `12:34` atıflarına tıklayınca video o ana gider. Uzun videolarda bölüm bölüm "video haritası" çıkarılır.
 - **Altyazısız videolar için konuşmadan metin (isteğe bağlı):** faster-whisper ile ses yerelde metne çevrilir; sonuç hem soru-cevapta hem oynatıcıda altyazı olarak kullanılır. NVIDIA GPU varsa hızlandırılır.
 - **Oynatıcıda altyazı seçimi:** Videodaki akışlar, video klasöründeki altyazı dosyaları (Aktar'ın `_TR` çevirisi dahil) ve Whisper transkripti CC menüsünden seçilip izlenebilir.
+- **Temalar:** Koyu, açık ya da sistemle uyumlu görünüm ve hazır renk temaları (Acid, Oled, Sepia Ember…). `themes\` klasörüne kendi temanızı koyabilirsiniz; Deeverse tema dosyaları aynen çalışır.
+- **Her videoyu oynatır:** Tarayıcının çalamadığı biçimler (MKV, AC3/DTS ses, ikinci ses parçası) FFmpeg ile anında dönüştürülerek oynatılır; kaynak dosyaya dokunulmaz.
 - **Türkçe karakter güvenliği:** Kaynak ASS/SSA fontu Türkçe harfleri (`ç ğ ı İ ö ş ü`) çizemiyorsa çıktıda o font otomatik olarak **Calibri** ile değiştirilir.
 
 ---
@@ -34,7 +36,8 @@ Video dosyalarındaki **metin tabanlı altyazıları** çıkarıp, **yerel bir y
 
 - **Windows 10/11** veya **Linux** (Debian, Ubuntu, Fedora…; KDE Plasma/GNOME, Wayland veya X11). Linux kurulumu için aşağıdaki **Linux** bölümüne bakın.
 - **Python 3.10+** (kaynak koddan çalıştırma için).
-- **PySide6** (arayüz).
+- **Python paketleri:** pywebview (pencere; Windows'ta WebView2, Linux'ta WebKitGTK), pypdfium2 ve Pillow (PDF ve görseller) — `requirements.txt`.
+- **Node.js** (yalnızca kaynak koddan çalıştırırken ve derlerken; arayüz Svelte ile yazıldı, `GUI_BASLAT.cmd` her açılışta derler). Windows 10/11'de WebView2 hazır gelir.
 - **FFmpeg / ffprobe:** `bin\ffmpeg.exe` ve `bin\ffprobe.exe` olarak taşınabilir şekilde projeye konur(daha fazla bilgi için bin klasöründe  **[README.txt](bin/README.txt)** 'i okuyabilirsiniz).
 - **LM Studio:** yerel sunucu açık olmalı (varsayılan `http://127.0.0.1:1234/v1`) ve bir model yüklü olmalı. Soru Sor için modelin bağlam uzunluğu en az ~12k token önerilir.
 - **İsteğe bağlı — faster-whisper:** altyazısız videolarda konuşmadan metin için. Kaynak koddan çalışırken `requirements-whisper.txt`; derlenmiş .exe ile `DERLE_WHISPER.cmd`'nin ürettiği ayrı `aktar-whisper` paketi. GPU için cuBLAS 12 / cuDNN 9; başka programlarla ortak kullandığınız bir klasör varsa Ayarlar'dan gösterilebilir. Bkz. KULLANIM.md 1.5.
@@ -59,12 +62,13 @@ GUI_BASLAT.cmd
 ```
 
 4. Açılan **Kütüphane** sayfasına bir klasör veya video sürükleyin; koleksiyon oluşur. Videoya çift tıklayınca oynatıcı ve soru-cevap açılır.
-5. Altyazı çevirmek için başlık şeridinden **Altyazı Çevir** sekmesine geçin (ya da tablodaki videoya sağ tıklayıp **Altyazıyı çevir…**): videoyu sürükleyin → altyazı akışını işaretleyin → **Çevir**.
+5. Altyazı çevirmek için sol menüden **Altyazı Çevir** sayfasına geçin (ya da tablodaki videoya sağ tıklayıp **Altyazıyı çevir…**): videoyu sürükleyin → altyazı akışını işaretleyin → **Çevir**.
 
 ### Linux (Debian, Ubuntu, KDE Plasma…)
 
 ```bash
-sudo apt install python3-venv ffmpeg fontconfig libxcb-cursor0
+sudo apt install python3-venv python3-gi gir1.2-webkit2-4.1 nodejs npm ffmpeg fontconfig \
+                 gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
 ./kur.sh --kisayol
 ./baslat.sh
 ```

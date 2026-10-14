@@ -1,0 +1,104 @@
+// pywebview olmadan (duz tarayicida `npm run dev`) arayuzu gelistirmek icin sahte arka uc.
+const BASE = {
+  dark: { window: '#0f1114', panel: '#15181c', surface: '#1d2127', surface_hover: '#262b33', surface_active: '#2f353f', outline: '#2a3038', text: '#f2f4f6', secondary: '#a9b1bc', dim: '#6e7784', accent: '#c8ff00', accent_hover: '#d6ff3d', on_accent: '#0a1200', danger: '#f5717f', warning: '#f2b85c', overlay: '#22272e', shadow: '#0000008c' },
+  light: { window: '#f8f9fb', panel: '#ffffff', surface: '#eef0f3', surface_hover: '#e3e6eb', surface_active: '#d7dbe1', outline: '#dde1e6', text: '#14171a', secondary: '#535b66', dim: '#8b939e', accent: '#4d7c0f', accent_hover: '#3f6212', on_accent: '#ffffff', danger: '#d63b4c', warning: '#b87a14', overlay: '#ffffff', shadow: '#0000002d' },
+};
+const PRESETS = import.meta.glob('../../../assets/themes/*.json', { eager: true, import: 'default' });
+
+function themes() {
+  const list = [
+    { id: 'dark', name: 'Koyu', base: 'dark', palette: BASE.dark, file: '' },
+    { id: 'light', name: 'Açık', base: 'light', palette: BASE.light, file: '' },
+  ];
+  for (const [path, data] of Object.entries(PRESETS)) {
+    const file = path.split('/').pop();
+    list.push({ id: 'file:' + file, name: file.replace(/\.json$/, ''), base: data.base, palette: { ...BASE[data.base], ...data.colors }, file });
+  }
+  return list;
+}
+
+export function createMock(emit) {
+  const settings = {
+    base_url: 'http://127.0.0.1:1234/v1', model: 'gemma-4-26b-a4b-it-qat@q4_k_xl', batch_cues: 10, max_tokens: 8192,
+    temperature: 0.2, timeout_seconds: 1800, auto_retry_count: 2, glossary_strict: false, analysis_chunk_chars: 12000,
+    qa_context_chars: 24000, whisper_model: 'large-v3-turbo', whisper_device: 'auto', whisper_language: '', whisper_cuda_dir: '',
+    embedding_model: 'text-embedding-embeddinggemma-2', vision_model: '', qa_model: '', ocr_engine: 'auto', ocr_model: '',
+    tesseract_path: '', tesseract_lang: 'tur+eng', disable_thinking: true,
+  };
+  let prefs = { theme: 'system' };
+  let translate = {
+    video: { path: 'D:\Diziler\One Step Beyond - S00E01 - Extended Pilot.mkv', name: 'One Step Beyond - S00E01 - Extended Pilot.mkv', folder: 'D:\Diziler' },
+    streams: [
+      { index: 2, codec: 'ass', language: 'eng', title: 'English subs', supported: true, image: false, extension: 'ass' },
+      { index: 3, codec: 'subrip', language: 'jpn', title: 'Signs', supported: true, image: false, extension: 'srt' },
+      { index: 4, codec: 'hdmv_pgs_subtitle', language: 'eng', title: 'Blu-ray', supported: false, image: true, extension: '' },
+    ],
+    probing: false, series: [{ slug: 'one-step-beyond', title: 'One Step Beyond' }], series_slug: 'one-step-beyond',
+    chapter_glossary: [], analysis: '', running: false, paused: false, progress: { done: 80, total: 375 },
+  };
+  const row = (name, kind, where, length, source, status, extra = {}) => ({
+    key: name, path: 'D:/Dersler/' + name, name, kind, where, folder: 'D:/Dersler/' + where, length, measured: length !== '—',
+    source, status, status_text: { ready: 'Hazır', transcript: 'Metin hazır', pending: 'Bekliyor', no_subtitle: 'Altyazı yok · Whisper bekliyor', missing: 'Bulunamadı' }[status],
+    new: false, missing: status === 'missing', ...extra });
+  const library = {
+    collections: [{ slug: 'ml', title: 'Makine Öğrenmesi', folders: 2, files: 0 }, { slug: 'kilavuz', title: 'Kullanım Kılavuzları', folders: 1, files: 3 }],
+    slug: 'ml', title: 'Makine Öğrenmesi', scanning: false, kinds: {},
+    folders: [{ path: 'D:/Dersler/ML', name: 'ML', count: 6 }, { path: 'D:/Dersler/Notlar', name: 'Notlar', count: 2 }],
+    meta: '8 dosya · 5 hazır · 1 bekliyor · 1 Whisper bekliyor · 1 bulunamadı',
+    queue: null,
+    rows: [
+      row('01 Doğrusal Regresyon.mkv', 'video', 'ML', '24:13', 'Altyazı · tur', 'ready'),
+      row('02 Lojistik Regresyon.mkv', 'video', 'ML', '31:02', 'Altyazı · eng', 'ready'),
+      row('03 Gradyan İnişi.mp4', 'video', 'ML', '18:40', 'Whisper · large-v3-turbo', 'ready'),
+      row('04 Aşırı Öğrenme.mkv', 'video', 'ML', '27:55', '', 'pending', { new: true }),
+      row('05 Düzenlileştirme.mp4', 'video', 'ML', '22:10', '', 'no_subtitle'),
+      row('06 Karar Ağaçları.mkv', 'video', 'ML', '—', '', 'missing'),
+      row('Ders notları.pdf', 'document', 'Notlar', '42 sayfa', 'PDF metni', 'ready'),
+      row('Tahta.jpg', 'image', 'Notlar', '1.2 MB', 'Görsel', 'transcript'),
+    ],
+  };
+  const chat = {
+    slug: 'ml', busy: false, enabled: true, note: '5 hazır dosya · 3 dosya henüz hazır değil',
+    overview: { summary: 'Bu koleksiyon denetimli öğrenmenin temellerini doğrusal regresyondan karar ağaçlarına kadar adım adım anlatıyor.', topics: ['Regresyon', 'Gradyan inişi', 'Aşırı öğrenme'], questions: ['Gradyan inişi nasıl çalışır?', 'Aşırı öğrenme nasıl önlenir?'], videos: 5 },
+    entries: [
+      { kind: 'user', text: 'Öğrenme oranı çok büyük seçilirse ne olur?' },
+      { kind: 'assistant', parts: [
+        { type: 'text', text: 'Öğrenme oranı çok büyükse gradyan inişi minimumun etrafında **salınır** ve hatta ıraksayabilir ' },
+        { type: 'cite', items: [{ path: 'x', start: 754, label: 'V3 12:34', title: '03 Gradyan İnişi' }] },
+        { type: 'text', text: '. Küçük değerlerde ise yakınsama yavaşlar ' },
+        { type: 'cite', items: [{ path: 'x', start: 70, label: 'V1 1:10', title: '01 Doğrusal Regresyon' }, { path: 'y', start: 12, label: 'V7 s.12', title: 'Ders notları' }] },
+        { type: 'text', text: '.' }],
+        sources: [{ path: 'x', start: 754, label: 'V3', title: '03 Gradyan İnişi', count: 1 }, { path: 'x', start: 70, label: 'V1', title: '01 Doğrusal Regresyon', count: 1 }, { path: 'y', start: 12, label: 'V7', title: 'Ders notları', count: 1 }] },
+    ],
+  };
+  setTimeout(() => {
+    for (const line of ['Video açıldı: D:\Diziler\One Step Beyond - S00E01 - Extended Pilot.mkv', 'Çeviri partisi 6/38 (10 çeviri birimi)', 'BİLGİ: model satır sayısını değiştirdi (beklenen 2, bulunan 1).', 'Çeviri partisi 7/38 (10 çeviri birimi)'])
+      emit('log', { line: '[10:42:0' + Math.floor(Math.random() * 9) + '] ' + line });
+  }, 300);
+  const api = {
+    library_open: async () => library,
+    library_state: async () => library,
+    chat_state: async () => chat,
+    library_search: async (q) => ({ query: q, keys: library.rows.slice(0, 3).map((r) => r.key), files: 2, limited: false, searched: q.length >= 3,
+      hits: [{ path: 'x', name: '03 Gradyan İnişi', start: 754, where: '12:34', text: 'öğrenme oranını küçültünce adımlar da küçülüyor' }, { path: 'y', name: 'Ders notları', start: 12, where: 's.12', text: 'Öğrenme oranı (learning rate) seçimi' }] }),
+    prepare_plan: async () => { setTimeout(() => emit('prepare', { counts: { ready: 4, summary: 1, index: 0, document: 0, subtitle: 1, vision: 0, whisper: 1 }, whisper_seconds: '22:10', vision_pages: 0, failed: [] }), 700); return { files: 7, model: settings.model, whisper: true, whisper_model: 'large-v3-turbo', whisper_device: 'auto', vision_model: settings.model, warnings: [] }; },
+    startup: async () => ({ prefs, themes: themes(), translate, library, models: { state: 'ok', names: ['gemma-4-26b-a4b-it-qat@q4_k_xl', 'qwen3-8b', 'text-embedding-embeddinggemma-2', 'glm-ocr'], model: settings.model, message: '' }, platform: 'windows', open: [] }),
+    ui_prefs: async () => prefs,
+    save_ui_prefs: async (values) => (prefs = { ...prefs, ...values }),
+    list_themes: async () => themes(),
+    refresh_models: async () => true,
+    get_settings: async () => ({ config: { ...settings }, defaults: { ...settings }, locked: [], whisper_models: ['large-v3-turbo', 'large-v3', 'medium', 'small', 'base'], ocr_engines: [{ id: 'auto', label: 'Otomatik (Tesseract > OCR modeli > görü modeli)' }, { id: 'tesseract', label: 'Tesseract (yerel)' }, { id: 'model', label: 'OCR modeli (LM Studio)' }, { id: 'vision', label: 'Görü modeli' }], cuda_markers: [] }),
+    save_settings: async (values) => ({ config: Object.assign(settings, values) }),
+    check_tesseract: async () => ({ found: 'C:\Program Files\Tesseract-OCR\tesseract.exe' }),
+    check_cuda_dir: async () => ({ message: '' }),
+    window_state: async () => ({ custom: true, maximized: false }),
+    window_command: async () => true,
+    translate_state: async () => translate,
+    set_series: async (slug) => ({ ...translate, series_slug: slug }),
+    series_data: async () => ({ slug: 'one-step-beyond', title: 'One Step Beyond', glossary: [{ source: 'Bridge of the Ancients', target: 'Kadimlerin Köprüsü' }], decisions: ['Karakterler birbirine "sen" der.'] }),
+    guess_series_title: async () => 'One Step Beyond',
+    start_translation: async () => ({ ...translate, running: true }),
+  };
+  // 'then' tanimsiz kalmali: yoksa Promise bu nesneyi "thenable" sanip hic cozulmez.
+  return new Proxy(api, { get: (target, name) => (name === 'then' ? undefined : target[name] ?? (async () => null)) });
+}

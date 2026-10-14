@@ -1,6 +1,6 @@
 """Kutuphane: adlandirilmis koleksiyonlar ve kaynak klasor taramasi.
 
-Qt'den bagimsizdir; library_panel.py ve testler ayni mantigi kullanir.
+Arayuzden bagimsizdir; bridge_library.py ve testler ayni mantigi kullanir.
 Koleksiyon = kaynak klasorler (alt klasorler dahil) + tek tek eklenen dosyalar
 - cikarilan dosyalar. Depo: uygulama dizini altindaki `library/<slug>.json`.
 
