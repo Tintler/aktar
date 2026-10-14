@@ -469,3 +469,32 @@ class TesseractTests(unittest.TestCase):
             validate_config(dict(DEFAULT_CONFIG, ocr_engine='abbyy'))
         with self.assertRaises(ValueError):
             validate_config(dict(DEFAULT_CONFIG, tesseract_lang='tur; rm'))
+
+    def test_pages_are_read_in_parallel_and_resume_after_stop(self):
+        import threading
+        import time
+        from app_core import GracefulStop
+        renderer = mock.Mock()
+        renderer.png.side_effect = lambda page, gray=False: f'{page}:{gray}'.encode()
+        state = {'active': 0, 'peak': 0}
+        lock = threading.Lock()
+
+        def ocr(png, prompt):
+            with lock:
+                state['active'] += 1
+                state['peak'] = max(state['peak'], state['active'])
+            time.sleep(0.05)
+            with lock:
+                state['active'] -= 1
+            return png.decode()
+        ocr.workers, ocr.grayscale = 4, True
+        done, seen = {}, []
+        with mock.patch.object(documents, 'PdfRenderer', return_value=renderer):
+            with self.assertRaises(GracefulStop):
+                documents._ocr_pages('x.pdf', list(range(1, 21)), ocr, done,
+                                     lambda i, n: seen.append(i), lambda: len(seen) >= 3)
+            self.assertLess(len(done), 20)
+            documents._ocr_pages('x.pdf', list(range(1, 21)), ocr, done)
+        self.assertEqual(done, {str(n): f'{n - 1}:True' for n in range(1, 21)})
+        self.assertGreater(state['peak'], 1)
+        self.assertEqual(renderer.close.call_count, 2)

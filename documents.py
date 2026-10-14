@@ -306,34 +306,51 @@ def epub_pages(path):
     return pages or ['']
 
 
-def _png(image):
+def _png(image, quality=-1):
     from PySide6.QtCore import QBuffer
     buffer = QBuffer()
     buffer.open(QBuffer.WriteOnly)
-    image.save(buffer, 'PNG')
+    image.save(buffer, 'PNG', quality)
     return bytes(buffer.data())
 
 
-def render_pdf_page(path, page):
-    """PDF sayfasinin beyaz zeminli PNG goruntusu (QtPdf seffaf cizer; model siyah gorur)."""
-    from PySide6.QtCore import QSize
-    from PySide6.QtGui import QColor, QImage, QPainter
-    from PySide6.QtPdf import QPdfDocument
-    document = QPdfDocument(None)
-    try:
-        document.load(str(path))
-        size = document.pagePointSize(page)
+class PdfRenderer:
+    """PDF bir kez acilir, sayfalar sirayla cizilir (her sayfada yeniden yukleme yok)."""
+
+    def __init__(self, path):
+        from PySide6.QtPdf import QPdfDocument
+        self.document = QPdfDocument(None)
+        self.document.load(str(path))
+
+    def png(self, page, gray=False):
+        """Beyaz zeminli PNG (QtPdf seffaf cizer; model siyah gorur). `gray`: Tesseract icin
+        gri tonlu ve az sikistirilmis; kodlama ~10 kat hizli."""
+        from PySide6.QtCore import QSize
+        from PySide6.QtGui import QColor, QImage, QPainter
+        size = self.document.pagePointSize(page)
         scale = RENDER_LONG_SIDE / max(size.width(), size.height(), 1.0)
         target = QSize(max(1, int(size.width() * scale)), max(1, int(size.height() * scale)))
-        rendered = document.render(page, target)
+        rendered = self.document.render(page, target)
+        image = QImage(rendered.size(), QImage.Format_RGB32)
+        image.fill(QColor('white'))
+        painter = QPainter(image)
+        painter.drawImage(0, 0, rendered)
+        painter.end()
+        if gray:
+            return _png(image.convertToFormat(QImage.Format_Grayscale8), 90)
+        return _png(image)
+
+    def close(self):
+        self.document.close()
+
+
+def render_pdf_page(path, page):
+    """PDF sayfasinin beyaz zeminli PNG goruntusu."""
+    renderer = PdfRenderer(path)
+    try:
+        return renderer.png(page)
     finally:
-        document.close()
-    image = QImage(rendered.size(), QImage.Format_RGB32)
-    image.fill(QColor('white'))
-    painter = QPainter(image)
-    painter.drawImage(0, 0, rendered)
-    painter.end()
-    return _png(image)
+        renderer.close()
 
 
 def image_bytes(path):
@@ -376,8 +393,15 @@ def tesseract_path(cfg=None):
     return next((str(item) for item in candidates if item.is_file()), None)
 
 
+def tesseract_workers():
+    """Ayni anda calisan Tesseract sayisi: bir-iki cekirdek arayuze kalir, en fazla 8."""
+    import os
+    return max(1, min(8, (os.cpu_count() or 2) - 2))
+
+
 def tesseract_reader(cfg, log=print):
     """(png) -> metin; Tesseract yoksa anlasilir hata. Turkce dil verisi yoksa 'eng'e duser."""
+    import os
     import subprocess
     import tempfile
     exe = tesseract_path(cfg)
@@ -400,12 +424,17 @@ def tesseract_reader(cfg, log=print):
     elif len(langs) < len(wanted.split('+')):
         log(f'UYARI: Tesseract\'ta eksik dil verisi; kullanılan: {"+".join(langs)}')
 
+    # Sayfalar paralel okunur (bkz. _ocr_pages); her Tesseract tek cekirdek kullanir,
+    # yoksa kendi is parcaciklari birbirini yavaslatir.
+    env = dict(os.environ, OMP_THREAD_LIMIT='1')
+
     def read(png):
         with tempfile.TemporaryDirectory() as folder:
             image = Path(folder) / 'sayfa.png'
             image.write_bytes(png)
             result = subprocess.run([exe, str(image), 'stdout', '-l', '+'.join(langs),
-                                     '--psm', '3'], capture_output=True, timeout=600, **hide)
+                                     '--psm', '3'], capture_output=True, timeout=600,
+                                    env=env, **hide)
         if result.returncode != 0:
             raise ValueError('Tesseract hatası: '
                              + result.stderr.decode('utf-8', 'replace').strip()[:200])
@@ -664,16 +693,10 @@ def extract(path, ocr=None, progress=None, cancelled=None, done=None):
         missing = [number for number, text in enumerate(pages, 1)
                    if len(' '.join(text.split())) < OCR_MIN_CHARS]
         done = {} if done is None else done
-        for index, number in enumerate(missing, 1):
-            if cancelled and cancelled():
-                from app_core import GracefulStop
-                raise GracefulStop('Görsel okuma durduruldu; okunan sayfalar kaydedildi.')
-            if str(number) not in done:
-                done[str(number)] = ocr(render_pdf_page(path, number - 1), OCR_PROMPT)
+        _ocr_pages(path, missing, ocr, done, progress, cancelled)
+        for number in missing:
             pages[number - 1] = done[str(number)]
             read += 1
-            if progress:
-                progress(index, len(missing))
     segments = _segments(pages)
     segments = [{'start': float(number), 'end': float(number), 'text': paragraph}
                 for number, text in enumerate(pages, 1) for paragraph in paragraphs(text)]
@@ -681,6 +704,51 @@ def extract(path, ocr=None, progress=None, cancelled=None, done=None):
         raise NoTextError('Belgede okunabilir metin yok' + (
             ' (taranmış PDF olabilir; görü modeliyle okunmadı).' if kind == 'pdf' else '.'))
     return len(pages), segments, read
+
+
+def _ocr_pages(path, missing, ocr, done, progress=None, cancelled=None):
+    """Eksik sayfalari `ocr` ile okuyup `done`a yazar. Sayfalar bu is parcaciginda cizilir,
+    okuma `ocr.workers` kadar paralel yapilir (Tesseract: cekirdek sayisi; gorsel model: 1).
+    Durdurulunca baslamamis sayfalar iptal edilir, okunanlar `done`da kalir."""
+    from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+    workers = max(1, int(getattr(ocr, 'workers', 1)))
+    gray = bool(getattr(ocr, 'grayscale', False))
+    total = len(missing)
+    finished = sum(1 for number in missing if str(number) in done)
+    todo = iter([number for number in missing if str(number) not in done])
+    if progress and finished:
+        progress(finished, total)
+    renderer = PdfRenderer(path) if finished < total else None
+    pool = ThreadPoolExecutor(workers)
+    running = {}
+    stopped = False
+    try:
+        while True:
+            stopped = stopped or bool(cancelled and cancelled())
+            while not stopped and len(running) < workers * 2:
+                number = next(todo, None)
+                if number is None:
+                    break
+                running[pool.submit(ocr, renderer.png(number - 1, gray), OCR_PROMPT)] = number
+            if stopped:
+                for future in [item for item in running if item.cancel()]:
+                    del running[future]
+            if not running:
+                break
+            completed, _pending = wait(running, return_when=FIRST_COMPLETED)
+            for future in completed:
+                number = running.pop(future)
+                done[str(number)] = future.result()
+                finished += 1
+                if progress:
+                    progress(finished, total)
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
+        if renderer is not None:
+            renderer.close()
+    if stopped:
+        from app_core import GracefulStop
+        raise GracefulStop('Görsel okuma durduruldu; okunan sayfalar kaydedildi.')
 
 
 def _segments(pages):

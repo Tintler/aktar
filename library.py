@@ -588,12 +588,16 @@ def vision_reader(cfg, log=print):
     client = Client(cfg, log=log)
     retries = int(cfg.get('auto_retry_count', 2))
 
+    import threading
+    use_tesseract = cfg.get('ocr_engine', 'vision') == 'tesseract'
     tesseract = []  # ilk taranmis sayfada kurulur; gorsel okuyan kuyruk Tesseract'siz de calisir
+    lock = threading.Lock()
 
     def read(png, prompt):
-        if cfg.get('ocr_engine', 'vision') == 'tesseract' and prompt == documents.OCR_PROMPT:
-            if not tesseract:
-                tesseract.append(documents.tesseract_reader(cfg, log))
+        if use_tesseract and prompt == documents.OCR_PROMPT:
+            with lock:  # sayfalar paralel okunur; Tesseract bir kez kurulur
+                if not tesseract:
+                    tesseract.append(documents.tesseract_reader(cfg, log))
             return tesseract[0](png)  # F74: taranmis sayfa Tesseract ile; gorseller modelde
         for attempt in range(retries + 1):
             try:
@@ -604,6 +608,9 @@ def vision_reader(cfg, log=print):
                 log(f'Görü isteği başarısız, yeniden deneniyor ({attempt + 1}/{retries}): {error}')
                 time.sleep(VISION_RETRY_SECONDS)
         raise RuntimeError('Görü isteği tamamlanamadı.')
+    # Tesseract: sayfalar paralel ve gri tonlu (hizli) cizilir; gorsel model tek tek.
+    read.workers = documents.tesseract_workers() if use_tesseract else 1
+    read.grayscale = use_tesseract
     return read
 
 
