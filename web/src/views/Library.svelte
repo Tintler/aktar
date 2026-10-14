@@ -2,17 +2,48 @@
   import Icon from '../lib/Icon.svelte';
   import PrepareModal from '../components/PrepareModal.svelte';
   import { app, act, setLibrary, onDrop, toast, runSearch, refreshChat, openInTranslate, openFile } from '../lib/state.svelte.js';
-  import { choose } from '../lib/confirm.svelte.js';
+  import { choose, prompt } from '../lib/confirm.svelte.js';
   import { openMenu } from '../lib/menu.svelte.js';
 
   const lib = $derived(app.library);
   const view = app.libraryView;
   const KIND_ICON = { video: 'film', document: 'fileText', image: 'image' };
 
+  // Ana sayfada birakilan klasor yeni koleksiyon olur; koleksiyon icindeyken ona eklenir.
   onDrop('library', async (paths) => {
-    const state = await act('library_add_paths', paths);
-    if (state) setLibrary(state);
+    const state = await act('library_add_paths', paths, view.home);
+    if (!state) return;
+    setLibrary(state);
+    view.home = false;
   });
+
+  // --- ana sayfa: tum koleksiyonlar ---
+  let cards = $state(null);
+  $effect(() => {
+    lib.collections;
+    if (view.home) act('library_overview').then((list) => (cards = list ?? []));
+  });
+
+  async function openCollection(slug) {
+    view.home = false;
+    if (slug !== lib.slug) setLibrary(await act('library_open', slug));
+  }
+
+  async function createCollection() {
+    const title = await prompt({ title: 'Yeni koleksiyon', message: 'Koleksiyon adı:', ok: 'Oluştur' });
+    if (!title?.trim()) return;
+    const state = await act('new_collection', title.trim());
+    if (!state) return;
+    setLibrary(state);
+    view.home = false;
+  }
+
+  async function folderAsCollection() {
+    const state = await act('library_choose_folder', true);
+    if (!state) return;
+    setLibrary(state);
+    view.home = false;
+  }
 
   // Arama: her tusta degil, kisa beklemeden sonra (yuzlerce transkript taranir).
   let timer;
@@ -109,7 +140,40 @@
 <svelte:window onkeydown={keydown} />
 
 <section class="page">
-  {#if !lib.slug}
+  {#if view.home && lib.collections.length}
+    <div class="page-head">
+      <h1>Kütüphane</h1>
+      <button class="btn" onclick={folderAsCollection}><Icon name="folderPlus" size={16} />Klasörden koleksiyon</button>
+      <button class="btn primary" onclick={createCollection}><Icon name="plus" size={16} />Yeni koleksiyon</button>
+    </div>
+    <div class="page-body">
+      <p class="lead dim">{lib.collections.length} koleksiyon · bir koleksiyonu açmak için tıklayın. Pencereye bırakılan klasör yeni koleksiyon olur.</p>
+      <div class="grid">
+        {#each cards ?? lib.collections as c (c.slug)}
+          <button class="ccard" onclick={() => openCollection(c.slug)}>
+            <span class="ctop">
+              <span class="cicon"><Icon name="library" size={20} /></span>
+              <span class="ctitle ellipsis" title={c.title}>{c.title}</span>
+            </span>
+            <span class="cmeta">{c.count ?? c.files} dosya · {c.folders} klasör</span>
+            {#if c.summary}
+              <span class="csum">{c.summary}</span>
+            {:else}
+              <span class="csum empty">Henüz özet yok. Koleksiyonu açıp "Hepsini hazırla" ile hazırlayınca burada özeti görünür.</span>
+            {/if}
+            {#if c.topics?.length}
+              <span class="ctopics">{#each c.topics as topic}<span class="badge">{topic}</span>{/each}</span>
+            {/if}
+          </button>
+        {/each}
+        <button class="ccard add" onclick={createCollection}>
+          <span class="cicon"><Icon name="plus" size={22} /></span>
+          <b>Yeni koleksiyon</b>
+          <span class="dim">ya da bir klasörü pencereye bırakın</span>
+        </button>
+      </div>
+    </div>
+  {:else if !lib.slug}
     <div class="page-body center">
       <div class="drop card">
         <span class="tile"><Icon name="folderPlus" size={32} /></span>
@@ -219,6 +283,26 @@
   .drop .note { color: var(--secondary); font-size: 13px; max-width: 520px; line-height: 1.6; margin-top: 8px; }
   .tile { width: 72px; height: 72px; border-radius: 16px; display: grid; place-items: center; background: var(--surface); color: var(--accent); }
 
+  .lead { font-size: 13px; margin: 0 0 18px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+  .ccard { display: flex; flex-direction: column; align-items: stretch; gap: 10px; text-align: left; padding: 18px; min-height: 190px;
+    border-radius: 14px; background: var(--panel); border: 1px solid var(--outline); color: var(--text);
+    transition: border-color .15s, transform .15s, box-shadow .15s; }
+  .ccard:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--outline)); transform: translateY(-2px);
+    box-shadow: 0 10px 28px color-mix(in srgb, var(--shadow) 70%, transparent); }
+  .ctop { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .cicon { width: 40px; height: 40px; border-radius: 10px; flex: none; display: grid; place-items: center; color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, var(--surface)); }
+  .ctitle { font-size: 17px; font-weight: 700; letter-spacing: -.01em; min-width: 0; }
+  .cmeta { font-size: 12.5px; color: var(--secondary); }
+  .csum { width: 100%; text-align: left; font-size: 13px; line-height: 1.55; color: var(--secondary); display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4;
+    -webkit-box-orient: vertical; overflow: hidden; }
+  .csum.empty { color: var(--dim); font-style: italic; }
+  .ctopics { display: flex; flex-wrap: wrap; gap: 4px; margin-top: auto; }
+  .ccard.add { align-items: center; justify-content: center; gap: 8px; border-style: dashed; background: transparent; color: var(--secondary); }
+  .ccard.add:hover { color: var(--text); }
+  .ccard.add b { font-size: 15px; color: var(--text); }
+  .ccard.add .dim { font-size: 12.5px; }
   .hero { display: flex; align-items: flex-end; gap: 24px; padding: 4px 0 20px; }
   .titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
   .titles h1 { font-size: clamp(28px, 3.4vw, 44px); font-weight: 800; letter-spacing: -.03em; line-height: 1.15; }
@@ -234,8 +318,8 @@
 
   .tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
   .search { flex: 1; min-width: 260px; max-width: 460px; height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 6px 0 14px;
-    border-radius: 999px; background: var(--surface); color: var(--secondary); border: 1px solid transparent; }
-  .search:focus-within { border-color: var(--outline); background: var(--surface-hover); }
+    border-radius: 999px; background: var(--surface); color: var(--secondary); border: 1px solid var(--field-border); transition: border-color .15s, box-shadow .15s; }
+  .search:focus-within { border-color: var(--accent); box-shadow: var(--focus-ring); }
   .search input { flex: 1; min-width: 0; background: none; border: 0; outline: none; font-size: 14px; color: var(--text); }
   .search input::placeholder { color: var(--dim); }
   .count { color: var(--dim); margin-left: 4px; }

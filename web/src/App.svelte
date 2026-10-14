@@ -62,7 +62,7 @@
     app.view = history[next];
   }
 
-  const panelOpen = $derived((app.view === 'library' && !!app.library.slug && app.libraryView.chatOpen)
+  const panelOpen = $derived((app.view === 'library' && !!app.library.slug && !app.libraryView.home && app.libraryView.chatOpen)
     || (app.view === 'player' && !!app.player) || (app.view === 'document' && !!app.document));
   const models = $derived(app.models);
   const modelListed = $derived((models.names ?? []).includes(models.model));
@@ -100,7 +100,8 @@
     </div>
     <nav>
       {#each nav as [key, label, icon]}
-        <button class="nav" class:on={active(key)} title={app.sideCollapsed ? label : null} onclick={() => go(key)}>
+        <button class="nav" class:on={active(key)} title={app.sideCollapsed ? label : null}
+          onclick={() => { if (key === 'library') app.libraryView.home = true; go(key); }}>
           <span class="ic"><Icon name={icon} size={22} />{#if key === 'console' && issues > seenIssues}<i class="badge-dot"></i>{/if}</span>
           <span class="label-text">{label}</span>
         </button>
@@ -123,7 +124,7 @@
       <button class="icon-btn filled sm" title="Geri" disabled={position === 0} onclick={() => step(-1)}><Icon name="back" size={16} /></button>
       <button class="icon-btn filled sm" title="İleri" disabled={position >= history.length - 1} onclick={() => step(1)}><Icon name="forward" size={16} /></button>
       <div class="grow"></div>
-      {#if app.view === 'library' && app.library.slug && !app.libraryView.chatOpen}
+      {#if app.view === 'library' && app.library.slug && !app.libraryView.home && !app.libraryView.chatOpen}
         <button class="btn sm" title="Koleksiyona sor panelini aç" onclick={() => (app.libraryView.chatOpen = true)}><Icon name="message" size={15} />Koleksiyona sor</button>
       {/if}
       <button class="icon-btn" class:on={app.view === 'settings'} title="Ayarlar" onclick={() => go('settings')}><Icon name="settings" size={20} /></button>

@@ -65,8 +65,8 @@
 
 <style>
   .search { width: 280px; height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 4px 0 12px; border-radius: 999px;
-    background: var(--surface); color: var(--secondary); border: 1px solid transparent; }
-  .search:focus-within { border-color: var(--outline); }
+    background: var(--surface); color: var(--secondary); border: 1px solid var(--field-border); transition: border-color .15s, box-shadow .15s; }
+  .search:focus-within { border-color: var(--accent); box-shadow: var(--focus-ring); }
   .search input { flex: 1; min-width: 0; background: none; border: 0; outline: none; font-size: 13px; color: var(--text); }
   .search input::placeholder { color: var(--dim); }
   .count { margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 11px; background: var(--danger); color: #fff; }

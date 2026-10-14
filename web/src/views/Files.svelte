@@ -59,6 +59,7 @@
     if (!state) return;
     setLibrary(state);
     toast(`${item.name} koleksiyona eklendi.`, 'ok');
+    app.libraryView.home = false;
     go('library');
   }
 

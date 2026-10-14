@@ -8,6 +8,7 @@
   const lib = $derived(app.library);
 
   async function open(slug) {
+    app.libraryView.home = false;
     go('library');
     if (slug !== lib.slug) setLibrary(await act('library_open', slug));
   }
@@ -16,6 +17,7 @@
     const title = await prompt({ title: 'Yeni koleksiyon', message: 'Koleksiyon adı:', ok: 'Oluştur' });
     if (title?.trim()) {
       setLibrary(await act('new_collection', title.trim()));
+      app.libraryView.home = false;
       go('library');
     }
   }
@@ -57,7 +59,7 @@
 </div>
 <div class="list">
   {#each lib.collections as c (c.slug)}
-    <button class="item" class:on={c.slug === lib.slug && app.view === 'library'} onclick={() => open(c.slug)}
+    <button class="item" class:on={c.slug === lib.slug && app.view === 'library' && !app.libraryView.home} onclick={() => open(c.slug)}
       oncontextmenu={(e) => menu(e, c)}>
       <span class="cover"><Icon name="folder" size={20} /></span>
       <span class="text">

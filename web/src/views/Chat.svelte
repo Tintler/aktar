@@ -160,7 +160,7 @@
     <textarea bind:this={input} bind:value={text} rows="1" oninput={grow} onkeydown={keydown} disabled={!chat || chat.locked}
       placeholder={chat?.locked ? 'Başka bir sohbette cevap hazırlanıyor…' : big ? 'Bir şey sorun ya da konuşmaya başlayın…' : 'Yanıtlayın…'}></textarea>
     <div class="row">
-      <span class="hint dim">{chat?.busy ? 'Cevap yazılıyor…' : 'Enter: gönder · Shift+Enter: yeni satır'}</span>
+      <span class="grow"></span>
       {#if chat?.busy}
         <button class="send stop" type="button" title="Durdur" onclick={() => act('assistant_stop')}><Icon name="stop" size={14} /></button>
       {:else}
@@ -243,12 +243,15 @@
 <style>
   .chat { height: 100%; display: flex; min-height: 0; }
 
-  .convs { width: 250px; flex: none; display: flex; flex-direction: column; gap: 8px; padding: 0 10px 16px 24px; min-height: 0; }
+  /* Sohbet listesi: acik sohbetten ayri, cerceveli bir kart. */
+  .convs { width: 260px; flex: none; display: flex; flex-direction: column; gap: 6px; min-height: 0; margin: 0 0 18px 20px; padding: 10px 8px;
+    border-radius: 14px; border: 1px solid var(--outline); background: color-mix(in srgb, var(--panel) 70%, var(--window)); }
   .new { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 12px; border-radius: 10px; font-weight: 600; font-size: 14px; color: var(--text); }
   .new:hover { background: var(--surface-hover); }
   .new :global(svg) { color: var(--accent); }
   .clist { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 1px; }
   .glabel { font-size: 11.5px; font-weight: 600; color: var(--dim); padding: 14px 12px 6px; }
+  .clist { border-top: 1px solid var(--outline); margin-top: 2px; }
   .conv { display: flex; align-items: center; gap: 6px; padding: 7px 6px 7px 12px; border-radius: 8px; font-size: 13.5px; color: var(--secondary); text-align: left; width: 100%; }
   .conv > span:first-child { flex: 1; min-width: 0; }
   .conv:hover { background: var(--surface-hover); color: var(--text); }
@@ -281,7 +284,7 @@
   .composer.big textarea { min-height: 52px; }
   .composer textarea::placeholder { color: var(--dim); }
   .composer .row { display: flex; align-items: center; gap: 8px; }
-  .composer .hint { flex: 1; font-size: 11.5px; }
+  .composer .grow { flex: 1; }
   .send { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--accent); color: var(--on-accent); flex: none; }
   .send:disabled { background: var(--surface-active); color: var(--dim); opacity: 1; }
   .send.stop { background: var(--text); color: var(--window); }

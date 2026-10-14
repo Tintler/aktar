@@ -256,6 +256,20 @@ class LibraryBridgeTests(unittest.TestCase):
         self.assertEqual(chat['entries'][0]['kind'], 'note')
         self.assertEqual(self.bridge.chat_ask('Soru?')['entries'], chat['entries'])
 
+    def test_home_page_lists_collections_and_drop_creates_new_one(self):
+        first, second = self.root / 'Birinci', self.root / 'Ikinci'
+        for folder in (first, second):
+            folder.mkdir()
+            (folder / 'a.txt').write_text('metin', encoding='utf-8')
+        self.bridge.library_add_paths([str(first)])
+        self.wait_scan()
+        state = self.bridge.library_add_paths([str(second)], True)  # ana sayfadan: yeni koleksiyon
+        self.wait_scan()
+        self.assertEqual(state['title'], 'Ikinci')
+        cards = self.bridge.library_overview()
+        self.assertEqual([(card['title'], card['count'], card['summary']) for card in cards],
+                         [('Birinci', 1, ''), ('Ikinci', 1, '')])
+
     def test_inspected_files_are_listed_and_forgotten(self):
         document = self.root / 'rapor.txt'
         document.write_text('Bütçe 40 bin.', encoding='utf-8')

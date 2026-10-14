@@ -133,6 +133,17 @@ class LibraryMixin:
                            'files': len(data.get('files', []))})
         return result
 
+    def library_overview(self):
+        """Kutuphane ana sayfasi: her koleksiyon icin dosya sayisi ve (varsa) ozeti."""
+        result = []
+        for slug, data in library.list_collections().items():
+            overview = library.load_overview(slug) or {}
+            result.append({'slug': slug, 'title': data['title'], 'folders': len(data.get('folders', [])),
+                           'count': len(data.get('known') or []) or len(data.get('files', [])),
+                           'summary': str(overview.get('summary', '')),
+                           'topics': list(overview.get('topics') or [])[:4]})
+        return result
+
     def _folders(self):
         counts = {}
         for entry in self._lib_entries:
@@ -271,9 +282,9 @@ class LibraryMixin:
         return self.library_open()
 
     # ------------------------------------------------------------------ ekleme / cikarma
-    def library_choose_folder(self):
+    def library_choose_folder(self, new_collection=False):
         folder = self._dialog('open_folder', 'Klasör seç')
-        return self.library_add_paths([folder]) if folder else None
+        return self.library_add_paths([folder], new_collection) if folder else None
 
     def library_choose_files(self):
         patterns = ['Desteklenen dosyalar (' + ';'.join('*' + suffix for suffix in library.supported_suffixes()) + ')']
@@ -282,8 +293,9 @@ class LibraryMixin:
         paths = self._dialog('open_files', 'Dosya seç', tuple(patterns))
         return self.library_add_paths(paths) if paths else None
 
-    def library_add_paths(self, paths):
-        """Birakilan/secilen klasor ve dosyalari acik koleksiyona ekler; koleksiyon yoksa kurar."""
+    def library_add_paths(self, paths, new_collection=False):
+        """Birakilan/secilen klasor ve dosyalari acik koleksiyona ekler; koleksiyon yoksa (ya da
+        `new_collection` ile, kutuphane ana sayfasinda) klasorun adiyla yeni koleksiyon kurar."""
         paths = [str(path) for path in paths or []]
         folders = [path for path in paths if Path(path).is_dir()]
         files = [path for path in paths if Path(path).is_file()]
@@ -293,7 +305,7 @@ class LibraryMixin:
             return {'error': 'Desteklenen dosya bulunamadı.'
                     + (' Atlananlar: ' + ', '.join(skipped[:5]) if skipped else '')}
         self._lib_check_folders = {library._clean(folder) for folder in folders}
-        if self._lib_data is None:
+        if self._lib_data is None or new_collection:
             try:
                 slug, _data = library.create_collection(library.default_title(folders + files),
                                                         folders=folders, files=files)

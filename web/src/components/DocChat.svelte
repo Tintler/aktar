@@ -56,8 +56,8 @@
   .pill { background: var(--text); color: var(--window); font-weight: 600; font-size: 13px; padding: 5px 12px; border-radius: 999px; }
   .messages { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 14px; padding: 4px 4px 8px 0; }
   .note { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--dim); }
-  .ask { display: flex; align-items: center; gap: 6px; height: 44px; padding: 0 5px 0 16px; border-radius: 999px; background: var(--surface); border: 1px solid transparent; }
-  .ask:focus-within { border-color: var(--outline); background: var(--surface-hover); }
+  .ask { display: flex; align-items: center; gap: 6px; height: 44px; padding: 0 5px 0 16px; border-radius: 999px; background: var(--surface); border: 1px solid var(--field-border); transition: border-color .15s, box-shadow .15s; }
+  .ask:focus-within { border-color: var(--accent); box-shadow: var(--focus-ring); }
   .ask input { flex: 1; min-width: 0; background: none; border: 0; outline: none; font-size: 14px; }
   .ask input::placeholder { color: var(--dim); }
   .send { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--on-accent); flex: none; }
