@@ -427,10 +427,13 @@ def trim_repetition(text, min_chars=25):
 
 
 def ocr_engine(cfg):
-    """Taranmis sayfalar icin kullanilacak motor: 'tesseract' ya da 'vision'."""
+    """Taranmis sayfalar icin motor: 'tesseract', 'model' (OCR modeli) ya da 'vision'.
+    Otomatik: Tesseract kuruluysa o, degilse secili OCR modeli, o da yoksa gorsel model."""
     engine = cfg.get('ocr_engine', 'auto')
     if engine == 'auto':
-        return 'tesseract' if tesseract_path(cfg) else 'vision'
+        if tesseract_path(cfg):
+            return 'tesseract'
+        return 'model' if str(cfg.get('ocr_model', '')).strip() else 'vision'
     return engine
 
 

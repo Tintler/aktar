@@ -529,3 +529,19 @@ class TesseractTests(unittest.TestCase):
             self.assertEqual(read(b'x', documents.OCR_PROMPT), 'Bir cümle burada yazılı duruyor.')
         self.assertEqual(read.workers, 1)
         self.assertTrue(any('tekrar' in line for line in logs))
+
+    def test_ocr_model_reads_scans_and_vision_model_describes_images(self):
+        cfg = dict(DEFAULT_CONFIG, ocr_engine='model', ocr_model='glm-ocr', vision_model='gemma')
+        client = mock.Mock()
+        client.vision.side_effect = lambda prompt, png, **kw: f'{kw.get("model")}:{prompt[:17]}'
+        with mock.patch('app_core.Client', return_value=client), \
+                mock.patch.object(documents, 'tesseract_reader') as tesseract:
+            read = library.vision_reader(cfg, log=lambda *_: None)
+            self.assertEqual(read(b'x', documents.OCR_PROMPT), 'glm-ocr:Text Recognition:')
+            self.assertEqual(read(b'x', documents.IMAGE_PROMPT), 'None:' + documents.IMAGE_PROMPT[:17])
+        tesseract.assert_not_called()
+        with mock.patch.object(documents, 'tesseract_path', return_value=None):
+            self.assertEqual(documents.ocr_engine(dict(cfg, ocr_engine='auto')), 'model')
+        from app_core import validate_config
+        with self.assertRaises(ValueError):
+            validate_config(dict(DEFAULT_CONFIG, ocr_engine='model', ocr_model=''))

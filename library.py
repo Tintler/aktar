@@ -579,7 +579,8 @@ VISION_RETRY_SECONDS = 5
 
 def vision_reader(cfg, log=print):
     """Sayfa/gorsel okuyan fonksiyon: (png, istem) -> metin. Taranmis PDF sayfalari
-    `ocr_engine` 'tesseract' ise Tesseract ile, gorseller her zaman gorsel modelle okunur.
+    `ocr_engine`e gore Tesseract, OCR modeli ya da gorsel modelle; gorseller (tarif icin)
+    her zaman gorsel modelle okunur.
 
     LM Studio modeli istek aninda yuklerken gorsel istegi reddedebiliyor (HTTP 400);
     kisa bekleyip `auto_retry_count` kadar yeniden denenir."""
@@ -589,7 +590,9 @@ def vision_reader(cfg, log=print):
     retries = int(cfg.get('auto_retry_count', 2))
 
     import threading
-    use_tesseract = documents.ocr_engine(cfg) == 'tesseract'
+    engine = documents.ocr_engine(cfg)
+    use_tesseract = engine == 'tesseract'
+    ocr_model = str(cfg.get('ocr_model', '')).strip() if engine == 'model' else ''
     tesseract = []  # ilk taranmis sayfada kurulur; gorsel okuyan kuyruk Tesseract'siz de calisir
     lock = threading.Lock()
 
@@ -601,7 +604,12 @@ def vision_reader(cfg, log=print):
             return tesseract[0](png)  # F74: taranmis sayfa Tesseract ile; gorseller modelde
         for attempt in range(retries + 1):
             try:
-                text = qa.strip_thinking(client.vision(prompt, png))
+                if ocr_model and prompt == documents.OCR_PROMPT:  # F77: OCR'a ozel model
+                    text = client.vision(str(cfg.get('ocr_model_prompt') or 'Text Recognition:'),
+                                         png, model=ocr_model)
+                else:
+                    text = client.vision(prompt, png)
+                text = qa.strip_thinking(text)
             except RuntimeError as error:
                 if attempt >= retries:
                     raise

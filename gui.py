@@ -744,8 +744,10 @@ VIDEO_FILTER = 'Video (' + ' '.join('*' + item for item in VIDEO_EXTENSIONS) + '
 NONE_SERIES = '(Seri yok)'
 EMBEDDING_OFF = '(kapalı)'
 VISION_SAME = '(analiz modeliyle aynı)'
+OCR_MODEL_NONE = '(seçilmedi)'
 QA_SAME = '(analiz modeliyle aynı)'
-OCR_ENGINES = [('auto', 'Otomatik (Tesseract varsa o)'), ('tesseract', 'Tesseract (yerel)'),
+OCR_ENGINES = [('auto', 'Otomatik (Tesseract > OCR modeli > görü modeli)'),
+               ('tesseract', 'Tesseract (yerel)'), ('model', 'OCR modeli (LM Studio)'),
                ('vision', 'Görü modeli (LM Studio)')]
 NEW_SERIES = '+ Yeni seri...'
 
@@ -1199,9 +1201,9 @@ class SettingsDialog(QDialog):
         vision = DropdownCombo()
         vision.setEditable(False)
         self._fill_vision(vision, self.loaded_models, str(config.get('vision_model', '')).strip())
-        vision.setToolTip('Taranmış PDF sayfalarını ve görselleri okuyan model (görsel destekli '
-                          "olmalı). Varsayılan: analiz modeli. OCR'a özel bir model (ör. "
-                          "GLM-OCR) LM Studio'ya yüklenip burada seçilebilir.")
+        vision.setToolTip('Görselleri (fotoğraf, ekran görüntüsü) tarif edip içindeki yazıları '
+                          'okuyan model; görsel destekli olmalı. Varsayılan: analiz modeli. '
+                          'OCR motoru "Görü modeli" ise taranmış PDF sayfalarını da okur.')
         self.fields['vision_model'] = vision
         layout.addRow('Görü modeli', vision)
         engine = DropdownCombo()
@@ -1216,6 +1218,15 @@ class SettingsDialog(QDialog):
                           'GLM-OCR) daha güvenilirdir. Görseller her zaman görü modeliyle okunur.')
         self.fields['ocr_engine'] = engine
         layout.addRow('OCR motoru', engine)
+        ocr_model = DropdownCombo()
+        ocr_model.setEditable(False)
+        self._fill_optional(ocr_model, self.loaded_models,
+                            str(config.get('ocr_model', '')).strip(), OCR_MODEL_NONE)
+        ocr_model.setToolTip("Taranmış PDF sayfaları için OCR'a özel küçük model (ör. glm-ocr). "
+                             'Hızlıdır ve metin uydurmaz; fotoğraf tarif edemez, görseller '
+                             'yine görü modeliyle okunur.')
+        self.fields['ocr_model'] = ocr_model
+        layout.addRow('OCR modeli', ocr_model)
         tesseract = QLineEdit(str(config.get('tesseract_path', '')))
         tesseract.setPlaceholderText('Boş: otomatik bul (PATH, Program Files)')
         self.fields['tesseract_path'] = tesseract
@@ -1433,6 +1444,9 @@ class SettingsDialog(QDialog):
         self._fill_vision(vision, names, self._combo_value('vision_model', vision))
         qa_model = self.fields['qa_model']
         self._fill_optional(qa_model, names, self._combo_value('qa_model', qa_model), QA_SAME)
+        ocr_model = self.fields['ocr_model']
+        self._fill_optional(ocr_model, names, self._combo_value('ocr_model', ocr_model),
+                            OCR_MODEL_NONE)
         self.model_hint.setText(f'{len(names)} model bulundu.')
 
     @staticmethod
@@ -1475,6 +1489,8 @@ class SettingsDialog(QDialog):
         if key == 'embedding_model' and text == EMBEDDING_OFF:
             return ''
         if key == 'qa_model' and text == QA_SAME:
+            return ''
+        if key == 'ocr_model' and text == OCR_MODEL_NONE:
             return ''
         if key == 'ocr_engine':
             return dict((label, name) for name, label in OCR_ENGINES).get(text, 'auto')

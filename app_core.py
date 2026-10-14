@@ -70,7 +70,9 @@ DEFAULT_CONFIG = {
     'qa_model': '',
     # Taranmis PDF sayfalari icin OCR motoru (F74): 'vision' (gorsel model) ya da 'tesseract'
     # (yerel Tesseract; temiz ve uzun taramalarda hizli). Gorseller her zaman gorsel modelle.
-    'ocr_engine': 'auto',     # auto: Tesseract kuruluysa o, yoksa gorsel model
+    'ocr_engine': 'auto',     # auto: Tesseract > OCR modeli > gorsel model (F77)
+    'ocr_model': '',          # taranmis sayfalar icin OCR'a ozel LM Studio modeli (orn. glm-ocr)
+    'ocr_model_prompt': 'Text Recognition:',  # OCR modelleri kisa, kendi komutlarini bekler
     'tesseract_path': '',     # bos: PATH / Program Files / bin/tesseract icinde aranir
     'tesseract_lang': 'tur+eng',
     # Reasoning/thinking ureten modellerde dusunmeyi kapatma denemesi
@@ -216,8 +218,13 @@ def validate_config(cfg):
         raise ValueError('whisper_language boş (otomatik) veya dil kodu (örn. en) olmalı.')
     if not isinstance(cfg.get('whisper_cuda_dir', ''), str):
         raise ValueError('whisper_cuda_dir klasör yolu (metin) olmalı.')
-    if cfg.get('ocr_engine', 'auto') not in ('auto', 'vision', 'tesseract'):
-        raise ValueError('ocr_engine auto, vision ya da tesseract olmalı.')
+    if cfg.get('ocr_engine', 'auto') not in ('auto', 'tesseract', 'model', 'vision'):
+        raise ValueError('ocr_engine auto, tesseract, model ya da vision olmalı.')
+    if cfg.get('ocr_engine') == 'model' and not str(cfg.get('ocr_model', '')).strip():
+        raise ValueError('OCR motoru "OCR modeli" seçili ama OCR modeli seçilmedi.')
+    if not isinstance(cfg.get('ocr_model', ''), str) or not str(
+            cfg.get('ocr_model_prompt', 'Text Recognition:')).strip():
+        raise ValueError('ocr_model metin, ocr_model_prompt boş olmayan metin olmalı.')
     if not re.fullmatch(r'[a-z_]{3,}(\+[a-z_]{3,})*', str(cfg.get('tesseract_lang', 'tur+eng'))):
         raise ValueError('tesseract_lang dil kodları olmalı (örn. tur+eng).')
     if not isinstance(cfg.get('qa_model', ''), str):
@@ -570,10 +577,10 @@ class Client:
         value = self.request('/models')
         return [item['id'] for item in value.get('data', []) if item.get('id')]
 
-    def vision(self, prompt, image, mime='image/png', max_tokens=4096):
-        """Gorsel + metin istegi (F69): `vision_model` (bossa sohbet modeli) ile."""
+    def vision(self, prompt, image, mime='image/png', max_tokens=4096, model=None):
+        """Gorsel + metin istegi (F69): `model` ya da `vision_model` (bossa sohbet modeli) ile."""
         import base64
-        model = str(self.cfg.get('vision_model', '')).strip() or self.cfg['model']
+        model = model or str(self.cfg.get('vision_model', '')).strip() or self.cfg['model']
         payload = {'model': model, 'temperature': 0, 'max_tokens': max_tokens, 'stream': False,
                    'messages': [{'role': 'user', 'content': [
                        {'type': 'text', 'text': prompt},
