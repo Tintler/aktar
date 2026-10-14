@@ -22,7 +22,7 @@ from pathlib import Path
 
 import media
 import subtitle
-from app_core import (APP_DIR, Client, GracefulStop, digest, load_config, read,
+from app_core import (APP_DIR, Client, GracefulStop, digest, load_config, qa_config, read,
                       retryable_translation_error, save_json, visible_cue_text)
 
 CACHE_VERSION = 1
@@ -707,7 +707,7 @@ class VideoQA:
         question = ' '.join(str(question).split())
         if not question:
             raise ValueError('Soru boş olamaz.')
-        cfg = self.config_provider()
+        cfg = qa_config(self.config_provider())  # F72: soru-cevap modeli
         client = Client(cfg, log=self.log)
         ranked = None
         if self.data.get('mode') == 'map' and self.sections:

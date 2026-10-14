@@ -743,7 +743,8 @@ def _alive(widget):
 VIDEO_FILTER = 'Video (' + ' '.join('*' + item for item in VIDEO_EXTENSIONS) + ')'
 NONE_SERIES = '(Seri yok)'
 EMBEDDING_OFF = '(kapalı)'
-VISION_SAME = '(sohbet modeliyle aynı)'
+VISION_SAME = '(analiz modeliyle aynı)'
+QA_SAME = '(analiz modeliyle aynı)'
 NEW_SERIES = '+ Yeni seri...'
 
 
@@ -1159,9 +1160,18 @@ class SettingsDialog(QDialog):
         model.addItems(choices)
         configured_index = model.findText(str(config['model']))
         model.setCurrentIndex(configured_index if configured_index >= 0 else 0)
-        model.setToolTip('LM Studio tarafından yüklü bildirilen modeller arasından seçim yapılır.')
+        model.setToolTip('Çeviri, dosya özetleri ve analiz için kullanılan model.')
         self.fields['model'] = model
-        layout.addRow('Model', model)
+        layout.addRow('Analiz modeli', model)
+        qa_model = DropdownCombo()
+        qa_model.setEditable(False)
+        self._fill_optional(qa_model, self.loaded_models, str(config.get('qa_model', '')).strip(),
+                            QA_SAME)
+        qa_model.setToolTip('Koleksiyon, belge ve video sohbetinde soruları cevaplayan model. '
+                            'Analiz modeliyle aynıysa LM Studio modeller arasında geçiş yapmaz; '
+                            'ayrı (ör. daha küçük) bir model seçilebilir.')
+        self.fields['qa_model'] = qa_model
+        layout.addRow('Soru-cevap modeli', qa_model)
         refresh = HoverIconButton('Yüklü modelleri sorgula')
         refresh.setTintedIcon('refresh', THEME['secondary'])
         refresh.clicked.connect(self.refresh_models)
@@ -1188,7 +1198,7 @@ class SettingsDialog(QDialog):
         vision.setEditable(False)
         self._fill_vision(vision, self.loaded_models, str(config.get('vision_model', '')).strip())
         vision.setToolTip('Taranmış PDF sayfalarını ve görselleri okuyan model (görsel destekli '
-                          "olmalı). Varsayılan: sohbet modeli. OCR'a özel bir model (ör. "
+                          "olmalı). Varsayılan: analiz modeli. OCR'a özel bir model (ör. "
                           "GLM-OCR) LM Studio'ya yüklenip burada seçilebilir.")
         self.fields['vision_model'] = vision
         layout.addRow('Görü modeli', vision)
@@ -1375,6 +1385,8 @@ class SettingsDialog(QDialog):
         self._fill_embedding(embedding, names, self._combo_value('embedding_model', embedding))
         vision = self.fields['vision_model']
         self._fill_vision(vision, names, self._combo_value('vision_model', vision))
+        qa_model = self.fields['qa_model']
+        self._fill_optional(qa_model, names, self._combo_value('qa_model', qa_model), QA_SAME)
         self.model_hint.setText(f'{len(names)} model bulundu.')
 
     @staticmethod
@@ -1387,6 +1399,16 @@ class SettingsDialog(QDialog):
             ordered.insert(0, current)
         combo.clear()
         combo.addItems([EMBEDDING_OFF] + ordered)
+        combo.setCurrentIndex(max(0, combo.findText(current)) if current else 0)
+
+    @staticmethod
+    def _fill_optional(combo, names, current, same_label):
+        """'(analiz modeliyle ayni)' + embedding olmayan modeller; secili deger korunur."""
+        names = [str(name) for name in names if 'embed' not in str(name).lower()]
+        if current and current not in names:
+            names.insert(0, current)
+        combo.clear()
+        combo.addItems([same_label] + names)
         combo.setCurrentIndex(max(0, combo.findText(current)) if current else 0)
 
     @staticmethod
@@ -1405,6 +1427,8 @@ class SettingsDialog(QDialog):
     def _combo_value(key, field):
         text = field.currentText().strip()
         if key == 'embedding_model' and text == EMBEDDING_OFF:
+            return ''
+        if key == 'qa_model' and text == QA_SAME:
             return ''
         return '' if key == 'vision_model' and text == VISION_SAME else text
 

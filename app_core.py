@@ -64,6 +64,10 @@ DEFAULT_CONFIG = {
     # Gorsel okuma (F69): taranmis PDF sayfalari ve gorseller. Bos: sohbet modeli kullanilir
     # (gorsel destekli olmali; ornegin gemma-4). OCR'a ozel model (GLM-OCR vb.) secilebilir.
     'vision_model': '',
+    # Soru-cevap modeli (F72): koleksiyon/belge/video sohbeti. Bos: `model` (analiz modeli:
+    # ceviri, ozetler, dosya analizi). Ayri model, LM Studio'da modeller arasi gecis
+    # (yukle/bosalt) beklemesini azaltmak icin.
+    'qa_model': '',
     # Reasoning/thinking ureten modellerde dusunmeyi kapatma denemesi
     # (LM Studio chat_template_kwargs desteklerse). Desteklenmezse yok sayilir;
     # o durumda LM Studio model preset'inden thinking kapatilmalidir.
@@ -207,6 +211,8 @@ def validate_config(cfg):
         raise ValueError('whisper_language boş (otomatik) veya dil kodu (örn. en) olmalı.')
     if not isinstance(cfg.get('whisper_cuda_dir', ''), str):
         raise ValueError('whisper_cuda_dir klasör yolu (metin) olmalı.')
+    if not isinstance(cfg.get('qa_model', ''), str):
+        raise ValueError('qa_model model adı (metin) olmalı.')
     if not isinstance(cfg.get('vision_model', ''), str):
         raise ValueError('vision_model model adı (metin) olmalı.')
     if not isinstance(cfg.get('embedding_model', ''), str):
@@ -221,6 +227,12 @@ def validate_config(cfg):
         raise ValueError('temperature 0 ile 2 arasında olmalı.')
     if not isinstance(cfg.get('disable_thinking', False), bool):
         raise ValueError('disable_thinking true veya false olmalı.')
+
+
+def qa_config(cfg):
+    """Soru-cevap icin ayarlar: `qa_model` seciliyse sohbet istekleri onunla yapilir."""
+    model = str(cfg.get('qa_model', '')).strip()
+    return dict(cfg, model=model) if model else dict(cfg)
 
 
 def tr_lower(text):

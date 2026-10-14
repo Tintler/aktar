@@ -144,7 +144,8 @@ Uygulama dizinindeki `config.json` dosyası ayarları tutar. Yoksa `DEFAULT_CONF
 | Alan | Açıklama |
 | --- | --- |
 | `base_url` | LM Studio yerel sunucu adresi. **Yalnızca yerel** (`localhost` / `127.0.0.1` / `::1`) HTTP adresi kabul edilir. |
-| `model` | LM Studio'da yüklü model kimliği (boş olamaz). |
+| `model` | **Analiz modeli**: çeviri, dosya/koleksiyon özetleri ve analiz için LM Studio model kimliği (boş olamaz). |
+| `qa_model` | **Soru-cevap modeli**: koleksiyon, belge ve video sohbetinde soruları cevaplayan model. Boş: analiz modeli. Ayrı bir model seçmek, LM Studio'da analiz/embedding/sohbet modelleri arasında yükle-boşalt beklemesini azaltır (LM Studio'nun aynı anda birden çok modeli bellekte tutabilmesi gerekir). |
 | `batch_cues` | Bir istekte modele gönderilecek altyazı girdisi sayısı. Thinking açıkken küçük tutun (örn. 10). |
 | `max_tokens` | Yanıt için üst token sınırı. Thinking'li modellerde artırın. |
 | `temperature` | 0–2 arası; düşük değer daha tutarlı çeviri verir. |
@@ -154,7 +155,7 @@ Uygulama dizinindeki `config.json` dosyası ayarları tutar. Yoksa `DEFAULT_CONF
 | `analysis_chunk_chars` | Ön/son analizde tek model isteğine gönderilecek yaklaşık görünür karakter sayısı. |
 | `disable_thinking` | `true` ise istek gövdesine `chat_template_kwargs: {enable_thinking: false}` eklenir (LM Studio destekliyorsa). Desteklenmezse yok sayılır. |
 | `qa_context_chars` | Soru Sor: modele tek istekte gidecek en fazla transkript karakteri (≥1000). Transkript sığmazsa video haritası kullanılır (bkz. 3.6). LM Studio'daki model bağlam uzunluğuna göre ayarlayın. |
-| `vision_model` | Taranmış PDF sayfalarını ve görselleri okuyan LM Studio modeli (görsel destekli). Boş: sohbet modeli (`model`) kullanılır. Ayarlar → **Kütüphane indeksi** → **Görü modeli**. |
+| `vision_model` | Taranmış PDF sayfalarını ve görselleri okuyan LM Studio modeli (görsel destekli). Boş: analiz modeli (`model`) kullanılır. Ayarlar → **Kütüphane indeksi** → **Görü modeli**. |
 | `embedding_model` | Kütüphane indeksi için LM Studio embedding modeli (ör. `text-embedding-embeddinggemma-2`). Boş: indeksleme kapalı, yalnızca transkript çıkarılır. Ayarlar → **Kütüphane indeksi**. |
 | `embedding_query_template` / `embedding_document_template` | Embedding modeline gönderilen metnin biçimi. Varsayılanlar EmbeddingGemma içindir (`task: search result \| query: {query}`, `title: {title} \| text: {text}`); başka bir embedding modeli kullanıyorsanız modelin önerdiği biçimi yazın. `{query}` / `{text}` zorunludur. |
 | `whisper_model` | Konuşmadan metin modeli: `large-v3-turbo` (varsayılan), `large-v3`, `medium`, `small`, `base`. |
@@ -196,7 +197,7 @@ Videolarınızı ve belgelerinizi **koleksiyonlarda** toplar (ör. "Makine Öğr
   - Atfa tıklayınca o video oynatıcıda açılır ve o ana gider; geri düğmesiyle sohbete dönersiniz, sohbet kaybolmaz.
   - **Kapsam:** **Tüm koleksiyon** ya da **Seçili dosyalar** (tabloda seçtiğiniz satırlar). Henüz hazır olmayan dosyalar cevaba dahil edilmez; panelin altındaki not kaç dosyanın beklediğini söyler.
   - Önceki sorular hatırlanır; "peki neden?" gibi devam soruları çalışır. Her koleksiyonun sohbeti ayrıdır ve `library\` klasörüne kaydedilir (son 50 soru); uygulama yeniden açılınca kaldığı yerden devam eder. Panelin sağ üstündeki çöp kutusu sohbeti ve kaydını siler; koleksiyon silinince sohbeti de silinir.
-  - Soru-cevap için Ayarlar'daki sohbet modeli, arama için embedding modeli kullanılır; ikisi de LM Studio'da aynı adresten çalışır. Koleksiyon özeti çıkarıldıysa sohbetin başında bir kartta görünür (genel özet, konular ve tıklanınca sorulan önerilen sorular); bu özet ve video özetleri her soruda modele de verilir, böylece "bu derslerde neler anlatılıyor?" gibi genel sorular da bütün koleksiyona göre cevaplanır. Özet yoksa genel sorular yalnızca soruya en yakın parçalarla cevaplanır.
+  - Soru-cevap için Ayarlar'daki **Soru-cevap modeli** (boşsa analiz modeli), arama için embedding modeli kullanılır; ikisi de LM Studio'da aynı adresten çalışır. Koleksiyon özeti çıkarıldıysa sohbetin başında bir kartta görünür (genel özet, konular ve tıklanınca sorulan önerilen sorular); bu özet ve video özetleri her soruda modele de verilir, böylece "bu derslerde neler anlatılıyor?" gibi genel sorular da bütün koleksiyona göre cevaplanır. Özet yoksa genel sorular yalnızca soruya en yakın parçalarla cevaplanır.
 
 Koleksiyonlar uygulama dizinindeki `library\` klasöründe tutulur.
 

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import qa
 import search_index
-from app_core import Client, load_config, retryable_translation_error, save_json
+from app_core import Client, load_config, qa_config, retryable_translation_error, save_json
 
 HIT_LIMIT = 24
 MAP_SHARE = 0.35  # baglam butcesinin koleksiyon ozeti + video ozetlerine ayrilan en fazla payi
@@ -176,7 +176,7 @@ class CollectionQA:
         question = ' '.join(str(question).split())
         if not question:
             raise ValueError('Soru boş olamaz.')
-        cfg = self.config_provider()
+        cfg = qa_config(self.config_provider())  # F72: soru-cevap modeli
         client = client or Client(cfg, log=self.log)
         hits = self.whole_hits(cfg) or search_index.search(
             self.videos, self._query(question), cfg, client, limit=HIT_LIMIT, base=self.base,

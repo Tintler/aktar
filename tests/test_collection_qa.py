@@ -125,6 +125,33 @@ class CollectionQATests(unittest.TestCase):
         self.assertIn('COLLECTION OVERVIEW:\nİki derslik ML serisi.', context)
         self.assertIn('V1 = 01 Regresyon: Regresyon dersi.', context)
 
+    def test_questions_use_qa_model_and_summaries_use_analysis_model(self):
+        """F72: soru-cevap 'qa_model' ile; ozet/analiz 'model' ile yapilir."""
+        cfg = dict(self.cfg, model='analiz', qa_model='soru')
+        used = []
+
+        def chat(client, messages):
+            used.append(client.cfg['model'])
+            if 'JSON' in messages[0]['content']:
+                return '{"summary": "Özet.", "topics": [], "questions": []}'
+            return 'Cevap [V1 0:30].'
+
+        embed = lambda client, texts: FakeClient().embed(texts)  # noqa: E731
+        with unittest.mock.patch('app_core.Client.chat', chat), \
+                unittest.mock.patch('app_core.Client.embed', embed):
+            chat_session = collection_qa.CollectionQA(self.videos, 'ML', lambda: dict(cfg),
+                                                      log=QUIET, base=self.work)
+            chat_session.ask('regresyon nedir')
+            self.assertEqual(used, ['soru'])
+            collection_qa.summarize_video(self.videos[0], lambda: dict(cfg), QUIET,
+                                          base=self.work)
+            self.assertEqual(set(used[1:]), {'analiz'})
+            used.clear()
+            same = dict(cfg, qa_model='')
+            collection_qa.CollectionQA(self.videos, 'ML', lambda: dict(same), log=QUIET,
+                                       base=self.work).ask('regresyon')
+            self.assertEqual(used, ['analiz'])
+
     def test_empty_index_raises_helpful_error(self):
         chat = collection_qa.CollectionQA([self.root / 'yok.mkv'], 'ML', lambda: dict(self.cfg),
                                           log=QUIET, base=self.work)
