@@ -7,4 +7,14 @@ if [ -x .venv/bin/python ]; then
 else
     PY=python3
 fi
-exec "$PY" gui.py "$@"
+# Web arayuzu (Svelte) derlenmemisse ya da kaynak degistiyse derlenir (Node.js gerekir).
+if command -v npm >/dev/null 2>&1; then
+    if [ ! -d web/node_modules ]; then
+        (cd web && npm ci) || exit 1
+    fi
+    (cd web && npm run build --silent >/dev/null) || exit 1
+elif [ ! -f web/dist/index.html ]; then
+    echo "HATA: web arayuzu derlenmemis ve npm yok. Kurun: sudo apt install nodejs npm"
+    exit 1
+fi
+exec "$PY" desktop.py "$@"
