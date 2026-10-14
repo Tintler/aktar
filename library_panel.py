@@ -459,6 +459,7 @@ class LibraryPanel(QWidget):
 
     translate_requested = Signal(str)
     scanned = Signal(int, str, object, object, object, bool)  # tarama thread'inden
+    overview_built = Signal(str)  # dosya cikarilinca yeniden uretilen ozet ('!' = hata)
 
     def __init__(self, log=None, warn=None, parent=None):
         super().__init__(parent)
@@ -484,6 +485,7 @@ class LibraryPanel(QWidget):
         self._suggestions = []  # ozet kartindaki onerilen sorular (ask:<n>)
         self.setStyleSheet(LIBRARY_STYLE.format(**THEME))
         self.scanned.connect(self._scan_finished)
+        self.overview_built.connect(self._overview_built)
         self._build()
         self.reload()
 
@@ -978,8 +980,10 @@ class LibraryPanel(QWidget):
         menu.exec(self.folder_list.mapToGlobal(point))
 
     def remove_folder(self, folder):
+        removed = [entry['path'] for entry in self.entries if entry['root'] == folder]
         if self.data is not None and library.remove_folder(self.data, folder):
             self._save_and_refresh('Klasör koleksiyondan kaldırıldı: ' + folder)
+            self._forget(removed)
 
     # --- ekleme --------------------------------------------------------------
     def choose_folder(self):
@@ -1029,6 +1033,51 @@ class LibraryPanel(QWidget):
             return
         library.exclude(self.data, paths)
         self._save_and_refresh(f'{len(paths)} dosya koleksiyondan çıkarıldı (diskte duruyor).')
+        self._forget(paths)
+
+    def _forget(self, paths):
+        """Cikarilan dosyalar sohbette ve koleksiyon ozetinde hatirlanmasin.
+
+        Modelin konusma gecmisi sifirlanir (ekrandaki mesajlar kalir); ozet bu dosyalari
+        iceriyorsa silinir ve kalan dosyalarin ozetlerinden arka planda yeniden uretilir."""
+        if not paths or self.data is None:
+            return
+        slug, keys = self.slug, {library._key(path) for path in paths}
+        chat = self._chat()
+        chat['session'], chat['history'] = None, []
+        chat['entries'].append(('note', f'{len(paths)} dosya koleksiyondan çıkarıldı; sohbet '
+                                        'bundan sonra onları kullanmaz.'))
+        library.save_chat(slug, chat['entries'], chat['history'])
+        self._render_chat()
+        overview = library.load_overview(slug)
+        if not overview or not keys & {library._key(item) for item in overview.get('videos', [])}:
+            return
+        library.overview_path(slug).unlink(missing_ok=True)
+        self._overviews.pop(slug, None)
+        self._render_chat()
+        remaining = [entry['path'] for entry in self.entries
+                     if not entry['missing'] and library._key(entry['path']) not in keys]
+        title = self.data['title']
+
+        def work():
+            try:
+                rebuilt = collection_qa.build_overview(title, remaining, load_config(),
+                                                       log=lambda _message: None)
+                if rebuilt is not None:
+                    library.save_overview(slug, rebuilt)
+                    self.overview_built.emit(slug)
+            except Exception as error:  # ozet sonra 'Hepsini hazirla' ile de uretilebilir
+                self.overview_built.emit('!' + str(error))
+
+        threading.Thread(target=work, name='aktar-overview-rebuild', daemon=True).start()
+        self._log('Koleksiyon özeti çıkarılan dosyalar olmadan yeniden üretiliyor…')
+
+    def _overview_built(self, slug):
+        if slug.startswith('!'):
+            self._log('Koleksiyon özeti yeniden üretilemedi: ' + slug[1:])
+            return
+        self._log('Koleksiyon özeti güncellendi.')
+        self._overview_ready(slug)
 
     # --- tablo ---------------------------------------------------------------
     def _fill_chips(self):

@@ -1661,7 +1661,6 @@ class ResizeEdges(QObject):
 
 
 class MainWindow(QMainWindow):
-    status_ready = Signal(str, bool)  # arka plan model sorgusundan durum rozetine
 
     def __init__(self):
         super().__init__()
@@ -1689,7 +1688,6 @@ class MainWindow(QMainWindow):
         self._progress_animation.valueChanged.connect(
             lambda value: self.progress.setValue(int(value)))
         self._build()
-        self.status_ready.connect(self._set_status)
         self.reload_series()
         self.refresh_loaded_models()
 
@@ -1979,10 +1977,6 @@ class MainWindow(QMainWindow):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         row.addWidget(spacer)
 
-        self.status_pill = QLabel('LM Studio sorgulanıyor...')
-        self.status_pill.setObjectName('statusPill')
-        self.status_pill.setToolTip('Bağlantı ve yüklü model durumu')
-        row.addWidget(self.status_pill)
 
         self.settings_button = HoverIconButton('')
         self.settings_button.setObjectName('iconOnly')
@@ -2040,26 +2034,6 @@ class MainWindow(QMainWindow):
         self.drop.setVisible(bool(empty))
         self.file_card.setVisible(not empty)
         self.stream_card.setVisible(not empty)
-
-    def _set_status(self, text, connected=None):
-        """Arac cubugunun sagindaki durum rozeti (model + baglanti)."""
-        self.status_pill.setText(str(text))
-        if connected is None:
-            return
-        self.status_pill.setStyleSheet(
-            'QLabel#statusPill { color:%s; border-color:%s; }'
-            % ((THEME['secondary'], THEME['drop_border']) if connected
-               else (THEME['muted'], THEME['border'])))
-        self.status_pill.setToolTip(
-            ('Bağlı - ' if connected else '') + str(text))
-
-    @staticmethod
-    def _status_text(cfg):
-        """Durum rozeti metni: '<model> · <host>' (config'ten)."""
-        host = str(cfg['base_url']).split('//')[-1].rstrip('/')
-        if host.endswith('/v1'):
-            host = host[:-3]
-        return str(cfg['model']) + ' · ' + host
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -2411,9 +2385,6 @@ class MainWindow(QMainWindow):
             self.warn('Ayarlar kaydedilemedi: ' + str(error))
             return
         self.append('Ayarlar kaydedildi.')
-        # Durum rozeti yeni modele gore aninda guncellenir; baglanti durumu
-        # arka plan sorgusuyla (refresh_loaded_models -> status_ready) duzeltilir.
-        self._set_status(self._status_text(dict(load_config())), None)
         self.refresh_loaded_models()
 
     def refresh_loaded_models(self):
@@ -2428,7 +2399,6 @@ class MainWindow(QMainWindow):
             except (RuntimeError, ValueError):
                 names = []
             self.loaded_models = list(names)
-            self.status_ready.emit(self._status_text(cfg), bool(names))
 
         threading.Thread(target=probe, name='aktar-model-probe', daemon=True).start()
 

@@ -79,22 +79,14 @@ class GuiReviewContractTests(unittest.TestCase):
         self.assertIn('field.setReadOnly(True)', source)
         self.assertIn('buttons.button(QDialogButtonBox.Save).setEnabled(False)', source)
 
-    def test_settings_save_refreshes_status_pill(self):
-        """Ayarlar kaydedilince durum rozeti yeni modele gore guncellenir.
-
-        Eski durum: show_settings yalnizca 'Ayarlar kaydedildi.' yazip rozeti
-        hic tazelemiyordu; model ismi ancak uygulama acilista guncelleniyordu."""
+    def test_title_bar_has_no_model_status_pill(self):
+        """F71: sag ustteki model/adres rozeti kaldirildi (birden cok model varken kafa
+        karistiriyordu). Ayarlar kaydedilince yuklu model listesi yine tazelenir."""
         source = GUI_PATH.read_text(encoding='utf-8')
+        self.assertNotIn('status_pill', source)
         window = _class(self.tree, 'MainWindow')
-        methods = {node.name for node in window.body if isinstance(node, ast.FunctionDef)}
-        self.assertIn('_status_text', methods)
         show = ast.get_source_segment(source, _method(window, 'show_settings'))
-        self.assertIn('_set_status', show)
         self.assertIn('refresh_loaded_models', show)
-        probe = ast.get_source_segment(source, _method(window, 'refresh_loaded_models'))
-        self.assertIn('_status_text(cfg)', probe)
-        status_text = ast.get_source_segment(source, _method(window, '_status_text'))
-        self.assertIn("' · '", status_text)
 
     def test_primary_ui_labels_use_turkish_characters(self):
         source = GUI_PATH.read_text(encoding='utf-8')

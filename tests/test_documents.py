@@ -154,6 +154,13 @@ class DocumentTests(unittest.TestCase):
                                log=QUIET)
         info = library.describe(self.entry(photo), self.work, {'embedding_model': ''})
         self.assertEqual(info['source'], 'Görü modeli')
+        # Model gorsel atfini '[V2 gorsel]' diye de yazabilir: baglantiya donmeli.
+        chat = collection_qa.CollectionQA([mixed, photo], 'K', lambda: dict(DEFAULT_CONFIG),
+                                          log=QUIET, base=self.work)
+        parts = chat.split_citations('Kombi kırmızı [V2 Görsel]; sayfa [V1 görsel].',
+                                     {'V1': mixed, 'V2': photo})
+        cites = [cite['label'] for kind, value in parts if kind == 'cite' for cite in value]
+        self.assertEqual(cites, ['V2 görsel'])
         self.assertIn('Kırmızı bir kombi', ' '.join(line['text'] for line in info['lines']))
 
     def test_document_is_indexed_cited_by_page_and_exported(self):

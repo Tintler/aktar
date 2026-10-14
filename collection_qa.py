@@ -23,7 +23,10 @@ HIT_LIMIT = 24
 MAP_SHARE = 0.35  # baglam butcesinin koleksiyon ozeti + video ozetlerine ayrilan en fazla payi
 HISTORY_TURNS = 4
 # Konum: video icin zaman (12:34), belge icin sayfa (s.12); aralik sonu belgede yalin sayi olabilir.
-_POS = r'(?:[sS]\.\s?\d+|(?:\d+:)?\d{1,2}:\d{2})'
+# Gorsel atfi icin model bazen 's.1' yerine 'gorsel' yazar; o da kabul edilir.
+_IMAGE_WORDS = ('görsel', 'gorsel', 'resim', 'image', 'görüntü')
+_IMAGE_PATTERN = '|'.join(word for item in _IMAGE_WORDS for word in (item, item.capitalize()))
+_POS = r'(?:[sS]\.\s?\d+|(?:\d+:)?\d{1,2}:\d{2}|' + _IMAGE_PATTERN + r')'
 _END = r'(?:' + _POS + r'|\d+)'
 _BRACKET = re.compile(r'\[([^\[\]\n]{3,160})\]')
 _ITEM = re.compile(r'\s*(?:(V\d+)\s*[·:,]?\s*)?(' + _POS + r')(?:\s*[-–—]\s*(' + _END + r'))?\s*')
@@ -217,7 +220,7 @@ class CollectionQA:
             return None
         title, lines, duration, document = data
         if document:
-            cite = self._resolve_page(start, end, lines)
+            cite = self._resolve_page(start, end, lines, image=document == 'image')
         else:
             try:
                 begin = qa.parse_time(start)
@@ -233,7 +236,9 @@ class CollectionQA:
         return cite
 
     @staticmethod
-    def _resolve_page(start, end, lines):
+    def _resolve_page(start, end, lines, image=False):
+        if str(start).strip().lower() in _IMAGE_WORDS:
+            return {'start': 1.0, 'end': None, 'label': 's.1'} if image else None
         if not str(start).lower().startswith('s'):
             return None  # belgede zaman atfi gecersiz
         page = int(_PAGE.fullmatch(str(start).strip()).group(1))
