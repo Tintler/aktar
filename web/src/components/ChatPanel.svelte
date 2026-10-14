@@ -76,10 +76,12 @@
   .grow { flex: 1; }
   .scope { display: flex; gap: 6px; padding-bottom: 12px; }
   .scope .chip { height: 28px; font-size: 12px; padding: 0 12px; }
-  .messages { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 14px; padding: 4px 4px 12px 0; }
-  .overview { background: var(--surface); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .messages { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 14px; padding: 4px 4px 12px 0; }
+  .overview { background: var(--surface); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
   .overview p { font-size: 13px; color: var(--secondary); line-height: 1.55; }
   .topics { display: flex; flex-wrap: wrap; gap: 4px; }
+  /* uzun konu adlari paneli genisletmesin: rozet satira sigmazsa alt satira kirilir */
+  .topics .badge { white-space: normal; max-width: 100%; line-height: 1.4; }
   .suggest { display: flex; align-items: flex-start; gap: 8px; text-align: left; font-size: 12.5px; color: var(--accent); padding: 3px 0; }
   .suggest :global(svg) { margin-top: 2px; }
   .suggest:not(:disabled):hover { text-decoration: underline; }
