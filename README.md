@@ -7,96 +7,60 @@
 
 ![aktar arayüzü](preview.png)
 
-Video dosyalarındaki **metin tabanlı altyazıları** çıkarıp, **yerel bir yapay zeka modeliyle Türkçeye çeviren** ve videolarınız hakkında **soru sorabildiğiniz** masaüstü uygulaması.
+Videolarınızı ve belgelerinizi **yerel bir yapay zeka modeliyle** inceleyen masaüstü uygulaması: altyazıları Türkçeye çevirir, koleksiyonlarınıza soru sorabilir, cevapları zaman damgalı kaynaklarla gösterir.
 
-> **Gizlilik:** Hiçbir veri internet üzerinden gönderilmez. Çeviri ve soru-cevap tamamen yerel ağdaki LM Studio sunucusunda (`127.0.0.1`) yapılır. Kaynak video dosyası **salt-okunur** kabul edilir; kopyalanmaz, taşınmaz, değiştirilmez veya yeniden encode edilmez.
+> **Gizlilik:** Hiçbir veri internete gönderilmez. Tüm işlemler LM Studio sunucunuzda yapılır; kaynak dosyalar yalnızca okunur, değiştirilmez.
 
-> **English:** Aktar is a cross-platform (Windows, Linux) desktop app (pywebview window with a themeable Svelte interface, plus a companion CLI) that extracts text subtitles from video files and translates them to Turkish with a local LLM served by LM Studio. Everything runs locally and the source video is treated as read-only. The program preserves subtitle structure, timings, order and ASS tags — while the model only ever sees plain text, and it enforces a glossary for consistent terminology across episodes. The **Library** home page groups folders and videos into named collections (rescanned on open); opening a video gives a built-in player plus a chat that answers questions about your own videos with clickable timestamp citations, using embedded subtitles or optional local speech-to-text (faster-whisper).
+> **English:** Aktar is a local-first desktop app (Windows, Linux) that translates video subtitles to Turkish and lets you chat with your videos and documents, using an LLM served by LM Studio. Nothing leaves your machine.
 
 ---
 
-## Öne çıkan özellikler
+## Özellikler
 
-- **Kütüphane (açılış sayfası):** Klasörleri, videoları, belgeleri (PDF, Word, Excel/CSV, PowerPoint, OpenDocument, EPUB, RTF, HTML, .txt, .md; LibreOffice varsa eski .doc/.xls/.ppt) ve görselleri adlandırılmış koleksiyonlarda toplar; taranmış PDF sayfaları ve görseller LM Studio'daki görsel destekli modelle okunur (OCR; taranmış sayfalar için isteğe bağlı olarak hızlı, yerel Tesseract). Klasörler alt klasörleriyle taranır, koleksiyon her açıldığında yeni eklenen videolar bulunur. Tabloda her videonun transkript kaynağı ve hazırlık durumu görünür; **Hepsini hazırla** tüm transkriptleri sırayla çıkarır (altyazısız videolarda onayla Whisper) ve LM Studio'daki bir embedding modeliyle (ör. EmbeddingGemma) aranabilir indekse ekler. Sağdaki **Koleksiyona sor** paneli tüm hazır videolara birden soru sorar; cevaptaki `V3 12:34` atıflarına tıklayınca ilgili video o anda açılır. Dosya adında ve transkriptlerde anında arama yapılabilir; transkriptler TXT/SRT/Markdown olarak, koleksiyon tek Markdown dosyası olarak dışa aktarılabilir. Videoya çift tıklayınca tek video oynatıcı ve soru-cevap açılır.
-- **Sohbet:** Claude benzeri serbest sohbet; genel sorulara modelin kendi bilgisiyle cevap verir, soru kütüphanedeki dosyalarla ilgiliyse tüm koleksiyonlarda arayıp kaynak gösterir. Cevaplar akış halinde gelir, sohbetler saklanır.
-- **Dosya incele:** Tek bir videoyu ya da belgeyi koleksiyona eklemeden açıp soru sorun; son incelenenler ve sohbetleri saklanır.
-- **Zorunlu terim sözlüğü (glossary):** Çeviride belirtilen terimlerin karşılığı Türkçe çekim ekleriyle birlikte denetlenir; eksikse tek düzeltme turu yapılır.
-- **Seri bazlı glossary + süreklilik:** TV dizisi/anime bölümleri arasında isim yazımı, hitap biçimi (sen/siz) ve tekrar eden kalıplar seri düzeyinde saklanır.
-- **Yapay zekâ ön analizi:** Kaynak altyazıdan çevrilebilir kurgu terimleri, unvanlar, yerler ve kalıcı süreklilik kararları için Türkçe öneriler üretir; kullanıcı karşılığı düzenleyip yalnız bölüm veya seri kapsamıyla onaylayabilir.
-- **Çeviri sonrası öğrenme:** Ön analiz kapalı olsa bile çevirinin sonunda sonraki bölümlerde kullanılabilecek terimler ve süreklilik kararları çıkarılır; kullanıcı onayı olmadan seri terimlerine yazılmaz.
-- **Format korunur:** SRT→SRT, ASS→ASS, SSA→SSA, VTT→VTT. Yalnızca `mov_text` SRT'ye dönüştürülür.
-- **Videoya soru sor (Kütüphane → video):** Yerleşik oynatıcının yanında videonun içeriği hakkında yerel modelle sohbet eder; özet gibi genel sorular da belirli ayrıntılar da cevaplanır. Cevaptaki `12:34` atıflarına tıklayınca video o ana gider. Uzun videolarda bölüm bölüm "video haritası" çıkarılır.
-- **Altyazısız videolar için konuşmadan metin (isteğe bağlı):** faster-whisper ile ses yerelde metne çevrilir; sonuç hem soru-cevapta hem oynatıcıda altyazı olarak kullanılır. NVIDIA GPU varsa hızlandırılır.
-- **Oynatıcıda altyazı seçimi:** Videodaki akışlar, video klasöründeki altyazı dosyaları (Aktar'ın `_TR` çevirisi dahil) ve Whisper transkripti CC menüsünden seçilip izlenebilir.
-- **Temalar:** Koyu, açık ya da sistemle uyumlu görünüm ve hazır renk temaları (Acid, Oled, Sepia Ember…). `themes\` klasörüne kendi temanızı koyabilirsiniz; Deeverse tema dosyaları aynen çalışır.
-- **Her videoyu oynatır:** Tarayıcının çalamadığı biçimler (MKV, AC3/DTS ses, ikinci ses parçası) FFmpeg ile anında dönüştürülerek oynatılır; kaynak dosyaya dokunulmaz.
-- **Türkçe karakter güvenliği:** Kaynak ASS/SSA fontu Türkçe harfleri (`ç ğ ı İ ö ş ü`) çizemiyorsa çıktıda o font otomatik olarak **Calibri** ile değiştirilir.
+- **Kütüphane:** Klasörleri, videoları, belgeleri (PDF, Word, Excel, EPUB…) ve görselleri koleksiyonlarda toplar; tek tıkla hepsini aranabilir hale getirir.
+- **Koleksiyona sor:** Tüm koleksiyona birden soru sorun; cevaptaki `V3 12:34` gibi atıflara tıklayınca video o anda açılır.
+- **Sohbet ve Dosya incele:** Serbest sohbet ya da tek bir dosyayı koleksiyona eklemeden açıp soru sorma.
+- **Altyazı çevirisi:** SRT, ASS, SSA ve VTT biçimleri, zamanlamalar ve ASS etiketleri korunur. Dizi bölümleri arasında terim sözlüğü ve isim tutarlılığı sağlanır.
+- **Altyazısız videolar:** faster-whisper ile konuşma yerelde metne çevrilir (isteğe bağlı, NVIDIA GPU desteğiyle).
+- **Yerleşik oynatıcı:** MKV, AC3/DTS gibi biçimler FFmpeg ile dönüştürülerek oynatılır.
+- **Temalar:** Koyu, açık ve hazır renk temaları; kendi temanızı da ekleyebilirsiniz.
 
 ---
 
 ## Gereksinimler
 
-- **Windows 10/11** veya **Linux** (Debian, Ubuntu, Fedora…; KDE Plasma/GNOME, Wayland veya X11). Linux kurulumu için aşağıdaki **Linux** bölümüne bakın.
-- **Python 3.10+** (kaynak koddan çalıştırma için).
-- **Python paketleri:** pywebview (pencere; Windows'ta WebView2, Linux'ta WebKitGTK), pypdfium2 ve Pillow (PDF ve görseller) — `requirements.txt`.
-- **Node.js** (yalnızca kaynak koddan çalıştırırken ve derlerken; arayüz Svelte ile yazıldı, `GUI_BASLAT.cmd` her açılışta derler). Windows 10/11'de WebView2 hazır gelir.
-- **FFmpeg / ffprobe:** `bin\ffmpeg.exe` ve `bin\ffprobe.exe` olarak taşınabilir şekilde projeye konur(daha fazla bilgi için bin klasöründe  **[README.txt](bin/README.txt)** 'i okuyabilirsiniz).
-- **LM Studio:** yerel sunucu açık olmalı (varsayılan `http://127.0.0.1:1234/v1`) ve bir model yüklü olmalı. Soru Sor için modelin bağlam uzunluğu en az ~12k token önerilir.
-- **İsteğe bağlı — faster-whisper:** altyazısız videolarda konuşmadan metin için. Kaynak koddan çalışırken `requirements-whisper.txt`; derlenmiş .exe ile `DERLE_WHISPER.cmd`'nin ürettiği ayrı `aktar-whisper` paketi. GPU için cuBLAS 12 / cuDNN 9; başka programlarla ortak kullandığınız bir klasör varsa Ayarlar'dan gösterilebilir. Bkz. KULLANIM.md 1.5.
+- Windows 10/11 veya Linux
+- Python 3.10+ ve Node.js (kaynak koddan çalıştırmak için)
+- FFmpeg (`bin\` klasörüne, bkz. [bin/README.txt](bin/README.txt))
+- Yerel sunucusu açık ve bir model yüklü [LM Studio](https://lmstudio.ai)
 
 ---
 
 ## Hızlı başlangıç
 
-Release'deki .exe dosyası veya derlemeden kullanmak istiyorsanız;
+**Windows:**
 
 ```bat
-cd /d Z:\LLM-Files\Projects\Aktar
 py -3 -m pip install -r requirements.txt
-```
-
-1. `bin\` klasörüne `ffmpeg.exe` ve `ffprobe.exe` koyun.
-2. LM Studio'da modeli yükleyip yerel sunucuyu başlatın; `config.json` içindeki `base_url` ve `model` alanlarını kendi ayarınıza göre düzenleyin.
-3. Arayüzü başlatın:
-
-```bat
 GUI_BASLAT.cmd
 ```
 
-4. Açılan **Kütüphane** sayfasına bir klasör veya video sürükleyin; koleksiyon oluşur. Videoya çift tıklayınca oynatıcı ve soru-cevap açılır.
-5. Altyazı çevirmek için sol menüden **Altyazı Çevir** sayfasına geçin (ya da tablodaki videoya sağ tıklayıp **Altyazıyı çevir…**): videoyu sürükleyin → altyazı akışını işaretleyin → **Çevir**.
-
-### Linux (Debian, Ubuntu, KDE Plasma…)
+**Linux:**
 
 ```bash
-sudo apt install python3-venv python3-gi gir1.2-webkit2-4.1 nodejs npm ffmpeg fontconfig \
-                 gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
 ./kur.sh --kisayol
 ./baslat.sh
 ```
 
-`kur.sh`, paketleri proje klasöründeki `.venv` sanal ortamına kurar. `--whisper` konuşmadan metni, `--gpu` bunun yanında NVIDIA CUDA kütüphanelerini de kurar; `--kisayol` uygulama menüsüne kısayol ekler. FFmpeg sistemden kullanılır. Derleme için `./derle.sh` ve `./derle_whisper.sh` var. Ayrıntılar: **[KULLANIM.md → 1.6](KULLANIM.md#16-linux-debian-ubuntu-fedora-kde-plasma-gnome)**.
-
-Ayrıntılı kullanım ve .exe'nin derlenmesi için bkz. **[KULLANIM.md](KULLANIM.md)**.
-
-### Komut satırı (isteğe bağlı)
-
-```bat
-py -3 cevir.py check
-py -3 cevir.py streams "C:\video\Movie.mkv"
-py -3 cevir.py extract "C:\video\Movie.mkv" --stream 2
-py -3 cevir.py translate "C:\video\Movie.ass" --series game-of-thrones --glossary "Ash=Kul"
-```
+Açılan **Kütüphane** sayfasına bir klasör sürükleyin; koleksiyon oluşur. Ayarlar, derleme, Linux paketleri ve komut satırı kullanımı için bkz. **[KULLANIM.md](KULLANIM.md)**.
 
 ---
 
 ## Sınırlamalar
 
-- Yalnızca **metin tabanlı** altyazılar desteklenir; görüntü tabanlı altyazılar (PGS/VobSub) çevrilemez.
-- Satır ortasındaki karakter bazlı ASS efektleri (`C{\fs38}L...` gibi) modelden uzak tutulup çevrilmiş metindeki oransal konumlarına geri yerleştirilir. Etiketler korunur; kelime sırası değiştiğinde görsel konumları yaklaşık olabilir.
-- Çeviri kalitesi seçilen modele ve prompt'a bağlıdır; LM Studio model preset'inde "thinking" kapatılması önerilir (bkz. KULLANIM.md → Sorun giderme).
-- Otomatik konuşmacı ayrımı, karaoke zamanlaması veya altyazı zamanlaması düzeltmesi yapılmaz.
-- Soru Sor cevapları yalnızca transkripte (altyazı veya konuşma) dayanır; görüntüdeki içerik (grafikler, ekrandaki yazılar) görülmez. Whisper, `Aktar.exe`'ye gömülmez; ayrı `aktar-whisper` paketi olarak yanına konur.
+- Yalnızca metin tabanlı altyazılar çevrilir; PGS/VobSub gibi görüntü tabanlı altyazılar desteklenmez.
+- Cevaplar transkripte dayanır; videodaki görüntü içeriği görülmez.
+- Çeviri kalitesi seçilen modele bağlıdır.
 
 ---
 
