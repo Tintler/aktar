@@ -24,9 +24,15 @@ function ready() {
       settled = true;
       resolve(window.pywebview.api);
     });
-    // pywebview disinda: gelistirme sahtesi.
+    // pywebview disinda: ?rpc=<adres> verildiyse gelistirme koprusu, yoksa sahte arka uc.
     setTimeout(async () => {
       if (settled || window.pywebview) return;
+      const rpc = new URLSearchParams(location.search).get('rpc');
+      if (rpc) {
+        const { createRpc } = await import('./rpc.js');
+        resolve(createRpc(rpc, window.__aktarEmit));
+        return;
+      }
       const { createMock } = await import('./mock.js');
       resolve(createMock(window.__aktarEmit));
     }, 600);

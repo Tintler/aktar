@@ -10,6 +10,8 @@
   import Library from './views/Library.svelte';
   import Translate from './views/Translate.svelte';
   import Settings from './views/Settings.svelte';
+  import Player from './views/Player.svelte';
+  import VideoChat from './components/VideoChat.svelte';
   import { app, init, toasts, dismissToast, go } from './lib/state.svelte.js';
   import { call } from './lib/api.js';
   import { frame, initFrame, dragArea } from './lib/frame.svelte.js';
@@ -41,7 +43,8 @@
     app.view = history[next];
   }
 
-  const panelOpen = $derived(app.view === 'library' && !!app.library.slug && app.libraryView.chatOpen);
+  const panelOpen = $derived((app.view === 'library' && !!app.library.slug && app.libraryView.chatOpen)
+    || (app.view === 'player' && !!app.player));
   const models = $derived(app.models);
   const modelListed = $derived((models.names ?? []).includes(models.model));
 
@@ -73,7 +76,7 @@
     <div class="brand" use:dragArea><Logo size={30} /><span>aktar<i>.</i></span></div>
     <nav>
       {#each nav as [key, label, icon]}
-        <button class="nav" class:on={app.view === key} onclick={() => go(key)}><Icon name={icon} size={22} /><span>{label}</span></button>
+        <button class="nav" class:on={app.view === key || (key === 'library' && app.view === 'player')} onclick={() => go(key)}><Icon name={icon} size={22} /><span>{label}</span></button>
       {/each}
     </nav>
     <div class="rule"></div>
@@ -101,10 +104,11 @@
     <div class="view">
       {#if app.view === 'library'}<Library />
       {:else if app.view === 'translate'}<Translate />
+      {:else if app.view === 'player'}<Player />
       {:else}<Settings />{/if}
     </div>
   </main>
-  {#if panelOpen}<ChatPanel />{/if}
+  {#if panelOpen}{#if app.view === 'player'}<VideoChat />{:else}<ChatPanel />{/if}{/if}
 </div>
 <TitleBar />
 <MenuHost />

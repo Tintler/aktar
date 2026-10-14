@@ -6,7 +6,7 @@ plandaki isler (gunluk, ilerleme, onay istekleri) enjekte edilen `emit` ile sayf
 
 Is mantigi app_core / library / qa modullerinde kalir; burada yalnizca arayuz akisi var.
 Bolumler: bu dosyada genel (ayarlar, tema, pencere), bridge_translate.py'de Altyazi Cevir,
-bridge_library.py'de Kutuphane.
+bridge_library.py'de Kutuphane, bridge_player.py'de oynatici ve videoya soru sor.
 """
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ import documents
 import themes
 from app_core import APP_DIR, DEFAULT_CONFIG, WINDOWS, Client, load_config, read, save_json, validate_config
 from bridge_library import LibraryMixin
+from bridge_player import PlayerMixin
 from bridge_translate import TranslateMixin
 
 UI_FILE = 'ui.json'
@@ -41,7 +42,7 @@ def _error(error):
     return {'error': str(error)}
 
 
-class Bridge(TranslateMixin, LibraryMixin):
+class Bridge(TranslateMixin, LibraryMixin, PlayerMixin):
     def __init__(self, emit=None, dialogs=None):
         self._emit = emit or (lambda _event, _data: None)
         self._dialogs = dialogs          # desktop.Dialogs: open_file(), open_folder() ...
@@ -53,6 +54,7 @@ class Bridge(TranslateMixin, LibraryMixin):
         self._startup_paths = []
         self._init_translate()
         self._init_library()
+        self._init_player()
 
     # ------------------------------------------------------------------ yardimcilar
     def _log(self, message):
@@ -242,6 +244,7 @@ class Bridge(TranslateMixin, LibraryMixin):
         self._pending_close = None
         self._stop_translation_for_close()
         self._stop_library_for_close()
+        self._stop_player_for_close()
         if close:
             threading.Timer(0.1, close).start()
         return True
@@ -250,3 +253,4 @@ class Bridge(TranslateMixin, LibraryMixin):
         """Pencere kapandi: arka plandaki isleri birak."""
         self._stop_translation_for_close()
         self._stop_library_for_close()
+        self._stop_player_for_close()

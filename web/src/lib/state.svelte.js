@@ -23,6 +23,9 @@ export const app = $state({
   libraryView: { selected: [], kind: '', query: '', search: null, chatOpen: true, scope: 'all' },
   chat: null,                 // bridge_library.chat_state
   prepare: null,              // 'Hepsini hazirla' penceresi: plan bilgisi + sayimlar
+  player: null,               // bridge_player._player_state (acik video)
+  playerSeek: null,           // {time, play, n}: oynaticiya gidecegi an (atif, arama sonucu)
+  playerPositions: {},        // video yolu -> son konum (sayfadan cikip donunce)
 });
 
 export const toasts = $state([]);
@@ -138,6 +141,9 @@ export async function init() {
   on('chat', ({ slug }) => {
     if (slug === app.library.slug) refreshChat();
   });
+  on('player', (state) => {
+    if (state && app.player?.path === state.path) app.player = state;
+  });
   on('dropped', ({ paths }) => {
     const handler = dropHandlers[app.view] ?? dropHandlers.library;
     handler?.(paths);
@@ -202,10 +208,27 @@ export function selectedPaths() {
   return app.library.rows.filter((r) => keys.has(r.key)).map((r) => r.path);
 }
 
+const VIDEO_EXT = /\.(mkv|mp4|m4v|avi|mov|webm|ts|wmv|flv)$/i;
+let seekId = 0;
+
+export function seekPlayer(time, play = true) {
+  app.playerSeek = { time: Number(time) || 0, play, n: ++seekId };
+}
+
 // Dosyayi acar: video oynatici + soru sor, belge goruntuleyici. `at`: saniye ya da sayfa.
-// (Oynatici ve belge goruntuleyici sonraki asamalarda baglanacak.)
-export function openFile(row, at = null) {
-  toast('Oynatıcı ve belge görüntüleyici sonraki aşamada yeni arayüze taşınacak.', 'info');
+export async function openFile(row, at = null) {
+  if (row.missing) return toast('Dosya bulunamadı: ' + row.path, 'error');
+  if (!VIDEO_EXT.test(row.path)) {
+    toast('Belge görüntüleyici sonraki aşamada yeni arayüze taşınacak.', 'info');
+    return;
+  }
+  if (app.player?.path !== row.path) {
+    const state = await act('player_open', row.path);
+    if (!state) return;
+    app.player = state;
+  }
+  app.view = 'player';
+  if (at !== null && at !== undefined) seekPlayer(at, true);
 }
 
 export function openInTranslate(path) {
