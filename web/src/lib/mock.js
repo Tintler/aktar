@@ -82,7 +82,17 @@ export function createMock(emit) {
     chat_state: async () => chat,
     library_search: async (q) => ({ query: q, keys: library.rows.slice(0, 3).map((r) => r.key), files: 2, limited: false, searched: q.length >= 3,
       hits: [{ path: 'x', name: '03 Gradyan İnişi', start: 754, where: '12:34', text: 'öğrenme oranını küçültünce adımlar da küçülüyor' }, { path: 'y', name: 'Ders notları', start: 12, where: 's.12', text: 'Öğrenme oranı (learning rate) seçimi' }] }),
-    prepare_plan: async () => { setTimeout(() => emit('prepare', { counts: { ready: 4, summary: 1, index: 0, document: 0, subtitle: 1, vision: 0, whisper: 1 }, whisper_seconds: '22:10', vision_pages: 0, failed: [] }), 700); return { files: 7, model: settings.model, whisper: true, whisper_model: 'large-v3-turbo', whisper_device: 'auto', vision_model: settings.model, warnings: [] }; },
+    prepare_plan: async () => { setTimeout(() => emit('prepare', { counts: { ready: 4, summary: 1, index: 0, document: 0, subtitle: 1, vision: 1, whisper: 1 }, whisper_seconds: '22:10', vision_pages: 12, failed: [] }), 700); return { files: 7, model: settings.model, whisper: true, whisper_model: 'large-v3-turbo', whisper_device: 'auto', vision_model: settings.model, ocr_engine: 'tesseract', warnings: [] }; },
+    // F85: yeniden isleme -> kayitlari silinen dosyalar 'Bekliyor' olur
+    library_reset: async (paths) => {
+      for (const r of library.rows) if (paths.includes(r.path)) Object.assign(r, { status: 'pending', status_text: 'Bekliyor', source: '' });
+      return { ...library };
+    },
+    library_reset_collection: async () => {
+      for (const r of library.rows) if (!r.missing) Object.assign(r, { status: 'pending', status_text: 'Bekliyor', source: '' });
+      chat.overview = null;
+      return { ...library };
+    },
     startup: async () => ({ prefs, themes: themes(), translate, library, models: { state: 'ok', names: ['gemma-4-26b-a4b-it-qat@q4_k_xl', 'qwen3-8b', 'text-embedding-embeddinggemma-2', 'glm-ocr'], model: settings.model, message: '' }, platform: 'windows', open: [] }),
     ui_prefs: async () => prefs,
     save_ui_prefs: async (values) => (prefs = { ...prefs, ...values }),

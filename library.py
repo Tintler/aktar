@@ -720,3 +720,72 @@ def index(entry, cfg, base=None, log=print, cancelled=None, client=None):
     path = search_index.build(entry['path'], cfg, client=client, base=base, log=log,
                               cancelled=cancelled)
     return 'indexed' if path is not None else 'no_transcript'
+
+
+# --- yeniden isleme (F85) --------------------------------------------------------
+def _same_file(stored, path):
+    try:
+        return Path(str(stored)).resolve() == Path(path).resolve()
+    except (OSError, ValueError):
+        return False
+
+
+def reset_file(path, base=None, cfg=None):
+    """Dosyanin Aktar'in urettigi tum kayitlarini siler: transkript/OCR metni (dosya ozeti
+    ve bolum ozetleri onun icinde), yarim OCR sayfalari, Whisper ham ciktisi, embedding
+    indeksleri ve yoklama kaydi. Kaynak dosyaya dokunulmaz. Silinen dosya sayisini dondurur.
+
+    Ayni adli baska dosyalarin kayitlari silinmesin diye yalnizca icindeki yolu bu dosyayi
+    gosteren kayitlar silinir."""
+    path = Path(path)
+    work = Path(base or qa.work_dir())
+    stem = re.sub(r'[^\w.-]+', '_', path.stem)[:40] or 'video'
+    targets = set()
+    try:
+        sessions = qa.cached_sessions(path, base)
+        for session in sessions:
+            targets.add(qa.cache_path(path, qa.source_key(session['source']), base))
+            source = session['source']
+            if source.get('kind') == 'whisper':
+                targets.add(speech.cache_path(path, source.get('model', ''), source.get('language', ''),
+                                              base, source.get('audio_track')))
+        cfg = _embedding_cfg(cfg)
+        if cfg.get('whisper_model'):  # gecerli ayarla uretilmis ama oturuma donusmemis Whisper ciktisi
+            targets.add(speech.cache_path(path, cfg['whisper_model'], cfg.get('whisper_language', ''), base))
+        targets.add(qa.cache_path(path, 'ocr-pages', base).with_suffix('.ocr'))
+    except OSError:
+        pass  # dosya diskte yok: yalnizca icerige bakilarak bulunanlar silinir
+    for folder in (work / 'qa', search_index.index_dir(base)):
+        for candidate in folder.glob(stem + '.*.json'):
+            try:
+                value = json.loads(read(candidate))
+            except (OSError, ValueError):
+                continue
+            if isinstance(value, dict) and _same_file(value.get('video', ''), path):
+                targets.add(candidate)
+    removed = 0
+    for target in targets:
+        try:
+            target.unlink()
+            removed += 1
+        except FileNotFoundError:
+            pass
+        with search_index._MEMO_LOCK:
+            search_index._MEMO.pop(str(target), None)
+    prefix = _key(path) + '|'
+    with _PROBE_LOCK:
+        store = _probe_store(base)
+        stale = [item for item in store if item.startswith(prefix)]
+        for item in stale:
+            del store[item]
+        if stale:
+            try:
+                save_json(_probe_file(base), store)
+            except OSError:
+                pass
+    return removed
+
+
+def reset_files(paths, base=None, cfg=None):
+    """Birden cok dosya icin reset_file; toplam silinen kayit sayisi."""
+    return sum(reset_file(path, base, cfg) for path in paths)

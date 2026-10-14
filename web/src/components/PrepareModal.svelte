@@ -10,6 +10,8 @@
   let summaries = $state(true);
   let vision = $state(true);
   let whisper = $state(false);
+  let ocr = $state('');   // bos: Ayarlardaki motor (F85: yalnizca bu hazirlik icin degistirilebilir)
+  const ENGINES = { tesseract: 'Tesseract (yerel)', model: 'OCR modeli (LM Studio)', vision: 'Görü modeli' };
 
   app.prepare = { loading: true };
   act('prepare_plan').then((info) => {
@@ -40,7 +42,7 @@
   }
 
   async function start() {
-    const state = await act('prepare_start', summaries, vision, whisper && p.whisper);
+    const state = await act('prepare_start', summaries, vision, whisper && p.whisper, ocr);
     app.prepare = null;
     if (state) setLibrary(state);
     onclose();
@@ -68,6 +70,15 @@
     <Toggle bind:checked={summaries} label="Dosya özetleri ve koleksiyon özeti çıkar" />
     <Toggle bind:checked={vision} label="Taranmış PDF ve görselleri görü modeliyle oku" />
     <Toggle bind:checked={whisper} disabled={!p.whisper} label="Altyazısız videolarda Whisper kullan" />
+    {#if vision && counts?.vision}
+      <label class="engine">
+        <span>Taranmış sayfalar için OCR motoru<small>Görseller her zaman görü modeliyle tarif edilir</small></span>
+        <select class="field" bind:value={ocr}>
+          <option value="">Ayarlardaki ({ENGINES[p.ocr_engine] ?? p.ocr_engine ?? 'otomatik'})</option>
+          {#each Object.entries(ENGINES) as [id, label]}<option value={id}>{label}</option>{/each}
+        </select>
+      </label>
+    {/if}
   </div>
   {#each p.warnings ?? [] as message}<p class="warn"><Icon name="alert" size={14} />{message}</p>{/each}
   {#snippet footer()}
@@ -89,5 +100,9 @@
   .count b { font-size: 15px; min-width: 32px; text-align: right; }
   .probe { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
   .opts { display: flex; flex-direction: column; gap: 12px; }
+  .engine { display: flex; align-items: center; gap: 12px; font-size: 13px; }
+  .engine span { flex: 1; min-width: 0; }
+  .engine small { display: block; color: var(--dim); font-size: 11.5px; }
+  .engine select { width: 220px; }
   .warn { display: flex; gap: 8px; align-items: center; color: var(--warning); font-size: 12px; }
 </style>

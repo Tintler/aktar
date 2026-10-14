@@ -2,7 +2,7 @@
   import Icon from '../lib/Icon.svelte';
   import PrepareModal from '../components/PrepareModal.svelte';
   import { app, act, setLibrary, onDrop, toast, runSearch, refreshChat, openInTranslate, openFile } from '../lib/state.svelte.js';
-  import { choose, prompt } from '../lib/confirm.svelte.js';
+  import { choose, prompt, confirm } from '../lib/confirm.svelte.js';
   import { openMenu } from '../lib/menu.svelte.js';
 
   const lib = $derived(app.library);
@@ -109,6 +109,8 @@
       { label: 'Altyazıyı çevir…', icon: 'languages', disabled: !(single && row.kind === 'video'), action: () => openInTranslate(row.path) },
       { label: 'Dosya konumunu aç', icon: 'folderOpen', action: () => act('reveal', row.path) },
       { label: 'Transkripti dışa aktar…' + (withText.length > 1 ? ` (${withText.length} dosya)` : ''), icon: 'download', disabled: !withText.length, action: () => exportRows(withText) },
+      { label: 'Yeniden işle…' + (rows.length > 1 ? ` (${rows.length} dosya)` : ''), icon: 'refresh', disabled: !!queue || !rows.some((r) => !r.missing),
+        action: () => resetRows(rows.filter((r) => !r.missing)) },
       'sep',
       { label: 'Koleksiyondan çıkar' + (rows.length > 1 ? ` (${rows.length} dosya)` : ''), icon: 'x', danger: true,
         action: async () => setLibrary(await act('library_exclude', rows.map((r) => r.path))) },
@@ -127,7 +129,35 @@
     if (state) setLibrary(state);
   }
 
-  let preparing = $state(false);
+  // F85: OCR/transkript, ozet ve indeks kayitlari silinir; ardindan 'Hepsini hazirla' acilir.
+  async function resetRows(rows) {
+    const ok = await confirm({
+      title: rows.length > 1 ? `${rows.length} dosyayı yeniden işle` : 'Dosyayı yeniden işle',
+      message: "Aktar'ın bu dosyalar için çıkardığı metin (OCR, altyazı, Whisper), özet ve arama indeksi silinir; "
+        + 'ardından "Hepsini hazırla" ile yeniden çıkarılır. Kaynak dosyalarınıza dokunulmaz.',
+      list: rows.map((r) => r.name), ok: 'Sil ve yeniden işle', danger: true,
+    });
+    if (!ok) return;
+    const state = await act('library_reset', rows.map((r) => r.path));
+    if (!state) return;
+    setLibrary(state);
+    view.preparing = true;
+  }
+
+  async function resetCollection() {
+    const ok = await confirm({
+      title: 'Koleksiyonu sıfırla',
+      message: `"${lib.title}" koleksiyonundaki ${lib.rows.length} dosyanın metinleri (OCR, altyazı, Whisper), özetleri, `
+        + 'arama indeksi ve koleksiyon özeti silinir; ardından "Hepsini hazırla" ile yeniden üretilir.\n'
+        + 'Kaynak dosyalarınıza ve sohbet geçmişine dokunulmaz.',
+      ok: 'Sıfırla', danger: true,
+    });
+    if (!ok) return;
+    const state = await act('library_reset_collection', lib.slug);
+    if (!state) return;
+    setLibrary(state);
+    view.preparing = true;
+  }
 
   function statusClass(row) {
     if (row.busy_text) return 'badge ' + (row.busy_tone === 'danger' ? 'danger' : row.busy_tone === 'dim' ? '' : 'accent');
@@ -198,8 +228,10 @@
       <div class="actions">
           <button class="btn" onclick={() => add('library_choose_folder')}><Icon name="folderPlus" size={16} />Klasör ekle</button>
           <button class="btn" onclick={() => add('library_choose_files')}><Icon name="filePlus" size={16} />Dosya ekle</button>
-          <button class="btn primary lg" disabled={!!queue || !lib.rows.some((r) => !r.missing)} onclick={() => (preparing = true)}
+          <button class="btn primary lg" disabled={!!queue || !lib.rows.some((r) => !r.missing)} onclick={() => (view.preparing = true)}
             title="Transkriptleri çıkarır, indeksler ve özetler"><Icon name="sparkles" size={16} />Hepsini hazırla</button>
+          <button class="btn" disabled={!!queue || !lib.rows.length} onclick={resetCollection}
+            title="Koleksiyonun OCR/transkript, özet ve indeks kayıtlarını silip yeniden hazırlar"><Icon name="rotate" size={16} />Sıfırla…</button>
         <span class="grow"></span>
         {#each lib.folders as folder}
           <button class="chip folder" title={folder.path + ' · sağ tık: kaldır'} onclick={() => act('reveal', folder.path)} oncontextmenu={(e) => folderMenu(e, folder)}>
@@ -272,7 +304,7 @@
   {/if}
 </section>
 
-{#if preparing}<PrepareModal onclose={() => (preparing = false)} />{/if}
+{#if view.preparing}<PrepareModal onclose={() => (view.preparing = false)} />{/if}
 
 <style>
   .center { display: grid; place-items: center; }

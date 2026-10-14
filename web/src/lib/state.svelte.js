@@ -22,7 +22,7 @@ export const app = $state({
   library: { collections: [], slug: '', title: '', folders: [], rows: [], meta: '', scanning: false, queue: null, kinds: {} },
   // Kutuphane gorunum durumu: secili satirlar (anahtar), tur filtresi, arama, sohbet paneli.
   // home: Kutuphane ana sayfasi (tum koleksiyonlar); bir koleksiyon acilinca false.
-  libraryView: { selected: [], kind: '', query: '', search: null, chatOpen: true, scope: 'all', home: true },
+  libraryView: { selected: [], kind: '', query: '', search: null, chatOpen: true, scope: 'all', home: true, preparing: false },
   chat: null,                 // bridge_library.chat_state
   prepare: null,              // 'Hepsini hazirla' penceresi: plan bilgisi + sayimlar
   player: null,               // bridge_player._player_state (acik video)

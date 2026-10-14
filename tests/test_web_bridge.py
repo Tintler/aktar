@@ -15,6 +15,8 @@ import bridge  # noqa: E402
 import bridge_library  # noqa: E402
 import library  # noqa: E402
 import bridge_translate  # noqa: E402
+import documents  # noqa: E402
+import qa  # noqa: E402
 import themes  # noqa: E402
 
 
@@ -244,6 +246,39 @@ class LibraryBridgeTests(unittest.TestCase):
         self.assertEqual(state['collections'], [])
         self.assertEqual(state['slug'], '')
         self.assertTrue(video.exists())
+
+    def test_reset_clears_cache_and_collection_overview(self):
+        """F85: dosya ve koleksiyon sifirlama; kaynak dosya diskte kalir."""
+        folder = self.root / 'Tarama'
+        folder.mkdir()
+        doc, other = folder / 'a.txt', folder / 'b.txt'
+        doc.write_text('ilk metin', encoding='utf-8')
+        other.write_text('ikinci metin', encoding='utf-8')
+        work = self.root / 'work'
+        with mock.patch.object(qa, 'work_dir', return_value=work):
+            state = self.bridge.library_add_paths([str(folder)])
+            self.wait_scan()
+            for path in (doc, other):
+                documents.load_session(path, log=lambda _message: None)
+            library.save_overview(state['slug'], {'summary': 'eski', 'videos': [str(doc)]})
+            self.bridge.library_rescan()
+            self.wait_scan()
+            self.assertEqual({row['status'] for row in self.bridge.library_state()['rows']}, {'transcript'})
+
+            self.bridge.library_reset([str(doc)])
+            self.wait_scan()
+            rows = {row['name']: row['status'] for row in self.bridge.library_state()['rows']}
+            self.assertEqual(rows, {'a.txt': 'pending', 'b.txt': 'transcript'})
+            self.assertIsNone(library.load_overview(state['slug']))
+
+            library.save_overview(state['slug'], {'summary': 'eski', 'videos': [str(other)]})
+            self.bridge.library_reset_collection(state['slug'])
+            self.wait_scan()
+            self.assertEqual({row['status'] for row in self.bridge.library_state()['rows']}, {'pending'})
+            self.assertIsNone(library.load_overview(state['slug']))
+            self.assertFalse(list((work / 'qa').glob('*.json')))
+        self.assertEqual(doc.read_text(encoding='utf-8'), 'ilk metin')
+        self.assertTrue(other.exists())
 
     def test_chat_needs_indexed_files(self):
         folder = self.root / 'Bos'

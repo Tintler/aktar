@@ -32,6 +32,7 @@ STATUS_TEXT = {'ready': 'Hazır', 'transcript': 'Metin hazır', 'pending': 'Bekl
                'no_text': 'Metin yok · görü modeli bekliyor', 'missing': 'Bulunamadı'}
 META_TEXT = {'ready': 'hazır', 'transcript': 'metin hazır', 'pending': 'bekliyor',
              'no_subtitle': 'Whisper bekliyor', 'no_text': 'görü bekliyor', 'missing': 'bulunamadı'}
+OCR_OVERRIDES = ('tesseract', 'model', 'vision')  # prepare_start: yalnizca bu hazirlik icin
 PLAN_GROUPS = ('ready', 'summary', 'index', 'document', 'subtitle', 'vision', 'whisper')
 
 
@@ -372,6 +373,58 @@ class LibraryMixin:
         threading.Thread(target=work, name='aktar-overview-rebuild', daemon=True).start()
         self._log('Koleksiyon özeti çıkarılan dosyalar olmadan yeniden üretiliyor…')
 
+    # ------------------------------------------------------------------ yeniden isleme (F85)
+    def library_reset(self, paths):
+        """Secili dosyalarin transkript/OCR, ozet ve indeks kayitlarini siler (kaynaklar kalir).
+
+        Koleksiyon ozeti bu dosyalari iceriyorsa o da silinir; 'Hepsini hazirla' yeniden uretir."""
+        if self._queue_running():
+            return {'error': 'Toplu hazırlık sürerken yeniden işlenemez; önce durdurun.'}
+        paths = [Path(path) for path in paths or []]
+        if not paths or self._lib_data is None:
+            return self.library_state()
+        keys = {library._key(path) for path in paths}
+        removed = library.reset_files(paths)
+        overview = library.load_overview(self._lib_slug)
+        if overview and keys & {library._key(item) for item in overview.get('videos', [])}:
+            library.overview_path(self._lib_slug).unlink(missing_ok=True)
+        self._after_reset()
+        self._log(f'{len(paths)} dosyanın Aktar kayıtları silindi ({removed} önbellek dosyası); '
+                  'kaynak dosyalar duruyor. "Hepsini hazırla" ile yeniden işlenir.')
+        self._rescan()
+        return self.library_state()
+
+    def library_reset_collection(self, slug=None):
+        """Koleksiyon ozeti + koleksiyondaki tum dosyalarin onbellek kayitlari silinir."""
+        if self._queue_running():
+            return {'error': 'Toplu hazırlık sürerken sıfırlanamaz; önce durdurun.'}
+        slug = slug or self._lib_slug
+        if slug != self._lib_slug:
+            state = self.library_open(slug)
+            if 'error' in state:
+                return state
+        if self._lib_data is None:
+            return self.library_state()
+        try:
+            entries, _changed = library.scan(copy.deepcopy(self._lib_data))
+        except OSError as error:
+            return {'error': 'Koleksiyon taranamadı: ' + str(error)}
+        removed = library.reset_files([entry['path'] for entry in entries])
+        library.overview_path(slug).unlink(missing_ok=True)
+        self._after_reset()
+        self._log(f'Koleksiyon sıfırlandı: {self._lib_data["title"]} ({len(entries)} dosya, {removed} '
+                  'önbellek dosyası silindi; kaynak dosyalar duruyor).')
+        self._rescan()
+        return self.library_state()
+
+    def _after_reset(self):
+        slug = self._lib_slug
+        self._overviews.pop(slug, None)
+        chat = self._chats.get(slug)
+        if chat is not None:
+            chat['session'] = None  # eski indeks/ozetle kurulmus soru oturumu kullanilmasin
+        self._push_chat()
+
     # ------------------------------------------------------------------ arama
     def library_search(self, query):
         """Dosya adinda ve transkriptlerde model kullanmadan arama (en az 3 harf)."""
@@ -490,7 +543,8 @@ class LibraryMixin:
         threading.Thread(target=work, name='aktar-library-plan', daemon=True).start()
         return {'files': len(entries), 'model': cfg['model'], 'whisper': whisper_ready,
                 'whisper_model': cfg['whisper_model'], 'whisper_device': cfg['whisper_device'],
-                'vision_model': str(cfg.get('vision_model', '')).strip() or cfg['model'], 'warnings': warnings}
+                'vision_model': str(cfg.get('vision_model', '')).strip() or cfg['model'],
+                'ocr_engine': documents.ocr_engine(cfg), 'warnings': warnings}
 
     def prepare_cancel(self):
         if self._lib_plan_cancel is not None:
@@ -498,13 +552,16 @@ class LibraryMixin:
         self._lib_plan = None
         return True
 
-    def prepare_start(self, summaries=True, vision=True, whisper=False):
+    def prepare_start(self, summaries=True, vision=True, whisper=False, ocr_engine=''):
+        """`ocr_engine` ('tesseract' | 'model' | 'vision'; bos: Ayarlardaki) yalnizca bu
+        hazirlik icin taranmis sayfalarin motorunu degistirir."""
         plan = self._lib_plan
         if plan is None:
             return {'error': 'Hazırlık planı hazır değil.'}
         if self._queue_running():
             return {'error': 'Toplu hazırlık zaten sürüyor.'}
         whisper = bool(whisper) and speech.available()[0]
+        ocr_engine = ocr_engine if ocr_engine in OCR_OVERRIDES else ''
         # Sira: once hizli isler (ozet, indeks, belge, altyazi), sonra gorsel okuma ve Whisper.
         entries = ((list(plan['summary']) if summaries else []) + list(plan['index'])
                    + list(plan['document']) + list(plan['subtitle'])
@@ -522,7 +579,7 @@ class LibraryMixin:
         self._row_status = {library._key(entry['path']): ('Sırada', 'dim') for entry in entries}
         self._log(f'Toplu hazırlık başladı: {len(entries)} dosya' + (' (Whisper açık).' if whisper else '.'))
         self._queue_worker = threading.Thread(
-            target=self._run_queue, args=(entries, whisper, bool(summaries), collection, bool(vision)),
+            target=self._run_queue, args=(entries, whisper, bool(summaries), collection, bool(vision), ocr_engine),
             name='aktar-library-queue', daemon=True)
         self._queue_worker.start()
         return self.library_state()
@@ -561,13 +618,16 @@ class LibraryMixin:
         self._push_queue()
         return self._queue
 
-    def _run_queue(self, entries, allow_whisper, summaries, collection, allow_vision):
+    def _run_queue(self, entries, allow_whisper, summaries, collection, allow_vision, ocr_engine=''):
         """Eski QueueWorker.run: siradaki dosyalari library.transcribe/index ile isler."""
         done = failed = 0
         last_error, repeats = '', 0
         queue = self._queue
         cancel = self._queue_cancel
         cfg = load_config()
+        if ocr_engine:
+            cfg['ocr_engine'] = ocr_engine
+            self._log('Bu hazırlıkta taranmış sayfalar için OCR motoru: ' + ocr_engine)
         client = Client(cfg, log=self._log)  # indeksleme icin tek istemci
 
         def started(index, path, step):

@@ -40,12 +40,31 @@
     if (result?.path) toast('Koleksiyon dışa aktarıldı: ' + result.path, 'ok');
   }
 
+  // F85: koleksiyonun Aktar kayitlari silinir, 'Hepsini hazirla' yeniden uretir.
+  async function reset(c) {
+    const ok = await confirm({
+      title: 'Koleksiyonu sıfırla',
+      message: `"${c.title}" koleksiyonundaki dosyaların metinleri (OCR, altyazı, Whisper), özetleri, arama indeksi ve `
+        + 'koleksiyon özeti silinir; ardından "Hepsini hazırla" ile yeniden üretilir.\n'
+        + 'Kaynak dosyalarınıza ve sohbet geçmişine dokunulmaz.',
+      ok: 'Sıfırla', danger: true,
+    });
+    if (!ok) return;
+    app.libraryView.home = false;
+    go('library');
+    const state = await act('library_reset_collection', c.slug);
+    if (!state) return;
+    setLibrary(state);
+    app.libraryView.preparing = true;
+  }
+
   function menu(event, c) {
     const current = c.slug === lib.slug;
     const hasText = current && lib.rows.some((r) => r.status === 'ready' || r.status === 'transcript');
     openMenu(event, [
       { label: 'Yeniden adlandır', icon: 'pencil', action: () => rename(c) },
       { label: 'Yeniden tara', icon: 'refresh', action: async () => { await open(c.slug); setLibrary(await act('library_rescan')); } },
+      { label: 'Sonuçları sıfırla ve yeniden hazırla…', icon: 'rotate', disabled: !!lib.queue, action: () => reset(c) },
       { label: 'Koleksiyonu dışa aktar (Markdown)…', icon: 'download', disabled: !hasText, action: exportCollection },
       'sep',
       { label: 'Koleksiyonu sil', icon: 'trash', danger: true, action: () => remove(c) },

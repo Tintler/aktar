@@ -249,6 +249,41 @@ class LibraryTests(unittest.TestCase):
         self.assertFalse(library.chat_path(slug).exists())
         self.assertFalse(library.overview_path(slug).exists())
 
+    def test_reset_file_removes_only_its_own_cache(self):
+        """F85: yeniden isleme yalnizca bu dosyanin Aktar kayitlarini siler."""
+        work = self.root / 'work'
+        video = self.media / 'Ders 2.mp4'
+        twin = touch(self.root / 'baska' / 'Ders 2.mp4', b'yy')  # ayni ad, baska klasor
+        source = {'kind': 'subtitle', 'stream': 2, 'language': 'eng', 'title': ''}
+        cfg = {'embedding_model': 'emb', 'embedding_document_template': '{text}',
+               'whisper_model': 'small', 'whisper_language': ''}
+        made = []
+        for path in (video, twin):
+            data = qa.build_data(path, [{'start': 0.0, 'end': 2.0, 'text': 'yanlis'}], source,
+                                 {'duration': 2.0, 'chapters': []})
+            data['overview'] = {'summary': 'yanlis ozet'}
+            made.append(qa.cache_path(path, qa.source_key(source), work))
+            save_json(made[-1], data)
+            made.append(search_index.index_path(path, data, cfg, work))
+            save_json(made[-1], {'video': str(path), 'chunks': [], 'dims': 1, 'vectors': ''})
+        whisper = library.speech.cache_path(video, 'small', '', work)
+        save_json(whisper, {'segments': [{'start': 0, 'end': 1, 'text': 'x'}]})
+        partial = qa.cache_path(video, 'ocr-pages', work).with_suffix('.ocr')
+        save_json(partial, {'1': 'yanlis'})
+        with mock.patch('media.probe_summary', return_value={'duration': 2.0, 'subtitles': []}):
+            library.probe(video, work)
+        entry = self._entry('Ders 2.mp4')
+        self.assertEqual(library.describe(entry, work, cfg=cfg)['status'], 'ready')
+
+        removed = library.reset_file(video, work, cfg)
+        self.assertEqual(removed, 4)
+        self.assertFalse(made[0].exists() or made[1].exists() or whisper.exists() or partial.exists())
+        self.assertTrue(made[2].exists() and made[3].exists(), 'ayni adli baska dosya korunur')
+        self.assertIsNone(library.cached_probe(video, work))
+        self.assertEqual(library.describe(entry, work, cfg=cfg)['status'], 'pending')
+        self.assertEqual(video.read_bytes(), b'x', 'kaynak dosyaya dokunulmaz')
+        self.assertEqual(library.reset_files([video], work, cfg), 0)
+
     def test_default_title(self):
         self.assertEqual(library.default_title([self.media]), 'media')
         self.assertEqual(library.default_title([self.media / 'Ders 2.mp4']), 'media')
