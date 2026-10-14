@@ -36,8 +36,11 @@ from xml.etree import ElementTree
 import qa
 from app_core import save_json
 
-KIND_SUFFIXES = {'pdf': ('.pdf',), 'text': ('.txt', '.md'), 'word': ('.docx',),
-                 'sheet': ('.xlsx', '.csv'), 'epub': ('.epub',),
+KIND_SUFFIXES = {'pdf': ('.pdf',), 'text': ('.txt', '.md'),
+                 'word': ('.docx', '.odt', '.rtf', '.doc'),
+                 'sheet': ('.xlsx', '.csv', '.ods', '.xls'),
+                 'slides': ('.pptx', '.odp', '.ppt'), 'epub': ('.epub',),
+                 'html': ('.html', '.htm'),
                  'image': ('.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif')}
 IMAGE_SUFFIXES = KIND_SUFFIXES['image']
 OCR_MIN_CHARS = 20      # bundan az metinli PDF sayfasi taranmis sayilir
@@ -58,6 +61,15 @@ _S = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
 _REL = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}'
 _PKG = '{http://schemas.openxmlformats.org/package/2006/relationships}'
 _OPF = '{http://www.idpf.org/2007/opf}'
+_A = '{http://schemas.openxmlformats.org/drawingml/2006/main}'
+_P = '{http://schemas.openxmlformats.org/presentationml/2006/main}'
+_ODF_TEXT = '{urn:oasis:names:tc:opendocument:xmlns:text:1.0}'
+_ODF_TABLE = '{urn:oasis:names:tc:opendocument:xmlns:table:1.0}'
+_ODF_DRAW = '{urn:oasis:names:tc:opendocument:xmlns:drawing:1.0}'
+_ODF_OFFICE = '{urn:oasis:names:tc:opendocument:xmlns:office:1.0}'
+ODS_REPEAT_LIMIT = 50  # bos tekrar eden hucre/satirlar (sayfa sonuna kadar) atlanir
+# Eski ikili Office bicimleri LibreOffice ile modern bicime cevrilip okunur.
+LEGACY_TARGETS = {'.doc': 'docx', '.xls': 'xlsx', '.ppt': 'pptx'}
 _CONTAINER = '{urn:oasis:names:tc:opendocument:xmlns:container}'
 _BLOCKS = {'p', 'div', 'br', 'li', 'tr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote',
            'section', 'article', 'pre', 'table', 'ul', 'ol', 'dt', 'dd'}
@@ -354,8 +366,211 @@ def needs_vision(path):
     return kind == 'image' or (kind == 'pdf' and bool(scanned_pages(path)))
 
 
-PAGE_READERS = {'pdf': pdf_pages, 'text': text_pages, 'word': word_pages,
-                'sheet': sheet_pages, 'epub': epub_pages}
+def pptx_pages(path):
+    """.pptx slaytlari sunum sirasiyla; her slayt bir 'sayfa' (paragraf = a:p)."""
+    with zipfile.ZipFile(path) as archive:
+        names = set(archive.namelist())
+        rels = {}
+        if 'ppt/_rels/presentation.xml.rels' in names:
+            for rel in ElementTree.fromstring(archive.read('ppt/_rels/presentation.xml.rels')):
+                target = rel.get('Target', '').lstrip('/')
+                rels[rel.get('Id')] = target if target.startswith('ppt/') else 'ppt/' + target
+        order = [rels.get(item.get(_REL + 'id')) for item in ElementTree.fromstring(
+            archive.read('ppt/presentation.xml')).iter(_P + 'sldId')]
+        pages = []
+        for target in order:
+            if target not in names:
+                continue
+            slide = ElementTree.fromstring(archive.read(target))
+            lines = [''.join(node.text or '' for node in paragraph.iter(_A + 't'))
+                     for paragraph in slide.iter(_A + 'p')]
+            pages.append('\n\n'.join(line for line in lines if line.strip()))
+    return pages or ['']
+
+
+def _odf_text(element):
+    """OpenDocument metin ogesinin duz metni (bosluk/sekme/satir sonu ogeleri dahil)."""
+    parts = [element.text or '']
+    for child in element:
+        if child.tag == _ODF_TEXT + 's':
+            parts.append(' ' * int(child.get(_ODF_TEXT + 'c', '1')))
+        elif child.tag == _ODF_TEXT + 'tab':
+            parts.append('\t')
+        elif child.tag == _ODF_TEXT + 'line-break':
+            parts.append('\n')
+        else:
+            parts.append(_odf_text(child))
+        parts.append(child.tail or '')
+    return ''.join(parts)
+
+
+def _odf_content(path):
+    with zipfile.ZipFile(path) as archive:
+        return ElementTree.fromstring(archive.read('content.xml'))
+
+
+def odt_pages(path):
+    """.odt baslik ve paragraflari; sayfa bilgisi olmadigi icin sanal sayfalar."""
+    body = _odf_content(path)
+    paragraphs_list = [_odf_text(node) for node in body.iter()
+                       if node.tag in (_ODF_TEXT + 'p', _ODF_TEXT + 'h')]
+    return _virtual_pages([text for text in paragraphs_list if text.strip()])
+
+
+def ods_pages(path):
+    """.ods calisma sayfalari (Excel ile ayni satir bicimi)."""
+    pages = []
+    for table in _odf_content(path).iter(_ODF_TABLE + 'table'):
+        rows = []
+        for row in table.iter(_ODF_TABLE + 'table-row'):
+            cells = []
+            for cell in row:
+                if cell.tag not in (_ODF_TABLE + 'table-cell', _ODF_TABLE + 'covered-table-cell'):
+                    continue
+                value = '\n'.join(_odf_text(node) for node in cell.iter(_ODF_TEXT + 'p'))
+                repeat = int(cell.get(_ODF_TABLE + 'number-columns-repeated', '1'))
+                cells.extend([value] * min(repeat, ODS_REPEAT_LIMIT if value else 1))
+            while cells and not cells[-1].strip():
+                cells.pop()
+            repeat = int(row.get(_ODF_TABLE + 'number-rows-repeated', '1'))
+            rows.extend([cells] * (min(repeat, ODS_REPEAT_LIMIT) if cells else 1))
+        pages.append(_rows_text(table.get(_ODF_TABLE + 'name') or f'Sayfa{len(pages) + 1}', rows))
+    return pages or ['']
+
+
+def odp_pages(path):
+    """.odp slaytlari (draw:page); her slayt bir 'sayfa'."""
+    pages = []
+    for slide in _odf_content(path).iter(_ODF_DRAW + 'page'):
+        lines = [_odf_text(node) for node in slide.iter()
+                 if node.tag in (_ODF_TEXT + 'p', _ODF_TEXT + 'h')]
+        pages.append('\n\n'.join(line for line in lines if line.strip()))
+    return pages or ['']
+
+
+_RTF_TOKEN = re.compile(r"\\([a-zA-Z]+)(-?\d+)? ?|\\'([0-9a-fA-F]{2})|\\(.)|([{}])|([^\\{}]+)",
+                        re.S)
+_RTF_SKIP = {'fonttbl', 'colortbl', 'stylesheet', 'info', 'pict', 'header', 'footer',
+             'headerl', 'headerr', 'footerl', 'footerr', 'listtable', 'listoverridetable',
+             'themedata', 'colorschememapping', 'datastore', 'latentstyles', 'xmlnstbl',
+             'rsidtbl', 'generator', 'object', 'fldinst'}
+
+
+def rtf_text(data):
+    """RTF -> duz metin (denetim kelimeleri atilir; \\'xx ve \\uN karakterleri cozulur)."""
+    codepage = re.search(r'\\ansicpg(\d+)', data)
+    encoding = f'cp{codepage.group(1)}' if codepage else 'cp1254'
+    out, stack, skip, uc_skip = [], [], False, 0
+    for word, number, hexcode, symbol, brace, plain in _RTF_TOKEN.findall(data):
+        if brace == '{':
+            stack.append(skip)
+        elif brace == '}':
+            skip = stack.pop() if stack else False
+        elif skip:
+            continue
+        elif word:
+            if word in _RTF_SKIP:
+                skip = True
+            elif word in ('par', 'line', 'sect', 'page', 'row'):
+                out.append('\n\n' if word != 'line' else '\n')
+            elif word in ('tab', 'cell'):
+                out.append('\t')
+            elif word == 'u' and number:
+                value = int(number)
+                out.append(chr(value + 65536 if value < 0 else value))
+                uc_skip = 1
+        elif hexcode:
+            if uc_skip:
+                uc_skip -= 1
+                continue
+            try:
+                out.append(bytes([int(hexcode, 16)]).decode(encoding))
+            except (UnicodeDecodeError, LookupError):
+                out.append(bytes([int(hexcode, 16)]).decode('latin-1'))
+        elif symbol:
+            if symbol == '*':
+                skip = True
+            elif symbol in '\\{}':
+                out.append(symbol)
+            elif symbol == '~':
+                out.append(' ')
+        elif plain:
+            plain = plain.replace('\r', '').replace('\n', '')
+            out.append(plain[uc_skip:])  # \uN'den sonraki yedek karakter atlanir
+            uc_skip = 0
+    return re.sub(r'\n\s*\n+', '\n\n', ''.join(out)).strip()
+
+
+def rtf_pages(path):
+    text = rtf_text(Path(path).read_bytes().decode('latin-1'))
+    return _virtual_pages([part for part in text.split('\n\n') if part.strip()])
+
+
+def html_pages(path):
+    text = html_text(read_text(path))
+    return _virtual_pages([part for part in text.split('\n\n') if part.strip()])
+
+
+def office_converter():
+    """LibreOffice (soffice) yolu ya da None (eski .doc/.xls/.ppt icin)."""
+    import os
+    import shutil
+    found = shutil.which('soffice') or shutil.which('libreoffice')
+    if found:
+        return found
+    if os.name == 'nt':
+        for root in (os.environ.get('ProgramFiles', r'C:\Program Files'),
+                     os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')):
+            candidate = Path(root) / 'LibreOffice' / 'program' / 'soffice.exe'
+            if candidate.is_file():
+                return str(candidate)
+    return None
+
+
+def convert_legacy(path, folder=None):
+    """Eski Office dosyasini LibreOffice ile modern bicime cevirir (onbellekli kopya)."""
+    import subprocess
+    import tempfile
+    path = Path(path)
+    target = LEGACY_TARGETS[path.suffix.lower()]
+    soffice = office_converter()
+    if soffice is None:
+        raise ValueError(f'Eski Office biçimi ({path.suffix}): okumak için LibreOffice kurun ya da '
+                         f'dosyayı .{target} olarak kaydedin.')
+    folder = Path(folder or (qa.work_dir() / 'converted'))
+    stamp = qa.cache_path(path, 'converted').stem.split('.')[-1]
+    output = folder / f'{path.stem}.{stamp}.{target}'
+    if output.is_file():
+        return output
+    with tempfile.TemporaryDirectory() as temp:
+        kwargs = {'creationflags': getattr(subprocess, 'CREATE_NO_WINDOW', 0)} if os_name() == 'nt' else {}
+        result = subprocess.run([soffice, '--headless', '--convert-to', target, '--outdir', temp,
+                                 str(path)], capture_output=True, text=True, timeout=300, **kwargs)
+        produced = Path(temp) / f'{path.stem}.{target}'
+        if result.returncode != 0 or not produced.is_file():
+            raise ValueError(f'LibreOffice dönüştüremedi: {path.name} '
+                             + (result.stderr or result.stdout or '').strip()[:200])
+        folder.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(produced.read_bytes())
+    return output
+
+
+def os_name():
+    import os
+    return os.name
+
+
+def legacy_pages(path):
+    converted = convert_legacy(path)
+    return SUFFIX_READERS[converted.suffix.lower()](converted)
+
+
+SUFFIX_READERS = {'.pdf': pdf_pages, '.txt': text_pages, '.md': text_pages,
+                  '.docx': word_pages, '.odt': odt_pages, '.rtf': rtf_pages,
+                  '.xlsx': sheet_pages, '.csv': sheet_pages, '.ods': ods_pages,
+                  '.pptx': pptx_pages, '.odp': odp_pages, '.epub': epub_pages,
+                  '.html': html_pages, '.htm': html_pages,
+                  '.doc': legacy_pages, '.xls': legacy_pages, '.ppt': legacy_pages}
 
 
 def pages_of(path):
@@ -364,7 +579,7 @@ def pages_of(path):
     if kind is None:
         raise ValueError('Desteklenmeyen belge türü: ' + Path(path).name)
     try:
-        return PAGE_READERS[kind](path)
+        return SUFFIX_READERS[Path(path).suffix.lower()](path)
     except (zipfile.BadZipFile, KeyError, ElementTree.ParseError, StopIteration) as error:
         raise ValueError(f'Belge okunamadı ({type(error).__name__}): {Path(path).name}') from None
 

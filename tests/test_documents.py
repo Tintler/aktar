@@ -301,6 +301,94 @@ class OfficeAndEbookTests(unittest.TestCase):
         csv_path.write_text('Ad;Şehir\nAyşe;İzmir\n', encoding='utf-8')
         self.assertIn('Satır 2: Ad: Ayşe; Şehir: İzmir', documents.pages_of(csv_path)[0])
 
+    def test_pptx_and_opendocument_formats(self):
+        """F73: PowerPoint slaytlari, ODT/ODS/ODP ve HTML."""
+        a_ns = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+        p_ns = 'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+        slide = (f'<p:sld {a_ns} {p_ns}><p:cSld><p:spTree><p:sp><p:txBody>'
+                 '<a:p><a:r><a:t>{}</a:t></a:r></a:p><a:p><a:r><a:t>Madde </a:t></a:r>'
+                 '<a:r><a:t>bir</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>')
+        pptx = self.root / 'sunum.pptx'
+        write_zip(pptx, {
+            'ppt/presentation.xml': f'<p:presentation {p_ns} {R_NS}><p:sldIdLst>'
+                                    '<p:sldId r:id="rId2"/><p:sldId r:id="rId1"/></p:sldIdLst>'
+                                    '</p:presentation>',
+            'ppt/_rels/presentation.xml.rels': (
+                '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                '<Relationship Id="rId1" Target="slides/slide1.xml"/>'
+                '<Relationship Id="rId2" Target="slides/slide2.xml"/></Relationships>'),
+            'ppt/slides/slide1.xml': slide.replace('{}', 'İkinci slayt'),
+            'ppt/slides/slide2.xml': slide.replace('{}', 'Giriş')})
+        self.assertEqual(documents.pages_of(pptx),
+                         ['Giriş\n\nMadde bir', 'İkinci slayt\n\nMadde bir'])
+        self.assertEqual(documents.kind_of(pptx), 'slides')
+        office = ('xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+                  'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" '
+                  'xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" '
+                  'xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"')
+        odt = self.root / 'not.odt'
+        write_zip(odt, {'content.xml': (
+            f'<office:document-content {office}><office:body><office:text>'
+            '<text:h>Başlık</text:h><text:p>Bir<text:s text:c="2"/>iki<text:tab/>üç</text:p>'
+            '</office:text></office:body></office:document-content>')})
+        self.assertEqual(documents.pages_of(odt), ['Başlık\n\nBir  iki\tüç'])
+        ods = self.root / 'tablo.ods'
+        write_zip(ods, {'content.xml': (
+            f'<office:document-content {office}><office:body><office:spreadsheet>'
+            '<table:table table:name="Stok"><table:table-row>'
+            '<table:table-cell><text:p>Ürün</text:p></table:table-cell>'
+            '<table:table-cell><text:p>Adet</text:p></table:table-cell>'
+            '<table:table-cell table:number-columns-repeated="16000"/></table:table-row>'
+            '<table:table-row><table:table-cell><text:p>Çay</text:p></table:table-cell>'
+            '<table:table-cell><text:p>7</text:p></table:table-cell></table:table-row>'
+            '<table:table-row table:number-rows-repeated="1048000"><table:table-cell/>'
+            '</table:table-row></table:table></office:spreadsheet></office:body>'
+            '</office:document-content>')})
+        pages = documents.pages_of(ods)
+        self.assertIn('Stok · sütunlar: Ürün, Adet', pages[0])
+        self.assertIn('Satır 2: Ürün: Çay; Adet: 7', pages[0])
+        self.assertLess(len(pages[0]), 500, 'bos tekrar eden satir/sutunlar sisirmemeli')
+        odp = self.root / 'sunu.odp'
+        write_zip(odp, {'content.xml': (
+            f'<office:document-content {office}><office:body><office:presentation>'
+            '<draw:page><text:p>Slayt 1</text:p></draw:page>'
+            '<draw:page><text:p>Slayt 2</text:p></draw:page>'
+            '</office:presentation></office:body></office:document-content>')})
+        self.assertEqual(documents.pages_of(odp), ['Slayt 1', 'Slayt 2'])
+        page = self.root / 'sayfa.html'
+        page.write_text('<html><head><title>x</title><script>var a;</script></head><body>'
+                        '<h1>Duyuru</h1><p>Toplantı &amp; sunum yarın.</p></body></html>',
+                        encoding='utf-8')
+        self.assertEqual(documents.pages_of(page), ['Duyuru\n\nToplantı & sunum yarın.'])
+        rtf = self.root / 'mektup.rtf'
+        rtf.write_bytes(b"{\\rtf1\\ansi\\ansicpg1254{\\fonttbl{\\f0 Arial;}}\\f0 "
+                        b"Say\\'fdn \\u305?lgili,\\par Te\\'feekk\\u252?rler.}")
+        self.assertEqual(documents.pages_of(rtf), ['Sayın ılgili,\n\nTeşekkürler.'])
+
+    def test_legacy_office_needs_libreoffice_and_reads_converted_copy(self):
+        """F73: .doc/.xls/.ppt LibreOffice ile .docx/.xlsx/.pptx'e cevrilip okunur."""
+        legacy = self.root / 'eski.doc'
+        legacy.write_bytes(b'\xd0\xcf\x11\xe0 ole')
+        with mock.patch('documents.office_converter', return_value=None):
+            with self.assertRaises(ValueError) as caught:
+                documents.pages_of(legacy)
+        self.assertIn('LibreOffice', str(caught.exception))
+
+        def fake_run(command, **_kwargs):
+            outdir = Path(command[command.index('--outdir') + 1])
+            write_zip(outdir / 'eski.docx', {'word/document.xml': (
+                f'<w:document {W_NS}><w:body><w:p><w:r><w:t>Eski belge metni.</w:t></w:r>'
+                '</w:p></w:body></w:document>')})
+            return mock.Mock(returncode=0, stderr='', stdout='')
+
+        with mock.patch('documents.office_converter', return_value='soffice'), \
+                mock.patch('subprocess.run', side_effect=fake_run) as run, \
+                mock.patch('qa.work_dir', return_value=self.root / 'work'):
+            self.assertEqual(documents.pages_of(legacy), ['Eski belge metni.'])
+            documents.pages_of(legacy)
+            self.assertEqual(run.call_count, 1, 'donusturulmus kopya tekrar kullanilmali')
+            self.assertIn('--headless', run.call_args.args[0])
+
     def test_epub_chapters_in_spine_order(self):
         path = self.root / 'kitap.epub'
         write_zip(path, {

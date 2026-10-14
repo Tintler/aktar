@@ -35,7 +35,8 @@ KINDS = {'video': VIDEO_EXTENSIONS, 'document': documents.SUFFIXES,
          'image': documents.IMAGE_SUFFIXES}
 TEXT_KINDS = ('document', 'image')  # documents.py ile metne cevrilen turler
 DOCUMENT_LABELS = {'text': 'Metin dosyası', 'word': 'Word metni', 'sheet': 'Tablo',
-                   'epub': 'E-kitap', 'image': 'Görü modeli'}
+                   'epub': 'E-kitap', 'image': 'Görü modeli', 'slides': 'Sunum',
+                   'html': 'Web sayfası'}
 SKIPPED_DIRS = {'$recycle.bin', 'system volume information', '__pycache__', 'node_modules'}
 
 
