@@ -86,30 +86,6 @@
     <div class="page-body">
       <div class="col">
         <section>
-          <h2>Görünüm</h2>
-          <div class="themes">
-            {#each choices as theme (theme.id)}
-              {@const p = preview(theme)}
-              <button class="theme" class:on={app.themeId === theme.id} disabled={!!theme.error} title={theme.error ?? ''}
-                onclick={() => setTheme(theme.id)}>
-                <span class="mini" style:background={p.window} style:border-color={p.outline}>
-                  <span class="mini-side" style:background={p.panel}><i style:background={p.accent}></i><i style:background={p.dim}></i><i style:background={p.dim}></i></span>
-                  <span class="mini-main"><i style:background={p.text}></i><i style:background={p.secondary}></i><b style:background={p.accent}></b></span>
-                </span>
-                <span class="tname">
-                  {#if theme.system}<Icon name="monitor" size={14} />{/if}{theme.name}
-                </span>
-                {#if theme.error}<span class="terr">Bozuk dosya</span>{/if}
-              </button>
-            {/each}
-          </div>
-          <div class="row-actions">
-            <button class="btn sm" onclick={() => act('open_themes_folder')}><Icon name="folderOpen" size={14} />Temalar klasörünü aç</button>
-            <button class="btn sm" onclick={reloadThemes}><Icon name="refresh" size={14} />Yeniden yükle</button>
-          </div>
-        </section>
-
-        <section>
           <h2>LM Studio ve model</h2>
           {#if info.locked.length}<div class="warn"><Icon name="alert" size={16} />Çeviri sürerken model ve bağlantı ayarları değiştirilemez.</div>{/if}
           <div class="fr">
@@ -234,6 +210,30 @@
               <input class="field n" type="number" {min} {max} {step} bind:value={cfg[key]} disabled={locked(key)} />
             </div>
           {/each}
+        </section>
+
+        <section>
+          <h2>Görünüm</h2>
+          <div class="themes">
+            {#each choices as theme (theme.id)}
+              {@const p = preview(theme)}
+              <button class="theme" class:on={app.themeId === theme.id} disabled={!!theme.error} title={theme.error ?? ''}
+                onclick={() => setTheme(theme.id)}>
+                <span class="mini" style:background={p.window} style:border-color={p.outline}>
+                  <span class="mini-side" style:background={p.panel}><i style:background={p.accent}></i><i style:background={p.dim}></i><i style:background={p.dim}></i></span>
+                  <span class="mini-main"><i style:background={p.text}></i><i style:background={p.secondary}></i><b style:background={p.accent}></b></span>
+                </span>
+                <span class="tname">
+                  {#if theme.system}<Icon name="monitor" size={14} />{/if}{theme.name}
+                </span>
+                {#if theme.error}<span class="terr">Bozuk dosya</span>{/if}
+              </button>
+            {/each}
+          </div>
+          <div class="row-actions">
+            <button class="btn sm" onclick={() => act('open_themes_folder')}><Icon name="folderOpen" size={14} />Temalar klasörünü aç</button>
+            <button class="btn sm" onclick={reloadThemes}><Icon name="refresh" size={14} />Yeniden yükle</button>
+          </div>
         </section>
       </div>
     </div>
