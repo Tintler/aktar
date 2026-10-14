@@ -70,7 +70,7 @@ DEFAULT_CONFIG = {
     'qa_model': '',
     # Taranmis PDF sayfalari icin OCR motoru (F74): 'vision' (gorsel model) ya da 'tesseract'
     # (yerel Tesseract; temiz ve uzun taramalarda hizli). Gorseller her zaman gorsel modelle.
-    'ocr_engine': 'vision',
+    'ocr_engine': 'auto',     # auto: Tesseract kuruluysa o, yoksa gorsel model
     'tesseract_path': '',     # bos: PATH / Program Files / bin/tesseract icinde aranir
     'tesseract_lang': 'tur+eng',
     # Reasoning/thinking ureten modellerde dusunmeyi kapatma denemesi
@@ -216,8 +216,8 @@ def validate_config(cfg):
         raise ValueError('whisper_language boş (otomatik) veya dil kodu (örn. en) olmalı.')
     if not isinstance(cfg.get('whisper_cuda_dir', ''), str):
         raise ValueError('whisper_cuda_dir klasör yolu (metin) olmalı.')
-    if cfg.get('ocr_engine', 'vision') not in ('vision', 'tesseract'):
-        raise ValueError('ocr_engine vision ya da tesseract olmalı.')
+    if cfg.get('ocr_engine', 'auto') not in ('auto', 'vision', 'tesseract'):
+        raise ValueError('ocr_engine auto, vision ya da tesseract olmalı.')
     if not re.fullmatch(r'[a-z_]{3,}(\+[a-z_]{3,})*', str(cfg.get('tesseract_lang', 'tur+eng'))):
         raise ValueError('tesseract_lang dil kodları olmalı (örn. tur+eng).')
     if not isinstance(cfg.get('qa_model', ''), str):

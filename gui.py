@@ -745,7 +745,8 @@ NONE_SERIES = '(Seri yok)'
 EMBEDDING_OFF = '(kapalı)'
 VISION_SAME = '(analiz modeliyle aynı)'
 QA_SAME = '(analiz modeliyle aynı)'
-OCR_ENGINES = [('vision', 'Görü modeli (LM Studio)'), ('tesseract', 'Tesseract (yerel)')]
+OCR_ENGINES = [('auto', 'Otomatik (Tesseract varsa o)'), ('tesseract', 'Tesseract (yerel)'),
+               ('vision', 'Görü modeli (LM Studio)')]
 NEW_SERIES = '+ Yeni seri...'
 
 
@@ -1206,12 +1207,13 @@ class SettingsDialog(QDialog):
         engine = DropdownCombo()
         engine.setEditable(False)
         engine.addItems([label for _key, label in OCR_ENGINES])
-        engine.setCurrentIndex(max(0, [key for key, _label in OCR_ENGINES].index(
-            config.get('ocr_engine', 'vision')) if config.get('ocr_engine', 'vision')
-            in dict(OCR_ENGINES) else 0))
-        engine.setToolTip('Taranmış PDF sayfalarını okuyan motor. Tesseract yerel ve hızlıdır '
-                          '(temiz, uzun taramalar); görü modeli karmaşık sayfalarda daha iyidir. '
-                          'Görseller her zaman görü modeliyle okunur (tarif için).')
+        keys = [key for key, _label in OCR_ENGINES]
+        current = config.get('ocr_engine', 'auto')
+        engine.setCurrentIndex(keys.index(current) if current in keys else 0)
+        engine.setToolTip('Taranmış PDF sayfalarını okuyan motor. Tesseract yerel, hızlı ve '
+                          'metin uydurmaz. Genel görü modelleri küçük yazılı sayfalarda (dergi, '
+                          'künye) metin uydurabilir; OCR için eğitilmiş küçük bir model (ör. '
+                          'GLM-OCR) daha güvenilirdir. Görseller her zaman görü modeliyle okunur.')
         self.fields['ocr_engine'] = engine
         layout.addRow('OCR motoru', engine)
         tesseract = QLineEdit(str(config.get('tesseract_path', '')))
@@ -1475,7 +1477,7 @@ class SettingsDialog(QDialog):
         if key == 'qa_model' and text == QA_SAME:
             return ''
         if key == 'ocr_engine':
-            return dict((label, name) for name, label in OCR_ENGINES).get(text, 'vision')
+            return dict((label, name) for name, label in OCR_ENGINES).get(text, 'auto')
         return '' if key == 'vision_model' and text == VISION_SAME else text
 
     def reset_defaults(self):

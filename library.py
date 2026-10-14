@@ -589,7 +589,7 @@ def vision_reader(cfg, log=print):
     retries = int(cfg.get('auto_retry_count', 2))
 
     import threading
-    use_tesseract = cfg.get('ocr_engine', 'vision') == 'tesseract'
+    use_tesseract = documents.ocr_engine(cfg) == 'tesseract'
     tesseract = []  # ilk taranmis sayfada kurulur; gorsel okuyan kuyruk Tesseract'siz de calisir
     lock = threading.Lock()
 
@@ -601,12 +601,19 @@ def vision_reader(cfg, log=print):
             return tesseract[0](png)  # F74: taranmis sayfa Tesseract ile; gorseller modelde
         for attempt in range(retries + 1):
             try:
-                return qa.strip_thinking(client.vision(prompt, png))
+                text = qa.strip_thinking(client.vision(prompt, png))
             except RuntimeError as error:
                 if attempt >= retries:
                     raise
                 log(f'Görü isteği başarısız, yeniden deneniyor ({attempt + 1}/{retries}): {error}')
                 time.sleep(VISION_RETRY_SECONDS)
+                continue
+            # Kucuk yazili sayfalarda model ayni paragrafi tekrar tekrar yazabiliyor (F76)
+            text, removed = documents.trim_repetition(text)
+            if removed:
+                log(f'UYARI: Görü modeli kendini tekrar etti; {removed} tekrar eden parça atıldı. '
+                    'Sayfa metni güvenilir olmayabilir (Tesseract ya da OCR modeli deneyin).')
+            return text
         raise RuntimeError('Görü isteği tamamlanamadı.')
     # Tesseract: sayfalar paralel ve gri tonlu (hizli) cizilir; gorsel model tek tek.
     read.workers = documents.tesseract_workers() if use_tesseract else 1

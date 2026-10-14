@@ -393,6 +393,47 @@ def tesseract_path(cfg=None):
     return next((str(item) for item in candidates if item.is_file()), None)
 
 
+_PHRASE_LOOP = re.compile(r'(\S.{8,200}?)(?:\s*\1){3,}', re.DOTALL)
+
+
+def trim_repetition(text, min_chars=25):
+    """Gorsel modelin dongusunu keser: daha once gecen cumle (min_chars+) tekrar gelirse atilir.
+    (temiz metin, atilan cumle sayisi). Tekrarsiz paragraflar oldugu gibi kalir."""
+    # Cumle icinde donen ifade ("X'in yeni versiyonu olan X'in yeni versiyonu olan ..."): bir kez
+    removed = 0
+
+    def collapse(match):
+        nonlocal removed
+        removed += 1
+        return match.group(1)
+    text = _PHRASE_LOOP.sub(collapse, text)
+    seen = set()
+    kept = []
+    for paragraph in re.split(r'\n\s*\n', text):
+        sentences = re.split(r'(?<=[.!?…])\s+', ' '.join(paragraph.split()))
+        fresh = []
+        for sentence in sentences:
+            key = sentence.casefold()
+            if len(key) >= min_chars and key in seen:
+                removed += 1
+                continue
+            seen.add(key)
+            fresh.append(sentence)
+        if len(fresh) == len(sentences):
+            kept.append(paragraph)
+        elif fresh:
+            kept.append(' '.join(fresh))
+    return '\n\n'.join(part for part in kept if part.strip()), removed
+
+
+def ocr_engine(cfg):
+    """Taranmis sayfalar icin kullanilacak motor: 'tesseract' ya da 'vision'."""
+    engine = cfg.get('ocr_engine', 'auto')
+    if engine == 'auto':
+        return 'tesseract' if tesseract_path(cfg) else 'vision'
+    return engine
+
+
 def tesseract_workers():
     """Ayni anda calisan Tesseract sayisi: bir-iki cekirdek arayuze kalir, en fazla 8."""
     import os

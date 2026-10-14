@@ -498,3 +498,34 @@ class TesseractTests(unittest.TestCase):
         self.assertEqual(done, {str(n): f'{n - 1}:True' for n in range(1, 21)})
         self.assertGreater(state['peak'], 1)
         self.assertEqual(renderer.close.call_count, 2)
+
+    def test_trim_repetition_cuts_model_loops_only(self):
+        clean = 'Başlık\n\nBirinci paragraf burada yazıyor. İkinci cümle de var.\n\nKısa\n\nKısa'
+        self.assertEqual(documents.trim_repetition(clean), (clean, 0))
+        loop = ('Giriş cümlesi burada başlıyor ve devam ediyor. '
+                + "X-COM'un yeni versiyonu olan " * 40 + 'son.')
+        text, removed = documents.trim_repetition(loop)
+        self.assertGreater(removed, 0)
+        self.assertLess(len(text), 150)
+        block = 'Wings oyununun yapımcıları yeni bir grup kurdu.\nBir yıl sonra şirket oldular.'
+        text, removed = documents.trim_repetition('\n\n'.join(['Başlık'] + [block] * 6))
+        self.assertEqual(text.count('Wings'), 1)
+        self.assertGreater(removed, 0)
+
+    def test_auto_engine_prefers_installed_tesseract(self):
+        with mock.patch.object(documents, 'tesseract_path', return_value='tesseract'):
+            self.assertEqual(documents.ocr_engine({'ocr_engine': 'auto'}), 'tesseract')
+            self.assertEqual(documents.ocr_engine({'ocr_engine': 'vision'}), 'vision')
+        with mock.patch.object(documents, 'tesseract_path', return_value=None):
+            self.assertEqual(documents.ocr_engine({}), 'vision')
+
+    def test_vision_reader_trims_loops_and_warns(self):
+        cfg = dict(DEFAULT_CONFIG, ocr_engine='vision')
+        client = mock.Mock()
+        client.vision.return_value = 'Bir cümle burada yazılı duruyor.\n\n' * 5
+        logs = []
+        with mock.patch('app_core.Client', return_value=client):
+            read = library.vision_reader(cfg, log=logs.append)
+            self.assertEqual(read(b'x', documents.OCR_PROMPT), 'Bir cümle burada yazılı duruyor.')
+        self.assertEqual(read.workers, 1)
+        self.assertTrue(any('tekrar' in line for line in logs))
