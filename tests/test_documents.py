@@ -413,3 +413,59 @@ class OfficeAndEbookTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TesseractTests(unittest.TestCase):
+    def _run(self, available='tur\neng\n'):
+        calls = []
+
+        def run(cmd, **kwargs):
+            calls.append(cmd)
+            if '--list-langs' in cmd:
+                return mock.Mock(returncode=0, stdout='List of available languages:\n' + available)
+            return mock.Mock(returncode=0, stdout='Merhaba dünya'.encode('utf-8'), stderr=b'')
+        return calls, run
+
+    def test_configured_path_must_exist(self):
+        self.assertIsNone(documents.tesseract_path({'tesseract_path': r'Z:\yok\tesseract.exe'}))
+        with tempfile.TemporaryDirectory() as folder:
+            exe = Path(folder) / 'tesseract.exe'
+            exe.write_bytes(b'')
+            self.assertEqual(documents.tesseract_path({'tesseract_path': str(exe)}), str(exe))
+
+    def test_missing_tesseract_explains(self):
+        with mock.patch.object(documents, 'tesseract_path', return_value=None):
+            with self.assertRaisesRegex(ValueError, 'Tesseract bulunamadı'):
+                documents.tesseract_reader({'tesseract_lang': 'tur+eng'})
+
+    def test_reads_page_with_available_languages(self):
+        calls, run = self._run('eng\nosd\n')
+        logs = []
+        with mock.patch.object(documents, 'tesseract_path', return_value='tesseract'), \
+                mock.patch('subprocess.run', side_effect=run):
+            read = documents.tesseract_reader({'tesseract_lang': 'tur+eng'}, logs.append)
+            self.assertEqual(read(b'png'), 'Merhaba dünya')
+        self.assertIn(['-l', 'eng'], [calls[1][3:5]])
+        self.assertTrue(any('eksik dil' in line for line in logs))
+
+    def test_vision_reader_routes_scans_to_tesseract_and_images_to_model(self):
+        cfg = dict(DEFAULT_CONFIG, ocr_engine='tesseract')
+        client = mock.Mock()
+        client.vision.return_value = 'bir kedi'
+        with mock.patch('app_core.Client', return_value=client), \
+                mock.patch.object(documents, 'tesseract_reader',
+                                  return_value=lambda png: 'tarama metni') as built:
+            read = library.vision_reader(cfg, log=lambda *_: None)
+            self.assertEqual(read(b'x', documents.OCR_PROMPT), 'tarama metni')
+            self.assertEqual(read(b'x', documents.OCR_PROMPT), 'tarama metni')
+            self.assertEqual(read(b'x', documents.IMAGE_PROMPT), 'bir kedi')
+        self.assertEqual(built.call_count, 1)
+        client.vision.assert_called_once()
+
+    def test_config_validation(self):
+        from app_core import validate_config
+        validate_config(dict(DEFAULT_CONFIG, ocr_engine='tesseract', tesseract_lang='tur+eng'))
+        with self.assertRaises(ValueError):
+            validate_config(dict(DEFAULT_CONFIG, ocr_engine='abbyy'))
+        with self.assertRaises(ValueError):
+            validate_config(dict(DEFAULT_CONFIG, tesseract_lang='tur; rm'))

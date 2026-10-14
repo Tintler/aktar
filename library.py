@@ -578,7 +578,8 @@ VISION_RETRY_SECONDS = 5
 
 
 def vision_reader(cfg, log=print):
-    """Gorsel model ile sayfa/gorsel okuyan fonksiyon: (png, istem) -> metin.
+    """Sayfa/gorsel okuyan fonksiyon: (png, istem) -> metin. Taranmis PDF sayfalari
+    `ocr_engine` 'tesseract' ise Tesseract ile, gorseller her zaman gorsel modelle okunur.
 
     LM Studio modeli istek aninda yuklerken gorsel istegi reddedebiliyor (HTTP 400);
     kisa bekleyip `auto_retry_count` kadar yeniden denenir."""
@@ -587,7 +588,13 @@ def vision_reader(cfg, log=print):
     client = Client(cfg, log=log)
     retries = int(cfg.get('auto_retry_count', 2))
 
+    tesseract = []  # ilk taranmis sayfada kurulur; gorsel okuyan kuyruk Tesseract'siz de calisir
+
     def read(png, prompt):
+        if cfg.get('ocr_engine', 'vision') == 'tesseract' and prompt == documents.OCR_PROMPT:
+            if not tesseract:
+                tesseract.append(documents.tesseract_reader(cfg, log))
+            return tesseract[0](png)  # F74: taranmis sayfa Tesseract ile; gorseller modelde
         for attempt in range(retries + 1):
             try:
                 return qa.strip_thinking(client.vision(prompt, png))

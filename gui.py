@@ -745,6 +745,7 @@ NONE_SERIES = '(Seri yok)'
 EMBEDDING_OFF = '(kapalı)'
 VISION_SAME = '(analiz modeliyle aynı)'
 QA_SAME = '(analiz modeliyle aynı)'
+OCR_ENGINES = [('vision', 'Görü modeli (LM Studio)'), ('tesseract', 'Tesseract (yerel)')]
 NEW_SERIES = '+ Yeni seri...'
 
 
@@ -1202,6 +1203,36 @@ class SettingsDialog(QDialog):
                           "GLM-OCR) LM Studio'ya yüklenip burada seçilebilir.")
         self.fields['vision_model'] = vision
         layout.addRow('Görü modeli', vision)
+        engine = DropdownCombo()
+        engine.setEditable(False)
+        engine.addItems([label for _key, label in OCR_ENGINES])
+        engine.setCurrentIndex(max(0, [key for key, _label in OCR_ENGINES].index(
+            config.get('ocr_engine', 'vision')) if config.get('ocr_engine', 'vision')
+            in dict(OCR_ENGINES) else 0))
+        engine.setToolTip('Taranmış PDF sayfalarını okuyan motor. Tesseract yerel ve hızlıdır '
+                          '(temiz, uzun taramalar); görü modeli karmaşık sayfalarda daha iyidir. '
+                          'Görseller her zaman görü modeliyle okunur (tarif için).')
+        self.fields['ocr_engine'] = engine
+        layout.addRow('OCR motoru', engine)
+        tesseract = QLineEdit(str(config.get('tesseract_path', '')))
+        tesseract.setPlaceholderText('Boş: otomatik bul (PATH, Program Files)')
+        self.fields['tesseract_path'] = tesseract
+        self.tesseract_browse = QPushButton('Gözat...')
+        self.tesseract_browse.clicked.connect(self.choose_tesseract)
+        tesseract_row = QHBoxLayout()
+        tesseract_row.addWidget(tesseract, 1)
+        tesseract_row.addWidget(self.tesseract_browse)
+        layout.addRow('Tesseract', tesseract_row)
+        tesseract_lang = QLineEdit(str(config.get('tesseract_lang', 'tur+eng')))
+        tesseract_lang.setPlaceholderText('tur+eng')
+        self.fields['tesseract_lang'] = tesseract_lang
+        layout.addRow('Tesseract dili', tesseract_lang)
+        self.tesseract_hint = QLabel('')
+        self.tesseract_hint.setObjectName('hint')
+        self.tesseract_hint.setWordWrap(True)
+        layout.addRow('', self.tesseract_hint)
+        tesseract.textChanged.connect(self._check_tesseract)
+        self._check_tesseract(tesseract.text())
 
         engine_section = QLabel('Çeviri davranışı')
         engine_section.setObjectName('settingsSection')
@@ -1334,6 +1365,19 @@ class SettingsDialog(QDialog):
         wanted = form_host.sizeHint().height() + 110
         self.resize(max(560, form_host.sizeHint().width() + 60), min(wanted, int(available * 0.85)))
 
+    def choose_tesseract(self):
+        current = self.fields['tesseract_path'].text().strip()
+        path, _ = QFileDialog.getOpenFileName(self, 'Tesseract programı', current,
+                                              'Tesseract (tesseract*)')
+        if path:
+            self.fields['tesseract_path'].setText(str(Path(path)))
+
+    def _check_tesseract(self, text):
+        import documents
+        found = documents.tesseract_path({'tesseract_path': str(text).strip()})
+        self.tesseract_hint.setText(('Bulundu: ' + found) if found else
+                                    'Tesseract bulunamadı (OCR motoru Tesseract seçilirse gerekir).')
+
     def choose_cuda_dir(self):
         current = self.fields['whisper_cuda_dir'].text().strip()
         folder = QFileDialog.getExistingDirectory(self, 'cuBLAS / cuDNN klasörü', current)
@@ -1430,6 +1474,8 @@ class SettingsDialog(QDialog):
             return ''
         if key == 'qa_model' and text == QA_SAME:
             return ''
+        if key == 'ocr_engine':
+            return dict((label, name) for name, label in OCR_ENGINES).get(text, 'vision')
         return '' if key == 'vision_model' and text == VISION_SAME else text
 
     def reset_defaults(self):

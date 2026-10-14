@@ -354,6 +354,65 @@ def image_bytes(path):
     return _png(flat)
 
 
+def tesseract_path(cfg=None):
+    """Tesseract programi: ayardaki yol, PATH, Program Files ya da uygulamadaki bin/tesseract."""
+    import os
+    import shutil
+    from app_core import APP_DIR, EXE_SUFFIX
+    configured = str((cfg or {}).get('tesseract_path', '')).strip()
+    if configured:
+        return configured if Path(configured).is_file() else None
+    found = shutil.which('tesseract')
+    if found:
+        return found
+    candidates = [APP_DIR / 'bin' / 'tesseract' / ('tesseract' + EXE_SUFFIX)]
+    if os.name == 'nt':
+        for root in (os.environ.get('ProgramFiles', r'C:\Program Files'),
+                     os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)'),
+                     os.environ.get('LOCALAPPDATA', '')):
+            if root:
+                candidates.append(Path(root) / 'Tesseract-OCR' / 'tesseract.exe')
+                candidates.append(Path(root) / 'Programs' / 'Tesseract-OCR' / 'tesseract.exe')
+    return next((str(item) for item in candidates if item.is_file()), None)
+
+
+def tesseract_reader(cfg, log=print):
+    """(png) -> metin; Tesseract yoksa anlasilir hata. Turkce dil verisi yoksa 'eng'e duser."""
+    import subprocess
+    import tempfile
+    exe = tesseract_path(cfg)
+    if exe is None:
+        raise ValueError('Tesseract bulunamadı: kurun (Windows: UB Mannheim Tesseract, Türkçe dil '
+                         'paketiyle; Linux: tesseract-ocr tesseract-ocr-tur) ya da Ayarlar\'da '
+                         'yolunu gösterin; veya OCR motoru olarak görü modelini seçin.')
+    hide = {'creationflags': getattr(subprocess, 'CREATE_NO_WINDOW', 0)} if os_name() == 'nt' else {}
+    wanted = str(cfg.get('tesseract_lang', 'tur+eng')).strip() or 'tur+eng'
+    try:
+        listed = subprocess.run([exe, '--list-langs'], capture_output=True, text=True,
+                                encoding='utf-8', errors='replace', timeout=60, **hide)
+        available = set((listed.stdout or '').split())
+    except (OSError, subprocess.SubprocessError):
+        available = set()
+    langs = [lang for lang in wanted.split('+') if not available or lang in available]
+    if not langs:
+        log(f'UYARI: Tesseract dil verisi yok ({wanted}); eng kullanılıyor.')
+        langs = ['eng']
+    elif len(langs) < len(wanted.split('+')):
+        log(f'UYARI: Tesseract\'ta eksik dil verisi; kullanılan: {"+".join(langs)}')
+
+    def read(png):
+        with tempfile.TemporaryDirectory() as folder:
+            image = Path(folder) / 'sayfa.png'
+            image.write_bytes(png)
+            result = subprocess.run([exe, str(image), 'stdout', '-l', '+'.join(langs),
+                                     '--psm', '3'], capture_output=True, timeout=600, **hide)
+        if result.returncode != 0:
+            raise ValueError('Tesseract hatası: '
+                             + result.stderr.decode('utf-8', 'replace').strip()[:200])
+        return result.stdout.decode('utf-8', 'replace')
+    return read
+
+
 def scanned_pages(path):
     """PDF'te metin katmani olmayan (OCR gereken) sayfa numaralari (1'den baslar)."""
     return [number for number, text in enumerate(pdf_pages(path), 1)
