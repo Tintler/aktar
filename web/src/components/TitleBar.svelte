@@ -29,7 +29,7 @@
 {/if}
 
 <style>
-  .controls { display: flex; gap: 2px; align-self: flex-start; padding-top: 8px; margin-left: 8px; }
+  .controls { position: fixed; top: 6px; right: 8px; z-index: 40; display: flex; gap: 2px; }
   .controls button { width: 40px; height: 30px; border-radius: 6px; display: grid; place-items: center; color: var(--secondary); }
   .controls button:hover { background: var(--surface-hover); color: var(--text); }
   .controls .close:hover { background: #c42b1c; color: #fff; }

@@ -12,6 +12,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import bridge  # noqa: E402
+import bridge_library  # noqa: E402
+import library  # noqa: E402
 import bridge_translate  # noqa: E402
 import themes  # noqa: E402
 
@@ -162,6 +164,97 @@ class BridgeTests(unittest.TestCase):
 
     def test_close_is_allowed_when_idle(self):
         self.assertTrue(self.bridge.request_close(lambda: None))
+
+
+class LibraryBridgeTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.patches = [mock.patch.object(bridge, 'APP_DIR', self.root),
+                        mock.patch.object(library, 'APP_DIR', self.root)]
+        for patch in self.patches:
+            patch.start()
+        self.events = []
+        self.bridge = bridge.Bridge(emit=lambda event, data: self.events.append((event, data)))
+
+    def tearDown(self):
+        for patch in self.patches:
+            patch.stop()
+        self.temp.cleanup()
+
+    def wait_scan(self):
+        import time
+        for _ in range(200):
+            if not self.bridge._lib_scanning:
+                return
+            time.sleep(0.02)
+
+    def test_row_shows_relative_folder_and_length(self):
+        root = self.root / 'Dersler'
+        entry = {'path': root / 'Hafta-1' / 'a.mkv', 'root': str(root), 'kind': 'video', 'new': True, 'missing': False}
+        row = bridge_library.row_of(entry, {'status': 'ready', 'source': 'Altyazı · tur', 'duration': 3725.0})
+        self.assertEqual(row['where'], 'Hafta-1')
+        self.assertEqual(row['length'], '1:02:05')
+        self.assertEqual(row['status_text'], 'Hazır')
+        self.assertTrue(row['new'])
+        doc = dict(entry, path=root / 'b.pdf', kind='document')
+        self.assertEqual(bridge_library.row_of(doc, {'status': 'transcript', 'source': '', 'duration': 12})['length'], '12 sayfa')
+        self.assertEqual(bridge_library.where(dict(entry, path=root / 'c.mkv')), 'Dersler')
+
+    def test_chat_entries_turn_citations_into_json(self):
+        cite = {'video': self.root / 'a.mkv', 'start': 12.0, 'label': 'V1 0:12', 'title': 'a', 'document': False}
+        turn = {'parts': [('text', 'Cevap '), ('cite', [cite])],
+                'sources': [{'video': self.root / 'a.mkv', 'start': 12.0, 'label': 'V1', 'title': 'a', 'count': 1}]}
+        entries = bridge_library.chat_entries([('user', 'Soru?'), ('assistant', turn), ('note', 'not')])
+        json.dumps(entries)  # arayuze gidebilmeli
+        self.assertEqual(entries[0], {'kind': 'user', 'text': 'Soru?'})
+        self.assertEqual(entries[1]['parts'][1]['items'][0]['label'], 'V1 0:12')
+        self.assertEqual(entries[1]['sources'][0]['count'], 1)
+        self.assertEqual(entries[2]['kind'], 'note')
+
+    def test_dropping_a_folder_creates_a_collection_and_scans_it(self):
+        folder = self.root / 'Dersler'
+        (folder / 'Hafta-1').mkdir(parents=True)
+        (folder / 'Hafta-1' / '01 Giris.mkv').write_bytes(b'x')
+        (folder / 'notlar.txt').write_text('Aşırı öğrenme', encoding='utf-8')
+        (folder / 'resim.xyz').write_bytes(b'x')
+        state = self.bridge.library_add_paths([str(folder)])
+        self.assertEqual(state['title'], 'Dersler')
+        self.assertEqual([item['title'] for item in state['collections']], ['Dersler'])
+        self.wait_scan()
+        state = self.bridge.library_state()
+        self.assertEqual(sorted(row['name'] for row in state['rows']), ['01 Giris.mkv', 'notlar.txt'])
+        self.assertEqual(state['folders'][0]['count'], 2)
+        found = self.bridge.library_search('giris')
+        self.assertEqual(len(found['keys']), 1)
+        self.assertFalse(self.bridge.library_add_paths([str(folder / 'resim.xyz')]).get('rows'))
+
+    def test_exclude_and_delete_keep_files_on_disk(self):
+        folder = self.root / 'Seri'
+        folder.mkdir()
+        video = folder / 'a.mkv'
+        video.write_bytes(b'x')
+        state = self.bridge.library_add_paths([str(folder)])
+        self.wait_scan()
+        state = self.bridge.library_exclude([str(video)])
+        self.wait_scan()
+        self.assertEqual(self.bridge.library_state()['rows'], [])
+        self.assertTrue(video.exists())
+        state = self.bridge.delete_collection(state['slug'])
+        self.assertEqual(state['collections'], [])
+        self.assertEqual(state['slug'], '')
+        self.assertTrue(video.exists())
+
+    def test_chat_needs_indexed_files(self):
+        folder = self.root / 'Bos'
+        folder.mkdir()
+        (folder / 'a.mkv').write_bytes(b'x')
+        self.bridge.library_add_paths([str(folder)])
+        self.wait_scan()
+        chat = self.bridge.chat_state()
+        self.assertFalse(chat['enabled'])
+        self.assertEqual(chat['entries'][0]['kind'], 'note')
+        self.assertEqual(self.bridge.chat_ask('Soru?')['entries'], chat['entries'])
 
 
 if __name__ == '__main__':

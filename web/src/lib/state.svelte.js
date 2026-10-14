@@ -18,6 +18,11 @@ export const app = $state({
   translateView: { stream: null, analysis: false, tab: 'console' },
   // Komut satirindan ya da baska sayfadan acilmak uzere bekleyen video (Translate acilinca alir).
   pendingVideo: null,
+  library: { collections: [], slug: '', title: '', folders: [], rows: [], meta: '', scanning: false, queue: null, kinds: {} },
+  // Kutuphane gorunum durumu: secili satirlar (anahtar), tur filtresi, arama, sohbet paneli.
+  libraryView: { selected: [], kind: '', query: '', search: null, chatOpen: true, scope: 'all' },
+  chat: null,                 // bridge_library.chat_state
+  prepare: null,              // 'Hepsini hazirla' penceresi: plan bilgisi + sayimlar
 });
 
 export const toasts = $state([]);
@@ -107,6 +112,32 @@ export async function init() {
     }
     notice('Çeviri tamamlandı', 'Çeviri başarıyla tamamlandı.\nÇıktı: ' + name);
   });
+  on('library', (state) => setLibrary(state));
+  on('row', ({ row, meta }) => {
+    const index = app.library.rows.findIndex((r) => r.key === row.key);
+    if (index >= 0) app.library.rows[index] = row;
+    app.library.meta = meta;
+  });
+  on('row_status', ({ key, text, tone }) => {
+    const row = app.library.rows.find((r) => r.key === key);
+    if (row) { row.busy_text = text; row.busy_tone = tone; }
+  });
+  on('queue', ({ queue, message, failed }) => {
+    app.library.queue = queue;
+    if (!queue) {
+      for (const row of app.library.rows) delete row.busy_text;
+      if (message) {
+        if (failed) notice('Toplu hazırlık', message + ' Ayrıntılar Altyazı Çevir sayfasındaki konsolda.');
+        else toast(message, 'ok');
+      }
+    }
+  });
+  on('prepare', (data) => {
+    if (app.prepare) Object.assign(app.prepare, data);
+  });
+  on('chat', ({ slug }) => {
+    if (slug === app.library.slug) refreshChat();
+  });
   on('dropped', ({ paths }) => {
     const handler = dropHandlers[app.view] ?? dropHandlers.library;
     handler?.(paths);
@@ -127,9 +158,54 @@ export async function init() {
   if (start.prefs?.view && ['library', 'translate'].includes(start.prefs.view)) app.view = start.prefs.view;
   app.models = { names: [], message: '', ...start.models };
   setTranslate(start.translate);
+  setLibrary(start.library);
   call('refresh_models');
   // Komut satirindan ("Birlikte ac") gelen video Altyazi Cevir'de acilir.
   if (start.open?.length) openInTranslate(start.open[0]);
+}
+
+export function setLibrary(state) {
+  if (!state) return;
+  const changed = state.slug !== app.library.slug;
+  Object.assign(app.library, state);
+  const view = app.libraryView;
+  if (changed) {
+    view.selected = [];
+    view.query = '';
+    view.search = null;
+    view.kind = '';
+  } else {
+    const keys = new Set(state.rows.map((r) => r.key));
+    view.selected = view.selected.filter((k) => keys.has(k));
+    if (view.query) runSearch();
+  }
+  refreshChat();
+}
+
+let searchSeq = 0;
+export async function runSearch() {
+  const seq = ++searchSeq;
+  const query = app.libraryView.query.trim();
+  const result = query ? await call('library_search', query) : null;
+  if (seq === searchSeq) app.libraryView.search = result;
+}
+
+export async function refreshChat() {
+  if (!app.library.slug) { app.chat = null; return; }
+  const view = app.libraryView;
+  const selected = view.scope === 'selected' ? selectedPaths() : null;
+  app.chat = await call('chat_state', selected);
+}
+
+export function selectedPaths() {
+  const keys = new Set(app.libraryView.selected);
+  return app.library.rows.filter((r) => keys.has(r.key)).map((r) => r.path);
+}
+
+// Dosyayi acar: video oynatici + soru sor, belge goruntuleyici. `at`: saniye ya da sayfa.
+// (Oynatici ve belge goruntuleyici sonraki asamalarda baglanacak.)
+export function openFile(row, at = null) {
+  toast('Oynatıcı ve belge görüntüleyici sonraki aşamada yeni arayüze taşınacak.', 'info');
 }
 
 export function openInTranslate(path) {

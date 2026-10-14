@@ -5,7 +5,8 @@ kullaniciya gosterilecek hatalar istisna yerine {'error': mesaj} olarak doner. A
 plandaki isler (gunluk, ilerleme, onay istekleri) enjekte edilen `emit` ile sayfaya itilir.
 
 Is mantigi app_core / library / qa modullerinde kalir; burada yalnizca arayuz akisi var.
-Bolumler: bu dosyada genel (ayarlar, tema, pencere), bridge_translate.py'de Altyazi Cevir.
+Bolumler: bu dosyada genel (ayarlar, tema, pencere), bridge_translate.py'de Altyazi Cevir,
+bridge_library.py'de Kutuphane.
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from pathlib import Path
 import documents
 import themes
 from app_core import APP_DIR, DEFAULT_CONFIG, WINDOWS, Client, load_config, read, save_json, validate_config
+from bridge_library import LibraryMixin
 from bridge_translate import TranslateMixin
 
 UI_FILE = 'ui.json'
@@ -39,7 +41,7 @@ def _error(error):
     return {'error': str(error)}
 
 
-class Bridge(TranslateMixin):
+class Bridge(TranslateMixin, LibraryMixin):
     def __init__(self, emit=None, dialogs=None):
         self._emit = emit or (lambda _event, _data: None)
         self._dialogs = dialogs          # desktop.Dialogs: open_file(), open_folder() ...
@@ -50,6 +52,7 @@ class Bridge(TranslateMixin):
         self._models = {'state': 'probing', 'names': [], 'message': '', 'model': ''}
         self._startup_paths = []
         self._init_translate()
+        self._init_library()
 
     # ------------------------------------------------------------------ yardimcilar
     def _log(self, message):
@@ -68,7 +71,7 @@ class Bridge(TranslateMixin):
         themes.install_presets()
         paths, self._startup_paths = self._startup_paths, []
         return {'prefs': self.ui_prefs(), 'themes': themes.list_themes(),
-                'translate': self.translate_state(), 'models': self._models,
+                'translate': self.translate_state(), 'library': self.library_open(), 'models': self._models,
                 'platform': 'windows' if WINDOWS else sys.platform, 'open': paths}
 
     def ui_prefs(self):
@@ -225,10 +228,12 @@ class Bridge(TranslateMixin):
 
     def request_close(self, close):
         """Pencere kapanirken cagrilir. Hemen kapanabiliyorsa True."""
-        if not self._running():
+        reasons = (['Çeviri sürüyor.'] if self._running() else []) + (
+            ['Toplu hazırlık sürüyor.'] if self._queue_running() else [])
+        if not reasons:
             return True
         self._pending_close = close
-        self._emit('confirm_close', {'reason': 'Çeviri sürüyor.'})
+        self._emit('confirm_close', {'reason': ' '.join(reasons)})
         return False
 
     def confirm_close(self):
@@ -236,6 +241,7 @@ class Bridge(TranslateMixin):
         close = getattr(self, '_pending_close', None)
         self._pending_close = None
         self._stop_translation_for_close()
+        self._stop_library_for_close()
         if close:
             threading.Timer(0.1, close).start()
         return True
@@ -243,3 +249,4 @@ class Bridge(TranslateMixin):
     def shutdown(self):
         """Pencere kapandi: arka plandaki isleri birak."""
         self._stop_translation_for_close()
+        self._stop_library_for_close()

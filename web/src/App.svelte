@@ -4,12 +4,15 @@
   import TitleBar from './components/TitleBar.svelte';
   import ConfirmHost from './components/ConfirmHost.svelte';
   import ReviewModal from './components/ReviewModal.svelte';
+  import Collections from './components/Collections.svelte';
+  import ChatPanel from './components/ChatPanel.svelte';
+  import MenuHost from './components/MenuHost.svelte';
   import Library from './views/Library.svelte';
   import Translate from './views/Translate.svelte';
   import Settings from './views/Settings.svelte';
   import { app, init, toasts, dismissToast, go } from './lib/state.svelte.js';
   import { call } from './lib/api.js';
-  import { initFrame, dragArea } from './lib/frame.svelte.js';
+  import { frame, initFrame, dragArea } from './lib/frame.svelte.js';
 
   init();
   initFrame();
@@ -38,6 +41,7 @@
     app.view = history[next];
   }
 
+  const panelOpen = $derived(app.view === 'library' && !!app.library.slug && app.libraryView.chatOpen);
   const models = $derived(app.models);
   const modelListed = $derived((models.names ?? []).includes(models.model));
 
@@ -73,14 +77,7 @@
       {/each}
     </nav>
     <div class="rule"></div>
-    <div class="side-body">
-      <div class="side-head">
-        <Icon name="library" size={20} /><b>Koleksiyonlar</b>
-      </div>
-      <div class="side-list">
-        <p class="hint">Koleksiyonlar bir sonraki aşamada buraya taşınacak.</p>
-      </div>
-    </div>
+    <div class="side-body"><Collections /></div>
     <div class="lm" title={models.message || ''}>
       <div class="row">
         <span class="dot {models.state === 'probing' ? 'wait' : models.state === 'failed' ? 'bad' : modelListed ? '' : 'wait'}"></span>
@@ -91,13 +88,15 @@
     </div>
   </aside>
 
-  <main>
+  <main class:controls={frame.custom && !panelOpen}>
     <header class="top" use:dragArea>
       <button class="icon-btn filled sm" title="Geri" disabled={position === 0} onclick={() => step(-1)}><Icon name="back" size={16} /></button>
       <button class="icon-btn filled sm" title="İleri" disabled={position >= history.length - 1} onclick={() => step(1)}><Icon name="forward" size={16} /></button>
       <div class="grow"></div>
+      {#if app.view === 'library' && app.library.slug && !app.libraryView.chatOpen}
+        <button class="btn sm" title="Koleksiyona sor panelini aç" onclick={() => (app.libraryView.chatOpen = true)}><Icon name="message" size={15} />Koleksiyona sor</button>
+      {/if}
       <button class="icon-btn" class:on={app.view === 'settings'} title="Ayarlar" onclick={() => go('settings')}><Icon name="settings" size={20} /></button>
-      <TitleBar />
     </header>
     <div class="view">
       {#if app.view === 'library'}<Library />
@@ -105,7 +104,10 @@
       {:else}<Settings />{/if}
     </div>
   </main>
+  {#if panelOpen}<ChatPanel />{/if}
 </div>
+<TitleBar />
+<MenuHost />
 
 {#if app.review}<ReviewModal data={app.review} onsubmit={submitReview} />{/if}
 <ConfirmHost />
@@ -120,7 +122,9 @@
 </div>
 
 <style>
-  .shell { display: grid; grid-template-columns: 300px 1fr; height: 100%; }
+  .shell { display: flex; height: 100%; }
+  .side { width: 300px; flex: none; }
+  @media (max-width: 1500px) { .side { width: 260px; } }
   .side { background: var(--panel); display: flex; flex-direction: column; padding: 14px 12px 12px; min-height: 0; }
   .brand { display: flex; align-items: center; gap: 10px; padding: 4px 14px 18px; font-weight: 700; font-size: 21px; letter-spacing: -.01em; }
   .brand i { color: var(--accent); font-style: normal; }
@@ -131,10 +135,6 @@
   .nav.on :global(svg) { color: var(--accent); }
   .rule { height: 1px; background: var(--outline); margin: 14px 6px; }
   .side-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  .side-head { display: flex; align-items: center; gap: 12px; padding: 4px 14px 12px; color: var(--secondary); }
-  .side-head b { color: var(--text); font-size: 16px; flex: 1; }
-  .side-list { flex: 1; min-height: 0; overflow: auto; }
-  .hint { color: var(--dim); font-size: 12px; padding: 4px 14px; }
   .lm { margin-top: 8px; padding: 10px 12px; border-radius: 10px; background: var(--surface); font-size: 12px; }
   .lm .row { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }
   .lm .st { flex: 1; min-width: 0; }
@@ -144,7 +144,9 @@
   .dot.bad { background: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 25%, transparent); }
   .lm .m { color: var(--secondary); margin-top: 4px; }
 
-  main { min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; }
+  main { flex: 1; min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; }
+  /* Pencere dugmeleri sag ustte sabit: panel kapaliyken ust cubuk onlara yer birakir. */
+  main.controls .top { padding-right: 150px; }
   .top { height: 64px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 32px; }
   .top .grow { flex: 1; align-self: stretch; }
   .top .icon-btn.on { color: var(--accent); }

@@ -36,12 +36,53 @@ export function createMock(emit) {
     probing: false, series: [{ slug: 'one-step-beyond', title: 'One Step Beyond' }], series_slug: 'one-step-beyond',
     chapter_glossary: [], analysis: '', running: false, paused: false, progress: { done: 80, total: 375 },
   };
+  const row = (name, kind, where, length, source, status, extra = {}) => ({
+    key: name, path: 'D:/Dersler/' + name, name, kind, where, folder: 'D:/Dersler/' + where, length, measured: length !== '—',
+    source, status, status_text: { ready: 'Hazır', transcript: 'Metin hazır', pending: 'Bekliyor', no_subtitle: 'Altyazı yok · Whisper bekliyor', missing: 'Bulunamadı' }[status],
+    new: false, missing: status === 'missing', ...extra });
+  const library = {
+    collections: [{ slug: 'ml', title: 'Makine Öğrenmesi', folders: 2, files: 0 }, { slug: 'kilavuz', title: 'Kullanım Kılavuzları', folders: 1, files: 3 }],
+    slug: 'ml', title: 'Makine Öğrenmesi', scanning: false, kinds: {},
+    folders: [{ path: 'D:/Dersler/ML', name: 'ML', count: 6 }, { path: 'D:/Dersler/Notlar', name: 'Notlar', count: 2 }],
+    meta: '8 dosya · 5 hazır · 1 bekliyor · 1 Whisper bekliyor · 1 bulunamadı',
+    queue: null,
+    rows: [
+      row('01 Doğrusal Regresyon.mkv', 'video', 'ML', '24:13', 'Altyazı · tur', 'ready'),
+      row('02 Lojistik Regresyon.mkv', 'video', 'ML', '31:02', 'Altyazı · eng', 'ready'),
+      row('03 Gradyan İnişi.mp4', 'video', 'ML', '18:40', 'Whisper · large-v3-turbo', 'ready'),
+      row('04 Aşırı Öğrenme.mkv', 'video', 'ML', '27:55', '', 'pending', { new: true }),
+      row('05 Düzenlileştirme.mp4', 'video', 'ML', '22:10', '', 'no_subtitle'),
+      row('06 Karar Ağaçları.mkv', 'video', 'ML', '—', '', 'missing'),
+      row('Ders notları.pdf', 'document', 'Notlar', '42 sayfa', 'PDF metni', 'ready'),
+      row('Tahta.jpg', 'image', 'Notlar', '1.2 MB', 'Görsel', 'transcript'),
+    ],
+  };
+  const chat = {
+    slug: 'ml', busy: false, enabled: true, note: '5 hazır dosya · 3 dosya henüz hazır değil',
+    overview: { summary: 'Bu koleksiyon denetimli öğrenmenin temellerini doğrusal regresyondan karar ağaçlarına kadar adım adım anlatıyor.', topics: ['Regresyon', 'Gradyan inişi', 'Aşırı öğrenme'], questions: ['Gradyan inişi nasıl çalışır?', 'Aşırı öğrenme nasıl önlenir?'], videos: 5 },
+    entries: [
+      { kind: 'user', text: 'Öğrenme oranı çok büyük seçilirse ne olur?' },
+      { kind: 'assistant', parts: [
+        { type: 'text', text: 'Öğrenme oranı çok büyükse gradyan inişi minimumun etrafında **salınır** ve hatta ıraksayabilir ' },
+        { type: 'cite', items: [{ path: 'x', start: 754, label: 'V3 12:34', title: '03 Gradyan İnişi' }] },
+        { type: 'text', text: '. Küçük değerlerde ise yakınsama yavaşlar ' },
+        { type: 'cite', items: [{ path: 'x', start: 70, label: 'V1 1:10', title: '01 Doğrusal Regresyon' }, { path: 'y', start: 12, label: 'V7 s.12', title: 'Ders notları' }] },
+        { type: 'text', text: '.' }],
+        sources: [{ path: 'x', start: 754, label: 'V3', title: '03 Gradyan İnişi', count: 1 }, { path: 'x', start: 70, label: 'V1', title: '01 Doğrusal Regresyon', count: 1 }, { path: 'y', start: 12, label: 'V7', title: 'Ders notları', count: 1 }] },
+    ],
+  };
   setTimeout(() => {
     for (const line of ['Video açıldı: D:\Diziler\One Step Beyond - S00E01 - Extended Pilot.mkv', 'Çeviri partisi 6/38 (10 çeviri birimi)', 'BİLGİ: model satır sayısını değiştirdi (beklenen 2, bulunan 1).', 'Çeviri partisi 7/38 (10 çeviri birimi)'])
       emit('log', { line: '[10:42:0' + Math.floor(Math.random() * 9) + '] ' + line });
   }, 300);
   const api = {
-    startup: async () => ({ prefs, themes: themes(), translate, models: { state: 'ok', names: ['gemma-4-26b-a4b-it-qat@q4_k_xl', 'qwen3-8b', 'text-embedding-embeddinggemma-2', 'glm-ocr'], model: settings.model, message: '' }, platform: 'windows', open: [] }),
+    library_open: async () => library,
+    library_state: async () => library,
+    chat_state: async () => chat,
+    library_search: async (q) => ({ query: q, keys: library.rows.slice(0, 3).map((r) => r.key), files: 2, limited: false, searched: q.length >= 3,
+      hits: [{ path: 'x', name: '03 Gradyan İnişi', start: 754, where: '12:34', text: 'öğrenme oranını küçültünce adımlar da küçülüyor' }, { path: 'y', name: 'Ders notları', start: 12, where: 's.12', text: 'Öğrenme oranı (learning rate) seçimi' }] }),
+    prepare_plan: async () => { setTimeout(() => emit('prepare', { counts: { ready: 4, summary: 1, index: 0, document: 0, subtitle: 1, vision: 0, whisper: 1 }, whisper_seconds: '22:10', vision_pages: 0, failed: [] }), 700); return { files: 7, model: settings.model, whisper: true, whisper_model: 'large-v3-turbo', whisper_device: 'auto', vision_model: settings.model, warnings: [] }; },
+    startup: async () => ({ prefs, themes: themes(), translate, library, models: { state: 'ok', names: ['gemma-4-26b-a4b-it-qat@q4_k_xl', 'qwen3-8b', 'text-embedding-embeddinggemma-2', 'glm-ocr'], model: settings.model, message: '' }, platform: 'windows', open: [] }),
     ui_prefs: async () => prefs,
     save_ui_prefs: async (values) => (prefs = { ...prefs, ...values }),
     list_themes: async () => themes(),
