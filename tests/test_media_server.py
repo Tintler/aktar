@@ -7,6 +7,7 @@ import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -53,7 +54,8 @@ class PlanTests(unittest.TestCase):
         self.assertIn('avc1.640028', media_server.stream_mime(exotic, media_server.plan('a.mkv', exotic)))
         self.assertIn('avc1.640028', media_server.stream_mime(info('mpeg4'), media_server.plan('a.avi', info('mpeg4'))))
 
-    def test_stream_command_maps_tracks_and_seeks(self):
+    @mock.patch.object(media_server.media, 'ffmpeg_path', return_value='ffmpeg')
+    def test_stream_command_maps_tracks_and_seeks(self, _ffmpeg):
         command = media_server.stream_command('a.mkv', 12.5, 0, 'copy', 3)
         joined = ' '.join(command)
         self.assertIn('-ss 12.500 -i a.mkv', joined)
