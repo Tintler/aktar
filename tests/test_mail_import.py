@@ -28,8 +28,10 @@ def mail(uid, subject, sender, day, attachments=(), html='', message_id=None):
     message.set_content('Ekte hesap özetiniz var.')
     if html:
         message.add_alternative(html, subtype='html')
-    for name, data in attachments:
-        message.add_attachment(data, maintype='application', subtype='pdf', filename=name)
+    for item in attachments:
+        name, data = item[:2]
+        maintype, subtype = (item[2] if len(item) > 2 else 'application/pdf').split('/')
+        message.add_attachment(data, maintype=maintype, subtype=subtype, filename=name)
     return str(uid).encode(), message.as_bytes()
 
 
@@ -151,6 +153,35 @@ class MailImportTests(unittest.TestCase):
                          ['2026-09-01 Fon Bülteni Ağustos 2026.html'])
         self.assertIn('Getiri %3,2', Path(outcome['files'][0]).read_text(encoding='utf-8'))
         self.assertEqual(library.kind_of(outcome['files'][0]), 'document')
+
+    def test_excel_and_office_attachments_are_taken_images_are_not(self):
+        """F90: Excel/CSV/Word ekleri de alinir; logo/imza gorselleri alinmaz."""
+        xlsx = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        server = FakeIMAP([mail(1, 'Hesap Özeti', 'ekstre@worldcard.com.tr', 'Thu, 04 Sep 2026', [
+            ('Hareketler.xlsx', b'PK xlsx', xlsx), ('Hareketler.csv', b'tarih;tutar', 'text/csv'),
+            ('Eski.xls', b'xls', 'application/octet-stream'), ('logo.png', b'png', 'image/png'),
+            ('sozlesme.zip', b'zip', 'application/zip'), ('Ozet.pdf', b'%PDF ozet')])])
+        outcome = self.run_rules(server)
+        self.assertEqual(sorted(Path(path).name for path in outcome['files']),
+                         ['2026-09-04 Eski.xls', '2026-09-04 Hareketler.csv', '2026-09-04 Hareketler.xlsx',
+                          '2026-09-04 Ozet.pdf'])
+        self.assertTrue(all(library.kind_of(path) == 'document' for path in outcome['files']))
+        # F89 ile yalnizca PDF'i alinmis eski kayit: bir kez yeniden islenir, PDF tekrar yazilmaz
+        key = next(iter(self.state['messages']))
+        for path in outcome['files']:
+            if not path.endswith('.pdf'):
+                Path(path).unlink()
+                del self.state['hashes'][next(h for h, p in self.state['hashes'].items() if p == path)]
+        self.state['messages'][key] = {'rule': self.rule['id'], 'date': '2026-09-04', 'subject': 'Hesap Özeti',
+                                       'files': [p for p in outcome['files'] if p.endswith('.pdf')]}
+        again = self.run_rules(server)
+        self.assertEqual((len(again['files']), again['duplicates']), (3, 0))
+        self.assertEqual(self.run_rules(server)['files'], [])
+        nameless = EmailMessage()
+        nameless.add_attachment(b'PK', maintype='application', subtype=xlsx.split('/')[1])
+        part = next(item for item in nameless.walk() if not item.is_multipart())
+        del part['Content-Disposition']
+        self.assertEqual(mail_import.attachments(nameless, 'pdf'), [('ek.xlsx', b'PK')])
 
     def test_wrong_password_and_rule_validation(self):
         with self.assertRaises(mail_import.MailError) as caught:

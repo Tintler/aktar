@@ -80,7 +80,7 @@ export function createMock(emit) {
   }, 300);
   let mailRules = [{ id: 'r1', title: 'World Gold ekstreleri', sender: '@worldcard.com.tr', subject: 'Hesap Özeti', what: 'pdf', since: '2025-01-01', folder: 'D:\Finans\Ekstreler', enabled: true, has_password: false, fetched: 9 }];
   const mailState = () => ({ rules: mailRules, account: true, address: settings.mail_address, checked: '2026-10-15T09:12:00', busy: false,
-    what: [{ id: 'pdf', label: 'PDF ekleri' }, { id: 'html', label: 'E-posta gövdesi' }, { id: 'both', label: 'PDF ekleri ve gövde' }] });
+    what: [{ id: 'pdf', label: 'Ekler (PDF, Excel, Word…)' }, { id: 'html', label: 'E-posta gövdesi' }, { id: 'both', label: 'Ekler ve gövde' }] });
   const api = {
     library_open: async () => library,
     library_state: async () => library,

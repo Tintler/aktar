@@ -131,7 +131,7 @@
             <button class="icon-btn" title="Sil" onclick={() => remove(rule)}><Icon name="trash" size={16} /></button>
           </div>
         {:else}
-          <div class="empty dim">Henüz kural yok. Örneğin gönderen "@worldcard.com.tr" ve konu "Hesap Özeti" olan postaların PDF eklerini bir klasöre indiren bir kural ekleyin.</div>
+          <div class="empty dim">Henüz kural yok. Örneğin gönderen "@worldcard.com.tr" ve konu "Hesap Özeti" olan postaların eklerini (PDF, Excel…) bir klasöre indiren bir kural ekleyin.</div>
         {/each}
       </div>
       <div><button class="btn sm" onclick={() => startEdit(null)}><Icon name="plus" size={14} />Kural ekle</button></div>

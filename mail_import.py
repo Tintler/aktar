@@ -29,13 +29,27 @@ from email.header import decode_header, make_header
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
+import documents
 import library
 from app_core import read, save_json
 
 VERSION = 1
 GMAIL_HOST = 'imap.gmail.com'
 GMAIL_PORT = 993
-WHAT = {'pdf': 'PDF ekleri', 'html': 'E-posta gövdesi', 'both': 'PDF ekleri ve gövde'}
+# 'pdf' kimligi eski kurallarla uyum icin kaldi; anlami 'belge ekleri' (F90: Excel, Word...).
+WHAT = {'pdf': 'Ekler (PDF, Excel, Word…)', 'html': 'E-posta gövdesi', 'both': 'Ekler ve gövde'}
+# Alinan ek turleri genisleyince eski kayitli postalar bir kez yeniden islenir; ayni ekler
+# icerik ozetinden tanindigi icin tekrar yazilmaz (F90: 1 -> 2, Excel/Word eklendi).
+ATTACHMENT_VERSION = 2
+ATTACHMENT_SUFFIXES = documents.SUFFIXES  # kutuphanenin okudugu belgeler (gorseller haric)
+ATTACHMENT_TYPES = {  # adi olmayan ekler icin icerik turu -> uzanti
+    'application/pdf': '.pdf',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+    'application/vnd.ms-excel': '.xls',
+    'application/vnd.oasis.opendocument.spreadsheet': '.ods',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+    'application/msword': '.doc',
+}
 HEADER_BATCH = 200       # tek FETCH'te istenen en fazla posta basligi
 DEFAULT_SINCE_DAYS = 365
 _MONTHS = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
@@ -264,7 +278,8 @@ def find(imap, rule, state):
     """Kurala uyan postalar (yeniden eskiye): [{'uid','id','date','subject','sender','done'}]."""
     uids = _search(imap, rule)
     items = []
-    done = state.get('messages', {})
+    done = {key for key, record in state.get('messages', {}).items()
+            if record.get('v', 1) >= ATTACHMENT_VERSION}
     for uid, head in _headers(imap, uids).items():
         sender, subject = decode(head.get('From')), decode(head.get('Subject'))
         if not matches(rule, sender, subject):
@@ -306,6 +321,17 @@ def unlock_pdf(data, password):
         document.close()
 
 
+def _attachment_name(part):
+    """Kaydedilecek ekin adi ya da None (desteklenmeyen tur, gorsel, e-posta govdesi).
+
+    Gorseller alinmaz: banka postalarindaki logo/imza gorselleri koleksiyonu doldurur."""
+    name = decode(part.get_filename() or '')
+    if name:
+        return name if name.lower().endswith(ATTACHMENT_SUFFIXES) else None
+    suffix = ATTACHMENT_TYPES.get(part.get_content_type())
+    return 'ek' + suffix if suffix else None
+
+
 def attachments(message, what):
     """Postadan kaydedilecek parcalar: [(ad, bayt)]."""
     found = []
@@ -313,12 +339,11 @@ def attachments(message, what):
         for part in message.walk():
             if part.is_multipart():
                 continue
-            name = decode(part.get_filename() or '')
-            if part.get_content_type() == 'application/pdf' or name.lower().endswith('.pdf'):
+            name = _attachment_name(part)
+            if name:
                 payload = part.get_payload(decode=True)
                 if payload:
-                    found.append((name if name.lower().endswith('.pdf') else (name or 'ek') + '.pdf',
-                                  payload))
+                    found.append((name, payload))
     if what in ('html', 'both'):
         body = message.get_body(preferencelist=('html', 'plain'))
         if body is not None:
@@ -350,12 +375,15 @@ def download(imap, rule, item, state, pdf_password='', log=print):
     folder.mkdir(parents=True, exist_ok=True)
     message = _message(imap, item['uid'])
     result = {'files': [], 'duplicates': 0, 'warnings': []}
+    key = f'{rule["id"]}|{item["id"]}'
+    before = set((state['messages'].get(key) or {}).get('files') or [])  # yeniden isleniyorsa
     recorded = []
     for name, data in attachments(message, rule.get('what', 'pdf')):
         digest_text = hashlib.sha256(data).hexdigest()
         known = state['hashes'].get(digest_text)
         if known:
-            result['duplicates'] += 1
+            if known not in before:
+                result['duplicates'] += 1
             recorded.append(known)
             continue
         if name.lower().endswith('.pdf'):
@@ -371,9 +399,9 @@ def download(imap, rule, item, state, pdf_password='', log=print):
         recorded.append(str(path))
     if not recorded and not result['warnings']:
         result['warnings'].append(f'"{item["subject"]}" postasında kaydedilecek ek bulunamadı.')
-    state['messages'][f'{rule["id"]}|{item["id"]}'] = {
+    state['messages'][key] = {
         'rule': rule['id'], 'date': item['date'], 'subject': item['subject'], 'files': recorded,
-        'fetched': datetime.now().isoformat(timespec='seconds')}
+        'v': ATTACHMENT_VERSION, 'fetched': datetime.now().isoformat(timespec='seconds')}
     return result
 
 
