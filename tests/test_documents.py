@@ -17,7 +17,7 @@ import library  # noqa: E402
 import qa  # noqa: E402
 import search_index  # noqa: E402
 import transcript_export  # noqa: E402
-from app_core import DEFAULT_CONFIG  # noqa: E402
+from app_core import DEFAULT_CONFIG, save_json  # noqa: E402
 
 try:
     import pypdfium2
@@ -218,7 +218,58 @@ class DocumentTests(unittest.TestCase):
                 collection_qa.summarize_document(session, self.root / 'uzun.json',
                                                  lambda: dict(cfg, qa_context_chars=1000), QUIET)
             self.assertGreater(len(replies), 1)
-            self.assertIn('[s.1-1] Parça özeti.', replies[-1][1]['content'])
+            self.assertIn('[s.1-1] Parça özeti.', replies[-2][1]['content'])
+            # F88: parca ozetlerinde tarih kaybolabilir; belgenin basindan ayrica sorulur
+            self.assertIn('beginning of a document', replies[-1][0]['content'])
+            self.assertIn('[s.1] Kullanım Kılavuzu', replies[-1][1]['content'])
+
+    def test_document_date_is_extracted_shown_and_fed_to_questions(self):
+        """F88: ekstre gibi belgelerin kendi tarihi ozetle cikarilir, elle duzeltilebilir."""
+        cfg = dict(DEFAULT_CONFIG, embedding_model='', auto_retry_count=1)
+        entry = self.entry(self.pdf)
+        library.transcribe(entry, cfg, base=self.work, log=QUIET)
+        replies = []
+
+        def chat(_self, messages):
+            replies.append(messages)
+            if 'beginning of a document' in messages[0]['content']:
+                return '{"date": "2026-08"}'
+            return ('{"summary": "Eylül ekstresi.", "topics": ["ekstre"], "questions": ["q?"], '
+                    '"date": "2026-09-15"}')
+
+        with mock.patch('app_core.Client.chat', chat):
+            collection_qa.summarize_video(self.pdf, lambda: dict(cfg), QUIET, base=self.work)
+        self.assertEqual(len(replies), 1)
+        self.assertIn('"date"', replies[0][0]['content'])
+        self.assertEqual(library.describe(entry, self.work, cfg)['date'], '2026-09-15')
+        self.assertEqual(library.plan([entry], self.work, cfg=cfg)['ready'], [entry])
+        chat_qa = collection_qa.CollectionQA([self.pdf], 'Ekstreler', lambda: dict(cfg),
+                                             log=QUIET, base=self.work)
+        client = FakeClient()
+        turn = chat_qa.ask('filtre', client)
+        context = client.messages[0]['content']
+        self.assertIn('### V1 · Kılavuz (belge, 2 sayfa, date: 2026-09-15)', context)
+        self.assertIn('(date: 2026-09-15): Eylül ekstresi.', context)
+        cites = [cite for kind, value in turn['parts'] if kind == 'cite' for cite in value]
+        self.assertEqual(cites[0]['title'], 'Kılavuz · 15.09.2026')
+        # elle girilen tarih icerikten cikarilani ezer
+        manual = collection_qa.CollectionQA([self.pdf], 'E', lambda: dict(cfg), log=QUIET,
+                                            base=self.work, dates={str(self.pdf): '2026-10'})
+        client = FakeClient()
+        manual.ask('filtre', client)
+        self.assertIn('2 sayfa, date: 2026-10)', client.messages[0]['content'])
+        # F88 oncesi ozet: 'ozeti eksik' grubunda yalnizca tarih sorulur
+        session = search_index.primary_session(self.pdf, self.work)
+        del session['overview']['date']
+        save_json(qa.cache_path(self.pdf, qa.source_key(session['source']), self.work), session)
+        self.assertEqual(library.plan([entry], self.work, cfg=cfg)['summary'], [entry])
+        replies.clear()
+        with mock.patch('app_core.Client.chat', chat):
+            overview = collection_qa.summarize_video(self.pdf, lambda: dict(cfg), QUIET,
+                                                     base=self.work)
+        self.assertEqual((len(replies), overview['summary'], overview['date']),
+                         (1, 'Eylül ekstresi.', '2026-08'))
+        self.assertEqual(library.describe(entry, self.work, cfg)['date'], '2026-08')
 
     def test_single_short_document_is_answered_without_index(self):
         """F66: tek belgeye soru; metin baglama sigiyorsa embedding/indeks gerekmez."""

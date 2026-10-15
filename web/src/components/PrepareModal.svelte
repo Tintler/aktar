@@ -24,7 +24,7 @@
   const counts = $derived(p.counts);
   const rows = [
     ['ready', 'check', '', 'Zaten hazır', 'Önbellekten gelir, tekrar işlenmez'],
-    ['summary', 'sparkles', '', 'Yalnızca özeti eksik', 'Transkript ve indeks hazır; özet seçeneği kapalıysa atlanır'],
+    ['summary', 'sparkles', '', 'Özeti ya da tarihi eksik', 'Transkript ve indeks hazır; özet (belgelerde belge tarihi) çıkarılır, özet seçeneği kapalıysa atlanır'],
     ['index', 'database', '', 'Yalnızca indekslenecek', 'Transkript hazır; embedding ile aranabilir yapılır'],
     ['document', 'fileText', '', 'Belgelerden metin', 'PDF metin katmanı, Word, Excel, EPUB ve metin dosyaları'],
     ['subtitle', 'subtitles', '', 'Gömülü altyazıdan', 'Hızlı · şarkı/yazı izleri atlanır, en uygun akış seçilir'],

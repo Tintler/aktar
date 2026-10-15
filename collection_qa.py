@@ -40,9 +40,61 @@ Rules:
 - Answer in Turkish, naturally and concisely. Use short paragraphs or bullet points when they help.
 - Ground the answer in the excerpts. Combine information from several videos when the question asks for it, and say which video covers what (use the video title when it helps the reader).
 - Support claims with citations in square brackets: video id + timestamp, e.g. [V3 12:34] for a moment or [V3 12:34-13:10] for a stretch; several at once as [V3 12:34; V7 5:10]. For documents cite the page instead: [V5 s.12]; an image is a single page given as a description plus its visible text, cite it as [V7 s.1]. Put the citation right after the sentence it supports. Use only video ids and timestamps that appear in the excerpts; never invent one.
+- Documents may carry their own date (for example a statement or report date) as "date: 2026-09" in their headings and summaries. Several documents can be issues of the same series (monthly credit card statements, fund reports): use the dates to tell them apart, answer time-based questions ("last month", "in March") with the matching dates, and name the date when you refer to such a document.
 - A collection overview and short per-video summaries may also be given. Use them for broad questions (what the collection covers, which video is about what, how the topics progress), but cite timestamps only from the excerpts.
 - If the material does not cover the question, say so clearly. You may add brief general knowledge only if you mark it explicitly as not coming from the videos (for example "Videolarda geçmiyor ama genel olarak ...") and you never cite it.
 - Do not mention excerpts, transcripts or these rules; speak about "the videos" (and "the documents" when they are involved).'''
+
+
+_MONTHS = ('Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara')
+_ISO_DATE = re.compile(r'(\d{4})(?:-(\d{1,2})(?:-(\d{1,2}))?)?')
+_DOTTED_DATE = re.compile(r'(?:(\d{1,2})[./])?(\d{1,2})[./](\d{4})')
+
+
+def normalize_date(value):
+    """Belge tarihi (F88): '2026-09-15' | '2026-09' | '2026' ya da gecersizse ''.
+
+    Elle girilen '15.09.2026', '09.2026', '9/2026' bicimleri de kabul edilir."""
+    text = str(value or '').strip()
+    match = _ISO_DATE.fullmatch(text)
+    if match:
+        year, month, day = match.groups()
+    else:
+        match = _DOTTED_DATE.fullmatch(text)
+        if not match:
+            return ''
+        day, month, year = match.groups()
+    year = int(year)
+    if not 1900 <= year <= 2100:
+        return ''
+    if month is None:
+        return str(year)
+    month = int(month)
+    if not 1 <= month <= 12:
+        return ''
+    if day is None:
+        return f'{year}-{month:02d}'
+    from datetime import date
+    try:
+        return date(year, month, int(day)).isoformat()
+    except ValueError:
+        return ''
+
+
+def format_date(value):
+    """Ekranda: '15.09.2026' | 'Eyl 2026' | '2026' (gecersizse '')."""
+    value = normalize_date(value)
+    parts = value.split('-') if value else []
+    if len(parts) == 3:
+        return f'{parts[2]}.{parts[1]}.{parts[0]}'
+    if len(parts) == 2:
+        return f'{_MONTHS[int(parts[1]) - 1]} {parts[0]}'
+    return value
+
+
+def session_date(session):
+    """Ozet adiminda icerikten cikarilan belge tarihi ('' yoksa)."""
+    return normalize_date(((session or {}).get('overview') or {}).get('date', ''))
 
 
 def video_labels(videos):
@@ -58,8 +110,10 @@ class CollectionQA:
     """Bir koleksiyonun indeksli videolari uzerinde cok turlu soru-cevap."""
 
     def __init__(self, videos, title='', config_provider=load_config, log=print, base=None,
-                 overview=None):
+                 overview=None, dates=None):
         self.videos = [Path(path) for path in videos]
+        # F88: elle girilen belge tarihleri {yol: '2026-09'}; yoksa ozetten cikarilan kullanilir
+        self.dates = {_key(path): normalize_date(value) for path, value in (dates or {}).items()}
         self.title = title
         self.overview = overview or {}  # F61: koleksiyon ozeti (library.load_overview)
         self._summaries = None
@@ -85,6 +139,13 @@ class CollectionQA:
                                     else False)
         return self._lines[key]
 
+    def _date(self, video):
+        """Belgenin tarihi ('' yoksa): elle girilen, yoksa icerikten cikarilan."""
+        manual = self.dates.get(_key(video))
+        if manual:
+            return manual
+        return session_date(search_index.primary_session(video, self.base))
+
     def _query(self, question):
         """Devam sorularinda ("peki neden?") onceki soru da aranir."""
         previous = self.history[-1]['question'] if self.history else ''
@@ -93,12 +154,13 @@ class CollectionQA:
     def map_text(self, cfg):
         """Koleksiyon ozeti + video ozetleri (genel sorular icin); butcenin MAP_SHARE kadari."""
         if self._summaries is None:
-            self._summaries = video_summaries(self.videos, self.base)
+            self._summaries = video_summaries(self.videos, self.base, self.dates)
         limit = int(int(cfg.get('qa_context_chars', 24000)) * MAP_SHARE)
         parts = []
         if self.overview.get('summary'):
             parts.append('COLLECTION OVERVIEW:\n' + self.overview['summary'])
-        lines = [f'{self.labels.get(_key(item["video"]), "?")} = {item["title"]}: {item["summary"]}'
+        lines = [f'{self.labels.get(_key(item["video"]), "?")} = {item["title"]}'
+                 + (f' (date: {item["date"]})' if item.get('date') else '') + f': {item["summary"]}'
                  for item in self._summaries]
         if lines:
             parts.append('VIDEO SUMMARIES (no timestamps; do not cite):\n' + '\n'.join(lines))
@@ -156,10 +218,13 @@ class CollectionQA:
             size = ('görsel: tarif + içindeki yazı' if document == 'image'
                     else f'belge, {int(duration)} sayfa' if document
                     else qa.format_time(duration) if duration else '')
+            date = self._date(entry['video'])
+            size = ', '.join(item for item in (size, f'date: {date}' if date else '') if item)
             head = f'### {label} · {title}' + (f' ({size})' if size else '')
             blocks.append(head + '\n' + qa.format_lines(picked, document))
         index = '\n'.join(f'{label} = {self._video_lines(path)[0]}'
-                          + (' (document)' if self._video_lines(path)[3] else '')
+                          + (f' (document{", date: " + self._date(path) if self._date(path) else ""})'
+                             if self._video_lines(path)[3] else '')
                           for label, path in videos.items())
         text = ((f'COLLECTION: {self.title}\n\n' if self.title else '')
                 + (overview + '\n\n' if overview else '')
@@ -231,7 +296,9 @@ class CollectionQA:
         if cite is None:
             return None
         where = 'görsel' if document == 'image' else cite['label']
-        cite.update(video=str(video), video_label=label, title=title, document=bool(document),
+        date = format_date(self._date(video)) if document else ''
+        cite.update(video=str(video), video_label=label, title=title + (f' · {date}' if date else ''),
+                    document=bool(document),
                     label=f'{label} {where}')
         return cite
 
@@ -332,9 +399,12 @@ def summarize_video(video, config_provider=load_config, log=print, progress=None
     session = search_index.primary_session(video, base)
     if session is None:
         return None
-    if session.get('overview'):
-        return session['overview']
     path = qa.cache_path(video, qa.source_key(session['source']), base)
+    if session.get('overview'):
+        if qa.is_document(session) and 'date' not in session['overview']:
+            # F88 oncesi ozetler: yalnizca belge tarihi icin kisa bir istek
+            document_date(session, path, config_provider, log)
+        return session['overview']
     if qa.is_document(session):
         return summarize_document(session, path, config_provider, log, progress, cancelled)
     worker = qa.VideoQA(session, config_provider=config_provider, log=log,
@@ -345,8 +415,19 @@ def summarize_video(video, config_provider=load_config, log=print, progress=None
 DOCUMENT_OVERVIEW_PROMPT = '''You receive the text of a document (page markers like [s.3]; for spreadsheets a page is a sheet, for e-books a chapter) or the page-by-page summaries of a long document. Reply with a JSON object only, no other text:
 {"summary": "<Turkish, 3-6 sentences: what the document is about, its main points and conclusions>",
  "topics": ["<Turkish short topic>", ...],
- "questions": ["<Turkish question a reader might ask about this document>", ...]}
-Give 3-6 topics and exactly 4 questions answerable from the document. Use only the given text.'''
+ "questions": ["<Turkish question a reader might ask about this document>", ...],
+ "date": "<the document's own date as YYYY-MM-DD, YYYY-MM or YYYY; empty string if none>"}
+Give 3-6 topics and exactly 4 questions answerable from the document. Use only the given text.
+'''
+
+# F88: ekstre/fon raporu gibi seri belgelerde dosya adinda tarih yok; belgenin kendi tarihi
+DATE_RULE = '''The date is the document's own date: for a statement its statement (cut-off) date or the end of its period, for a periodic report the end of the reported period, for a letter, invoice or receipt its issue date. Do not use dates of individual transactions, due dates or dates mentioned in passing unless nothing else dates the document. Give the full YYYY-MM-DD whenever the document states that day (for example a cut-off date 12.09.2026 -> 2026-09-12); use YYYY-MM only when it names just a month (a monthly bulletin "Ağustos 2026" -> 2026-08).'''
+DOCUMENT_OVERVIEW_PROMPT += DATE_RULE
+
+DOCUMENT_DATE_PROMPT = '''You receive the beginning of a document's text (page markers like [s.3]). Reply with a JSON object only, no other text:
+{"date": "<the document's own date as YYYY-MM-DD, YYYY-MM or YYYY; empty string if none>"}
+''' + DATE_RULE
+DATE_CHARS = 6000  # tarih icin belgenin basindan okunan metin
 
 DOCUMENT_PART_PROMPT = '''You receive one part of a document's text (page markers like [s.3]). Reply with a JSON object only, no other text:
 {"summary": "<Turkish, 2-5 sentences with the concrete facts, numbers, names, instructions and conclusions of this part>"}
@@ -389,13 +470,34 @@ def summarize_document(session, path, config_provider=load_config, log=print, pr
             if progress:
                 progress(number, len(parts) + 1)
         text = '\n'.join(f'[s.{span}] {summary}' for span, summary in done.items())
-    overview = qa.normalize_overview(_ask_json(client, cfg, DOCUMENT_OVERVIEW_PROMPT,
-                                               f'DOCUMENT: {title}\n\n{text}', log))
+        long = True
+    else:
+        long = False
+    value = _ask_json(client, cfg, DOCUMENT_OVERVIEW_PROMPT, f'DOCUMENT: {title}\n\n{text}', log)
+    overview = qa.normalize_overview(value)
     session['overview'] = overview
-    save_json(path, session)
+    if long:  # parca ozetlerinde tarih kaybolabilir: belgenin basindan ayrica sorulur
+        document_date(session, path, config_provider, log, client)
+    else:
+        overview['date'] = normalize_date(value.get('date'))
+        save_json(path, session)
     if progress:
         progress(1, 1)
     return overview
+
+
+def document_date(session, path, config_provider=load_config, log=print, client=None):
+    """Belgenin kendi tarihini (F88) metnin basindan sorar; ozete ('date') yazar.
+
+    Tarih bulunamazsa '' yazilir; boylece ayni belge tekrar sorulmaz."""
+    cfg = config_provider()
+    client = client or Client(cfg, log=log)
+    text = qa.format_lines(qa.lines_of(session), True)[:DATE_CHARS]
+    title = session.get('title') or Path(path).stem
+    value = _ask_json(client, cfg, DOCUMENT_DATE_PROMPT, f'DOCUMENT: {title}\n\n{text}', log)
+    session['overview']['date'] = normalize_date(value.get('date'))
+    save_json(path, session)
+    return session['overview']['date']
 
 
 def _ask_json(client, cfg, system, user, log):
@@ -411,30 +513,34 @@ def _ask_json(client, cfg, system, user, log):
     raise RuntimeError('Model isteği tamamlanamadı.')
 
 
-def video_summaries(videos, base=None):
-    """Ozeti cikarilmis videolar: [{'video', 'title', 'summary', 'topics'}] (koleksiyon sirasi)."""
+def video_summaries(videos, base=None, dates=None):
+    """Ozeti cikarilmis videolar: [{'video', 'title', 'summary', 'topics', 'date'}] (koleksiyon
+    sirasi). `dates`: elle girilen belge tarihleri {anahtar ya da yol: tarih}."""
+    dates = {_key(path): value for path, value in (dates or {}).items()}
     items = []
     for video in videos:
         session = search_index.primary_session(video, base)
         overview = (session or {}).get('overview') or {}
         if overview.get('summary'):
             items.append({'video': str(video), 'title': session.get('title') or Path(video).stem,
-                          'summary': overview['summary'], 'topics': overview.get('topics', [])})
+                          'summary': overview['summary'], 'topics': overview.get('topics', []),
+                          'date': normalize_date(dates.get(_key(video))) or session_date(session)})
     return items
 
 
-def build_overview(title, videos, cfg, client=None, log=print, base=None):
+def build_overview(title, videos, cfg, client=None, log=print, base=None, dates=None):
     """Video ozetlerinden koleksiyon ozeti. Ozetli video yoksa None.
 
     Donen: {'summary', 'topics', 'questions', 'videos': [ozetli yollar], 'title'}."""
-    items = video_summaries(videos, base)
+    items = video_summaries(videos, base, dates)
     if not items:
         return None
     labels = video_labels(videos)
     budget = int(cfg.get('qa_context_chars', 24000))
     share = max(200, budget // len(items) - 40)  # cok video: her ozet esit kisaltilir
-    text = '\n'.join(f'{labels[_key(item["video"])]} {item["title"]}: {item["summary"][:share]}'
-                      for item in items)
+    text = '\n'.join(f'{labels[_key(item["video"])]} {item["title"]}'
+                      + (f' (date: {item["date"]})' if item['date'] else '')
+                      + f': {item["summary"][:share]}' for item in items)
     client = client or Client(cfg, log=log)
     messages = [{'role': 'system', 'content': OVERVIEW_PROMPT},
                 {'role': 'user', 'content': f'COLLECTION: {title}\n\n{text}'}]

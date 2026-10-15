@@ -231,6 +231,26 @@ class LibraryBridgeTests(unittest.TestCase):
         self.assertEqual(len(found['keys']), 1)
         self.assertFalse(self.bridge.library_add_paths([str(folder / 'resim.xyz')]).get('rows'))
 
+    def test_manual_document_date_is_saved_and_shown(self):
+        """F88: elle girilen tarih koleksiyona yazilir; bos deger kaldirir, gecersizi reddedilir."""
+        folder = self.root / 'Ekstreler'
+        folder.mkdir()
+        statement = folder / 'Hesap Ozeti.txt'
+        statement.write_text('Hesap kesim tarihi 15.09.2026', encoding='utf-8')
+        self.bridge.library_add_paths([str(folder)])
+        self.wait_scan()
+        state = self.bridge.library_set_date([str(statement)], '15.09.2026')
+        self.wait_scan()
+        row = self.bridge.library_state()['rows'][0]
+        self.assertEqual((row['date'], row['date_text'], row['date_manual']),
+                         ('2026-09-15', '15.09.2026', True))
+        self.assertEqual(library.load_collection(state['slug'])['dates'],
+                         {str(statement): '2026-09-15'})
+        self.assertIn('error', self.bridge.library_set_date([str(statement)], 'geçen ay'))
+        self.bridge.library_set_date([str(statement)], '')
+        self.wait_scan()
+        self.assertEqual(self.bridge.library_state()['rows'][0]['date'], '')
+
     def test_exclude_and_delete_keep_files_on_disk(self):
         folder = self.root / 'Seri'
         folder.mkdir()

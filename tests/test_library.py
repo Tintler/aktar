@@ -11,6 +11,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+import collection_qa  # noqa: E402
 import library  # noqa: E402
 import qa  # noqa: E402
 import search_index  # noqa: E402
@@ -283,6 +284,23 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(library.describe(entry, work, cfg=cfg)['status'], 'pending')
         self.assertEqual(video.read_bytes(), b'x', 'kaynak dosyaya dokunulmaz')
         self.assertEqual(library.reset_files([video], work, cfg), 0)
+
+    def test_document_dates_parse_format_and_manual_override(self):
+        """F88: elle girilen tarih bicimleri ve koleksiyon kaydindaki elle tarih."""
+        normalize, fmt = collection_qa.normalize_date, collection_qa.format_date
+        self.assertEqual([normalize(value) for value in
+                          ('2026-09-15', '2026-9', '2026', '15.09.2026', '9/2026', '31.02.2026',
+                           '2026-13', 'Eylül', '', None)],
+                         ['2026-09-15', '2026-09', '2026', '2026-09-15', '2026-09', '', '', '',
+                          '', ''])
+        self.assertEqual([fmt('2026-09-15'), fmt('2026-08'), fmt('2026'), fmt('x')],
+                         ['15.09.2026', 'Ağu 2026', '2026', ''])
+        data = {'folders': [], 'files': []}
+        first, second = self.media / 'Ders 2.mp4', self.media / 'Ders 10.mp4'
+        library.set_date(data, [first, second], '2026-09')
+        self.assertEqual(library.manual_dates(data)[library._key(first)], '2026-09')
+        library.set_date(data, [first], '')
+        self.assertEqual(list(library.manual_dates(data)), [library._key(second)])
 
     def test_default_title(self):
         self.assertEqual(library.default_title([self.media]), 'media')

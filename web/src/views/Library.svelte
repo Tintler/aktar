@@ -59,8 +59,15 @@
   });
   const visible = $derived.by(() => {
     const keys = view.search ? new Set(view.search.keys) : null;
-    return lib.rows.filter((r) => (!view.kind || r.kind === view.kind) && (!keys || keys.has(r.key)));
+    const rows = lib.rows.filter((r) => (!view.kind || r.kind === view.kind) && (!keys || keys.has(r.key)));
+    if (!view.sort) return rows;
+    // F88: tarihe gore (yeniden eskiye / eskiden yeniye); tarihsizler sonda, kendi sirasinda
+    const dir = view.sort === 'date-asc' ? 1 : -1;
+    return rows.map((r, i) => [r, i]).sort(([a, i], [b, j]) =>
+      (!a.date - !b.date) || (a.date && b.date && a.date !== b.date ? (a.date < b.date ? -dir : dir) : i - j)).map(([r]) => r);
   });
+  const SORTS = { '': 'date-desc', 'date-desc': 'date-asc', 'date-asc': '' };
+  const SORT_TITLE = { '': 'Tarihe göre sırala (yeniden eskiye)', 'date-desc': 'Eskiden yeniye', 'date-asc': 'Koleksiyon sırasına dön' };
   const selected = $derived(new Set(view.selected));
 
   let anchor = null;   // shift ile aralik secimi icin son tiklanan satir
@@ -108,6 +115,7 @@
       { label: row.kind === 'video' ? 'Oynat ve soru sor' : 'Aç', icon: row.kind === 'video' ? 'play' : 'eye', disabled: !single, action: () => openFile(row) },
       { label: 'Altyazıyı çevir…', icon: 'languages', disabled: !(single && row.kind === 'video'), action: () => openInTranslate(row.path) },
       { label: 'Dosya konumunu aç', icon: 'folderOpen', action: () => act('reveal', row.path) },
+      { label: 'Tarihi düzenle…' + (rows.length > 1 ? ` (${rows.length} dosya)` : ''), icon: 'calendar', action: () => editDate(rows) },
       { label: 'Transkripti dışa aktar…' + (withText.length > 1 ? ` (${withText.length} dosya)` : ''), icon: 'download', disabled: !withText.length, action: () => exportRows(withText) },
       { label: 'Yeniden işle…' + (rows.length > 1 ? ` (${rows.length} dosya)` : ''), icon: 'refresh', disabled: !!queue || !rows.some((r) => !r.missing),
         action: () => resetRows(rows.filter((r) => !r.missing)) },
@@ -115,6 +123,21 @@
       { label: 'Koleksiyondan çıkar' + (rows.length > 1 ? ` (${rows.length} dosya)` : ''), icon: 'x', danger: true,
         action: async () => setLibrary(await act('library_exclude', rows.map((r) => r.path))) },
     ]);
+  }
+
+  // F88: ekstre/fon raporu gibi belgelerin kendi tarihi; bos birakilirsa icerikten cikarilana doner.
+  async function editDate(rows) {
+    const current = rows.length === 1 ? rows[0] : null;
+    const value = await prompt({
+      title: rows.length > 1 ? `${rows.length} dosyanın tarihi` : 'Belge tarihi',
+      message: 'Belgenin kendi tarihi (ekstre kesim tarihi, rapor dönemi…). Gün/ay/yıl, ay/yıl ya da yalnızca yıl yazın.'
+        + ' Boş bırakırsanız tarih içerikten çıkarılır ("Hepsini hazırla" sırasında).',
+      value: current?.date ? current.date.split('-').reverse().join('.') : '',
+      placeholder: '15.09.2026 · 09.2026 · 2026', ok: 'Kaydet',
+    });
+    if (value === null || value === undefined) return;
+    const state = await act('library_set_date', rows.map((r) => r.path), value.trim());
+    if (state) setLibrary(state);
   }
 
   function folderMenu(event, folder) {
@@ -272,7 +295,7 @@
             <div class="hit-list">
               {#each view.search.hits as hit}
                 <button class="hit" onclick={() => openFile({ path: hit.path }, hit.start)} title={hit.text}>
-                  <span class="hname ellipsis">{hit.name}</span><span class="badge accent">{hit.where}</span><span class="htext ellipsis">{hit.text}</span>
+                  <span class="hname ellipsis">{hit.name}</span>{#if hit.date}<span class="badge">{hit.date}</span>{/if}<span class="badge accent">{hit.where}</span><span class="htext ellipsis">{hit.text}</span>
                 </button>
               {/each}
             </div>
@@ -283,7 +306,9 @@
       {/if}
 
       <table class="table files">
-        <thead><tr><th class="ic"></th><th>Dosya</th><th>Klasör</th><th>Uzunluk</th><th>Metin kaynağı</th><th>Durum</th></tr></thead>
+        <thead><tr><th class="ic"></th><th>Dosya</th><th>Klasör</th>
+          <th class="date"><button class="sort" class:on={view.sort} title={SORT_TITLE[view.sort]} onclick={() => (view.sort = SORTS[view.sort])}>Tarih{#if view.sort}<Icon name={view.sort === 'date-asc' ? 'up' : 'down'} size={14} />{/if}</button></th>
+          <th>Uzunluk</th><th>Metin kaynağı</th><th>Durum</th></tr></thead>
         <tbody>
           {#each visible as row (row.key)}
             <tr class:on={selected.has(row.key)} class:missing={row.missing} onclick={(e) => click(e, row)} ondblclick={() => openFile(row)}
@@ -291,12 +316,14 @@
               <td class="ic"><span class="kind"><Icon name={KIND_ICON[row.kind] ?? 'file'} size={16} /></span></td>
               <td class="name"><span class="ellipsis" title={row.path}>{row.name}</span>{#if row.new}<span class="badge accent">yeni</span>{/if}</td>
               <td class="dim ellipsis where" title={row.folder}>{row.where}</td>
+              <td class="secondary nowrap date" title={row.date ? (row.date_manual ? 'Elle girildi' : 'İçerikten çıkarıldı') + ' · sağ tık: Tarihi düzenle' : 'Tarih yok · sağ tık: Tarihi düzenle'}>
+                {#if row.date}{row.date_text}{#if row.date_manual}<Icon name="pencil" size={11} />{/if}{:else}<span class="dim">—</span>{/if}</td>
               <td class:dim={!row.measured} class="secondary nowrap">{row.length}</td>
               <td class:dim={!row.source} class="secondary ellipsis src">{row.source || '—'}</td>
               <td class="nowrap"><span class={statusClass(row)}>{row.busy_text ?? row.status_text}</span></td>
             </tr>
           {:else}
-            <tr><td colspan="6" class="empty">{lib.scanning ? 'Taranıyor…' : view.search ? 'Aramayla eşleşen dosya yok.' : 'Bu koleksiyonda dosya yok. Klasör ya da dosya ekleyin.'}</td></tr>
+            <tr><td colspan="7" class="empty">{lib.scanning ? 'Taranıyor…' : view.search ? 'Aramayla eşleşen dosya yok.' : 'Bu koleksiyonda dosya yok. Klasör ya da dosya ekleyin.'}</td></tr>
           {/each}
         </tbody>
       </table>
@@ -368,13 +395,17 @@
   .page-body { container-type: inline-size; }
   .files { table-layout: fixed; }
   @container (max-width: 860px) { .files .where, .files th:nth-child(3) { display: none; } }
-  @container (max-width: 700px) { .files .src, .files th:nth-child(5) { display: none; } }
+  @container (max-width: 700px) { .files .src, .files th:nth-child(6) { display: none; } }
   .files th { background: var(--window); }
   .files th.ic, .files td.ic { width: 52px; }
   .files th:nth-child(3) { width: 18%; }
-  .files th:nth-child(4) { width: 96px; }
-  .files th:nth-child(5) { width: 18%; }
-  .files th:nth-child(6) { width: 190px; }
+  .files th.date { width: 104px; }
+  .files th:nth-child(5) { width: 96px; }
+  .files th:nth-child(6) { width: 18%; }
+  .files th:nth-child(7) { width: 190px; }
+  .sort { display: inline-flex; align-items: center; gap: 4px; font: inherit; color: inherit; padding: 0; }
+  .sort.on { color: var(--accent); }
+  td.date :global(svg) { margin-left: 4px; vertical-align: -1px; color: var(--dim); }
   .files tr { cursor: default; }
   .files td { padding: 8px 12px; }
   .kind { width: 32px; height: 32px; border-radius: 4px; background: var(--surface); display: grid; place-items: center; color: var(--secondary); }

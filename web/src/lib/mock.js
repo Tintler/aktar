@@ -56,6 +56,8 @@ export function createMock(emit) {
       row('06 Karar Ağaçları.mkv', 'video', 'ML', '—', '', 'missing'),
       row('Ders notları.pdf', 'document', 'Notlar', '42 sayfa', 'PDF metni', 'ready'),
       row('Tahta.jpg', 'image', 'Notlar', '1.2 MB', 'Görsel', 'transcript'),
+      row('Hesap Özeti.pdf', 'document', 'Ekstreler', '4 sayfa', 'PDF metni', 'ready', { key: 'e1', date: '2026-09-15', date_text: '15.09.2026' }),
+      row('Hesap Özeti (1).pdf', 'document', 'Ekstreler', '3 sayfa', 'PDF metni', 'ready', { key: 'e2', date: '2026-08', date_text: 'Ağu 2026', date_manual: true }),
     ],
   };
   const chat = {
@@ -86,6 +88,10 @@ export function createMock(emit) {
     // F85: yeniden isleme -> kayitlari silinen dosyalar 'Bekliyor' olur
     library_reset: async (paths) => {
       for (const r of library.rows) if (paths.includes(r.path)) Object.assign(r, { status: 'pending', status_text: 'Bekliyor', source: '' });
+      return { ...library };
+    },
+    library_set_date: async (paths, value) => {
+      for (const r of library.rows) if (paths.includes(r.path)) Object.assign(r, { date: value, date_text: value, date_manual: !!value });
       return { ...library };
     },
     library_reset_collection: async () => {

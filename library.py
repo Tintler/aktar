@@ -426,7 +426,13 @@ def describe(entry, base=None, cfg=None):
     [{'start', 'text', 'folded'}] (transkript yoksa bos).
     """
     if entry['missing']:
-        return {'status': 'missing', 'source': '', 'duration': 0.0, 'lines': []}
+        return {'status': 'missing', 'source': '', 'duration': 0.0, 'lines': [], 'date': ''}
+    info = _describe(entry, base, cfg)
+    info.setdefault('date', '')
+    return info
+
+
+def _describe(entry, base, cfg):
     sessions = qa.cached_sessions(entry['path'], base)
     if not sessions:
         probed = cached_probe(entry['path'], base)
@@ -451,8 +457,27 @@ def describe(entry, base=None, cfg=None):
     indexed = is_indexed(entry['path'], best, _embedding_cfg(cfg), base)
     lines = [{'start': line['start'], 'text': line['text'], 'folded': fold(line['text'])}
              for line in qa.lines_of(best)]
+    date = str((best.get('overview') or {}).get('date') or '') if qa.is_document(best) else ''
     return {'status': 'ready' if indexed else 'transcript', 'source': label,
-            'duration': float(best.get('duration') or 0.0), 'lines': lines}
+            'duration': float(best.get('duration') or 0.0), 'lines': lines, 'date': date}
+
+
+# --- belge tarihleri (F88) -------------------------------------------------------
+# Icerikten cikarilan tarih dosyanin ozetinde ('overview.date') durur; kullanicinin elle
+# girdigi tarih koleksiyon kaydinda {'dates': {yol: tarih}} olarak onu gecersiz kilar.
+def manual_dates(data):
+    """{anahtar: tarih} (elle girilenler)."""
+    return {_key(path): str(value) for path, value in (data.get('dates') or {}).items() if value}
+
+
+def set_date(data, paths, value):
+    """Dosyalarin tarihini elle ayarlar; bos deger elle girilen tarihi kaldirir."""
+    dates = {path: item for path, item in (data.get('dates') or {}).items()}
+    keys = {_key(path) for path in paths}
+    dates = {path: item for path, item in dates.items() if _key(path) not in keys}
+    if value:
+        dates.update({_clean(path): value for path in paths})
+    data['dates'] = dates
 
 
 # --- transkript aramasi (F59) --------------------------------------------------
@@ -582,7 +607,9 @@ def plan(entries, base=None, progress=None, cancelled=None, cfg=None):
         elif session is not None:
             indexed = (not str(cfg.get('embedding_model', '')).strip()
                        or is_indexed(entry['path'], session, cfg, base))
-            summarized = session.get('overview')
+            overview = session.get('overview')
+            # F88: belge ozetinde tarih yoksa (eski ozet) 'ozeti eksik' grubunda tarihi sorulur
+            summarized = overview and ('date' in overview or not qa.is_document(session))
             group = 'index' if not indexed else 'ready' if summarized else 'summary'
             result[group].append(entry)
         elif entry['kind'] in TEXT_KINDS:

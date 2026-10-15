@@ -67,8 +67,12 @@ def where(entry):
     return parent.name
 
 
-def row_of(entry, info):
-    """Tablo satiri (JSON): transkript satirlari arayuze gonderilmez."""
+def row_of(entry, info, dates=None):
+    """Tablo satiri (JSON): transkript satirlari arayuze gonderilmez.
+
+    `dates`: elle girilen belge tarihleri (library.manual_dates); icerikten cikarilani ezer."""
+    manual = (dates or {}).get(library._key(entry['path']), '')
+    date = collection_qa.normalize_date(manual or info.get('date', ''))
     if entry['kind'] == 'image':
         length = '—' if entry['missing'] else format_size(entry['path'])
     elif info['duration'] and entry['kind'] == 'document':
@@ -81,7 +85,8 @@ def row_of(entry, info):
             'kind': entry['kind'], 'where': where(entry), 'folder': str(entry['path'].parent),
             'length': length, 'measured': bool(info['duration']), 'source': info['source'],
             'status': info['status'], 'status_text': STATUS_TEXT[info['status']],
-            'new': bool(entry['new']), 'missing': bool(entry['missing'])}
+            'new': bool(entry['new']), 'missing': bool(entry['missing']),
+            'date': date, 'date_text': collection_qa.format_date(date), 'date_manual': bool(manual)}
 
 
 def chat_entries(entries):
@@ -164,7 +169,8 @@ class LibraryMixin:
 
     def library_state(self):
         data = self._lib_data
-        rows = [row_of(entry, info) for entry, info in zip(self._lib_entries, self._lib_infos)]
+        dates = library.manual_dates(data) if data else {}
+        rows = [row_of(entry, info, dates) for entry, info in zip(self._lib_entries, self._lib_infos)]
         for row in rows:
             if row['key'] in self._row_status:
                 row['busy_text'], row['busy_tone'] = self._row_status[row['key']]
@@ -339,6 +345,22 @@ class LibraryMixin:
         self._forget(paths)
         return state
 
+    def library_set_date(self, paths, value):
+        """Belge tarihini elle ayarlar (F88); bos deger icerikten cikarilan tarihe doner."""
+        paths = [Path(path) for path in paths or []]
+        if not paths or self._lib_data is None:
+            return self.library_state()
+        text = str(value or '').strip()
+        date = collection_qa.normalize_date(text)
+        if text and not date:
+            return {'error': f'Tarih anlaşılamadı: "{text}". Örnek: 15.09.2026, 09.2026 ya da 2026.'}
+        library.set_date(self._lib_data, paths, date)
+        chat = self._chats.get(self._lib_slug)
+        if chat is not None:
+            chat['session'] = None  # sohbet baglami yeni tarihlerle kurulsun
+        names = ', '.join(path.name for path in paths[:3]) + (' …' if len(paths) > 3 else '')
+        return self._save_collection(f'Tarih {collection_qa.format_date(date) if date else "içerikten"}: {names}')
+
     def _forget(self, paths):
         """Cikarilan dosyalar sohbette ve koleksiyon ozetinde hatirlanmasin."""
         if not paths or self._lib_data is None:
@@ -359,10 +381,12 @@ class LibraryMixin:
         remaining = [entry['path'] for entry in self._lib_entries
                      if not entry['missing'] and library._key(entry['path']) not in keys]
         title = self._lib_data['title']
+        dates = dict(self._lib_data.get('dates') or {})
 
         def work():
             try:
-                rebuilt = collection_qa.build_overview(title, remaining, load_config(), log=lambda _message: None)
+                rebuilt = collection_qa.build_overview(title, remaining, load_config(), log=lambda _message: None,
+                                                       dates=dates)
                 if rebuilt is not None:
                     library.save_overview(slug, rebuilt)
                     self._log('Koleksiyon özeti güncellendi.')
@@ -438,9 +462,14 @@ class LibraryMixin:
             name = library.fold(entry['path'].name)
             if not words or all(word in name for word in words) or library._key(entry['path']) in matched:
                 keys.append(library._key(entry['path']))
+        manual = library.manual_dates(self._lib_data or {})
+        dates = {library._key(entry['path']): collection_qa.format_date(
+                     manual.get(library._key(entry['path'])) or info.get('date', ''))
+                 for entry, info in zip(self._lib_entries, self._lib_infos)}
         return {'query': query, 'keys': keys, 'files': len(matched), 'limited': len(hits) >= HIT_LIMIT,
                 'searched': len(query) >= MIN_SEARCH_CHARS,
                 'hits': [{'path': str(hit['path']), 'name': hit['path'].stem, 'start': hit['start'],
+                          'date': dates.get(library._key(hit['path']), ''),
                           'where': qa.format_position(hit['start'], library.kind_of(hit['path']) in library.TEXT_KINDS),
                           'text': hit['text']} for hit in hits]}
 
@@ -704,7 +733,8 @@ class LibraryMixin:
             queue.update(label='Koleksiyon özeti çıkarılıyor…', name='')
             self._push_queue()
             try:
-                overview = collection_qa.build_overview(title, videos, cfg, log=self._log)
+                overview = collection_qa.build_overview(title, videos, cfg, log=self._log,
+                                                        dates=(self._lib_data or {}).get('dates'))
                 if overview is not None:
                     library.save_overview(slug, overview)
                     self._log(f'Koleksiyon özeti hazır: {len(overview["videos"])} dosya.')
@@ -726,7 +756,9 @@ class LibraryMixin:
         for row, entry in enumerate(self._lib_entries):
             if library._key(entry['path']) == key:
                 self._lib_infos[row] = library.describe(entry)
-                self._emit('row', {'row': row_of(entry, self._lib_infos[row]), 'meta': self._meta()})
+                self._emit('row', {'row': row_of(entry, self._lib_infos[row],
+                                                 library.manual_dates(self._lib_data or {})),
+                                   'meta': self._meta()})
                 self._push_chat()
                 return
 
@@ -817,7 +849,8 @@ class LibraryMixin:
         if session is None or [str(path) for path in session.videos] != [str(path) for path in videos]:
             # Kapsam degisti: etiketler yeni listeye gore; konusma gecmisi korunur.
             fresh = collection_qa.CollectionQA(videos, self._lib_data['title'], log=self._log,
-                                               overview=self._overview(slug))
+                                               overview=self._overview(slug),
+                                               dates=self._lib_data.get('dates'))
             fresh.history = session.history if session is not None else list(chat['history'])
             session = chat['session'] = fresh
         chat['entries'] += [('user', question), ('pending', 'Dosyalarda aranıyor…')]
