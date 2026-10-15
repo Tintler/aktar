@@ -13,7 +13,7 @@ export const app = $state({
   review: null,               // ceviri onay penceresi verisi (bridge_translate.review_payload)
   translate: {
     video: null, streams: [], probing: false, series: [], series_slug: '', chapter_glossary: [],
-    analysis: '', running: false, paused: false, progress: { done: 0, total: 0 },
+    analysis: '', running: false, paused: false, progress: { done: 0, total: 0 }, job: '', whisper_available: false,
   },
   // Altyazi Cevir sayfasinin gorunum durumu (sekme degisince korunur).
   translateView: { stream: null, analysis: false },
@@ -135,6 +135,14 @@ export async function init() {
       return;
     }
     notice('Çeviri tamamlandı', 'Çeviri başarıyla tamamlandı.\nÇıktı: ' + name);
+  });
+  on('subtitle_ready', ({ name, error, cancelled }) => {
+    if (error) {
+      if (!cancelled) notice('Altyazı oluşturulamadı', error);
+      return;
+    }
+    app.translateView.stream = 'whisper';
+    toast('Altyazı oluşturuldu: ' + name + ' · Çevirmek için Çevir\'e basın.', 'ok');
   });
   on('library', (state) => setLibrary(state));
   on('row', ({ row, meta }) => {

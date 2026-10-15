@@ -11,6 +11,8 @@
   const VIDEO = ['.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.ts', '.wmv', '.flv'];
 
   const supported = $derived(t.streams.filter((s) => s.supported).length);
+  const whisperJob = $derived(t.running && t.job === 'whisper');
+  const hasWhisper = $derived(t.streams.some((s) => s.whisper));
   const percent = $derived(t.progress.total ? Math.round((t.progress.done * 100) / t.progress.total) : 0);
   let glossary = $state(null);   // {title, items, save(rows)}
 
@@ -97,7 +99,9 @@
 
   async function start() {
     if (t.running) {
-      const ok = await confirm({ title: 'Çeviri iptal edilsin mi?', message: 'Kaydedilen partiler korunur; aynı videoyu yeniden çevirdiğinizde kaldığı yerden devam eder.', ok: 'İptal et', cancel: 'Sürdür', danger: true });
+      const ok = whisperJob
+        ? await confirm({ title: 'Altyazı oluşturma iptal edilsin mi?', message: 'Konuşmadan metin çıkarma durdurulur.', ok: 'İptal et', cancel: 'Sürdür', danger: true })
+        : await confirm({ title: 'Çeviri iptal edilsin mi?', message: 'Kaydedilen partiler korunur; aynı videoyu yeniden çevirdiğinizde kaldığı yerden devam eder.', ok: 'İptal et', cancel: 'Sürdür', danger: true });
       if (ok) setTranslate(await act('cancel_translation'));
       return;
     }
@@ -107,7 +111,13 @@
   }
 
 
-  const statusOf = (s) => s.image ? ['Görüntü tabanlı', 'danger'] : s.supported ? [s.extension.toUpperCase(), 'ok'] : ['Desteklenmiyor', ''];
+  async function generateSubtitle() {
+    const state = await act('generate_subtitle');
+    if (state) setTranslate(state);
+  }
+
+  const clock = (sec) => { const s = Math.max(0, Math.round(sec)); const m = Math.floor(s / 60); return m + ':' + String(s % 60).padStart(2, '0'); };
+  const statusOf = (s) => s.whisper ? ['Whisper · SRT', 'ok'] : s.image ? ['Görüntü tabanlı', 'danger'] : s.supported ? [s.extension.toUpperCase(), 'ok'] : ['Desteklenmiyor', ''];
 </script>
 
 <section class="page">
@@ -132,7 +142,7 @@
         <span class="tile"><Icon name="film" size={30} /></span>
         <b>Videoyu buraya bırakın</b>
         <span class="dim">ya da tıklayıp seçin · {VIDEO.join(' ')}</span>
-        <span class="note">Seçilen metin altyazı LM Studio'daki modelle Türkçeye çevrilir ve videonun yanına <span class="mono">_TR</span> ekiyle yazılır. Kaynak video değiştirilmez.</span>
+        <span class="note">Seçilen metin altyazı LM Studio'daki modelle Türkçeye çevrilir ve videonun yanına <span class="mono">_TR</span> ekiyle yazılır. Altyazısı olmayan videoda önce Whisper ile altyazı oluşturulabilir. Kaynak video değiştirilmez.</span>
       </button>
     {:else}
       <div class="hero card">
@@ -162,8 +172,18 @@
                 <span class="badge {kind}">{status}</span>
               </label>
             {:else}
-              <div class="empty">Bu videoda altyazı akışı yok.</div>
+              <div class="empty">Bu videoda altyazı akışı yok. Konuşmadan altyazı oluşturabilirsiniz.</div>
             {/each}
+            {#if whisperJob}
+              <div class="whisper busy"><Icon name="loader" spin size={16} /><span class="title">Whisper ile altyazı oluşturuluyor…</span>
+                <span class="mono dim">%{percent}</span></div>
+            {:else if !hasWhisper}
+              <button class="whisper" onclick={generateSubtitle} disabled={t.running || !t.whisper_available}
+                title={t.whisper_available ? 'Konuşmayı Whisper ile yazıya döker; videonun yanına .srt olarak kaydeder ve çeviri için listeye ekler.' : 'Whisper kurulu değil (KULLANIM.md 1.5).'}>
+                <Icon name="mic" size={16} /><span class="title">Whisper ile altyazı oluştur</span>
+                <span class="dim">{t.whisper_available ? 'sesten SRT' : 'kurulu değil'}</span>
+              </button>
+            {/if}
           {/if}
         </div>
 
@@ -183,11 +203,11 @@
       <Icon name="dict" size={16} />Bölüm terimleri{t.chapter_glossary.length ? ' · ' + t.chapter_glossary.length : ''}</button>
     <Toggle bind:checked={view.analysis} disabled={t.running} label="Ön analiz yap" />
     <div class="progress">
-      <span class="mono count">{t.progress.done} / {t.progress.total}</span>
+      <span class="mono count">{whisperJob ? clock(t.progress.done) + ' / ' + clock(t.progress.total) : t.progress.done + ' / ' + t.progress.total}</span>
       <div class="track"><i style:width="{percent}%"></i></div>
       <span class="mono pct">%{percent}</span>
     </div>
-    <button class="icon-btn filled" title={t.paused ? 'Devam' : 'Duraklat'} disabled={!t.running}
+    <button class="icon-btn filled" title={t.paused ? 'Devam' : 'Duraklat'} disabled={!t.running || whisperJob}
       onclick={async () => setTranslate(await act('toggle_pause'))}><Icon name={t.paused ? 'play' : 'pause'} size={16} /></button>
     <button class="btn primary lg go" class:danger={t.running} disabled={!t.video || (!t.running && view.stream === null)} onclick={start}>
       {#if t.running}<Icon name="stop" size={16} />İptal{:else}<Icon name="languages" size={18} />Çevir{/if}
@@ -235,6 +255,12 @@
   .stream.off .codec { color: var(--dim); }
   .lang { color: var(--secondary); min-width: 34px; }
   .title { flex: 1; }
+  .whisper { display: flex; align-items: center; gap: 12px; padding: 10px 12px; margin-top: 4px; border-radius: 6px; text-align: left;
+    border: 1px dashed var(--outline); color: var(--accent); }
+  .whisper .title { color: var(--text); }
+  .whisper .dim { font-size: 12px; }
+  .whisper:not(.busy):not(:disabled):hover { background: var(--surface-hover); border-color: var(--accent); }
+  .whisper:disabled { opacity: .5; cursor: default; }
   .console { flex: 1; min-height: 0; overflow: auto; margin: 0 4px 4px; padding: 10px 12px; background: var(--window); border-radius: 8px;
     font: 12px/1.6 var(--mono); color: var(--secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
 

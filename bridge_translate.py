@@ -4,6 +4,10 @@ Akis eski arayuzle aynidir: video -> ffprobe ile altyazi akislari -> tek akis se
 Cevir: altyazi cikarilir, (istege bagli) on analiz onaya sunulur, ceviri yapilir, ceviri
 sonu onerileri onaya sunulur ve <video>_TR.<uzanti> yazilir. Onay pencereleri arayuzde
 acilir; is parcacigi submit_review gelene kadar bekler.
+
+Altyazisi olmayan videoda "Whisper ile olustur" konusmadan metin cikarir (speech.transcribe,
+onbellekli), videonun yanina <video>.srt yazar ve listeye 'whisper' akisini ekler; bu akis
+secilince ceviri kaynagi o transkripttir.
 """
 from __future__ import annotations
 
@@ -11,10 +15,14 @@ import threading
 from pathlib import Path
 
 import series
+import speech
 import subtitle
 from app_core import (APP_DIR, GracefulStop, PauseController, TranslationEngine, _dedupe_glossary,
                       load_config, merge_glossaries, read, render_output)
-from media import VIDEO_EXTENSIONS, extract_subtitle, subtitle_streams, unique_output_path
+from media import VIDEO_EXTENSIONS, extract_subtitle, subtitle_streams, unique_output_path, unique_source_path
+from transcript_export import srt_time
+
+WHISPER_STREAM = 'whisper'   # Whisper transkriptinin akis listesindeki anahtari
 
 
 def clean_glossary(items):
@@ -63,6 +71,28 @@ def review_values(values, has_series):
     return result
 
 
+def whisper_srt(segments):
+    """Whisper segmentlerinden SRT metni (satirlar 42 karakterde bolunur)."""
+    cues = []
+    for segment in segments:
+        text = str(segment.get('text', '')).strip()
+        if not text:
+            continue
+        start = float(segment['start'])
+        end = max(float(segment['end']), start + 0.5)
+        cues.append(subtitle.Cue(speech.wrap_lines(text).split('\n'), start=srt_time(start), end=srt_time(end)))
+    if not cues:
+        raise ValueError('Transkriptte altyazı satırı yok.')
+    return subtitle.render_srt(cues)
+
+
+def whisper_entry(result):
+    """Whisper transkriptinin akis listesindeki satiri (subtitle_streams kaydi bicimi)."""
+    return {'index': WHISPER_STREAM, 'codec': 'whisper', 'language': str(result.get('language') or ''),
+            'title': f"Konuşmadan metin · {result.get('model', '')} · {len(result.get('segments', []))} satır",
+            'supported': True, 'image': False, 'extension': 'srt', 'whisper': True}
+
+
 class TranslateMixin:
     def _init_translate(self):
         self._video = None
@@ -73,6 +103,8 @@ class TranslateMixin:
         self._analysis_text = ''
         self._progress = {'done': 0, 'total': 0}
         self._worker = None              # threading.Thread
+        self._job = ''                   # 'translate' | 'whisper' (calisan isin turu)
+        self._whisper = None             # acik videonun Whisper transkripti (speech.transcribe sonucu)
         self._pause = None               # PauseController
         self._cancelled = False
         self._review_event = None
@@ -92,7 +124,8 @@ class TranslateMixin:
             'series': series_list, 'series_slug': self._series_slug,
             'chapter_glossary': self._chapter_glossary, 'analysis': self._analysis_text,
             'running': self._running(), 'paused': bool(self._pause and self._pause.pause_requested),
-            'progress': self._progress,
+            'progress': self._progress, 'job': self._job if self._running() else '',
+            'whisper_available': speech.available()[0],
         }
 
     def _push_translate(self):
@@ -117,6 +150,7 @@ class TranslateMixin:
             return {'error': 'Video bulunamadı: ' + str(path)}
         self._video = path
         self._streams = []
+        self._whisper = None
         self._analysis_text = ''
         self._progress = {'done': 0, 'total': 0}
         self._probing = True
@@ -137,8 +171,12 @@ class TranslateMixin:
                 streams = []
                 self._log(str(error))
                 self._emit('toast', {'message': str(error), 'kind': 'error'})
+            cached = self._cached_whisper(path)
             if self._video != path:
                 return
+            if cached:
+                self._whisper = cached
+                streams.append(whisper_entry(cached))
             self._streams = streams
             self._probing = False
             if not streams:
@@ -155,9 +193,71 @@ class TranslateMixin:
             return {'error': 'Çeviri sürerken video kapatılamaz.'}
         self._video = None
         self._streams = []
+        self._whisper = None
         self._analysis_text = ''
         self._progress = {'done': 0, 'total': 0}
         return self.translate_state()
+
+    # ------------------------------------------------------------------ Whisper
+    @staticmethod
+    def _cached_whisper(path):
+        try:
+            cfg = load_config()
+            return speech.load_cached(path, cfg['whisper_model'], cfg['whisper_language'])
+        except (RuntimeError, ValueError, OSError):
+            return None
+
+    def generate_subtitle(self):
+        """Konusmadan metinle altyazi olusturur: <video>.srt yazilir, 'whisper' akisi eklenir."""
+        if self._running():
+            return {'error': 'Önceki iş sürüyor.'}
+        if self._video is None:
+            return {'error': 'Önce bir video açın.'}
+        ok, message = speech.available()
+        if not ok:
+            return {'error': message}
+        self._pause = None
+        self._cancelled = False
+        self._review_event = None
+        self._job = 'whisper'
+        self._progress = {'done': 0, 'total': 0}
+        self._worker = threading.Thread(target=self._run_whisper, name='aktar-whisper-subtitle',
+                                        daemon=True, args=(self._video,))
+        self._worker.start()
+        return self.translate_state()
+
+    def _run_whisper(self, video):
+        output, error = '', ''
+        self._push_translate()
+        try:
+            cfg = load_config()
+            result = speech.transcribe(video, cfg['whisper_model'], cfg['whisper_device'], cfg['whisper_language'],
+                                       progress=self._on_progress, cancelled=lambda: self._cancelled,
+                                       log=self._log, cuda_dir=cfg.get('whisper_cuda_dir', ''))
+            if self._cancelled:
+                raise GracefulStop('Altyazı oluşturma iptal edildi.')
+            text = whisper_srt(result['segments'])
+            target = unique_source_path(video, 'srt')
+            target.write_text(text, encoding='utf-8', newline='\n')
+            output = str(target)
+            if self._video == video:
+                self._whisper = result
+                self._streams = [item for item in self._streams if item['index'] != WHISPER_STREAM]
+                self._streams.append(whisper_entry(result))
+        except GracefulStop as stop:
+            error = str(stop) or 'Altyazı oluşturma iptal edildi.'
+        except (RuntimeError, ValueError, OSError) as failure:
+            error = 'Altyazı oluşturulamadı: ' + str(failure)
+        except Exception as failure:  # beklenmeyen hata arayuzu kilitli birakmasin
+            error = 'Beklenmeyen hata: ' + repr(failure)
+        self._log(error or 'Altyazı yazıldı: ' + output)
+        self._worker = None
+        self._job = ''
+        self._progress = {'done': 0, 'total': 0}
+        cancelled = bool(error) and 'ptal' in error.casefold()
+        self._emit('subtitle_ready', {'output': output, 'name': Path(output).name if output else '',
+                                      'error': error, 'cancelled': cancelled})
+        self._push_translate()
 
     # ------------------------------------------------------------------ seri
     def set_series(self, slug):
@@ -245,6 +345,8 @@ class TranslateMixin:
         stream = next((item for item in self._streams if item['index'] == stream_index), None)
         if stream is None:
             return {'error': 'Önce bir altyazı akışı işaretleyin.'}
+        if stream['index'] == WHISPER_STREAM and not (self._whisper or {}).get('segments'):
+            return {'error': 'Whisper transkripti bulunamadı; yeniden oluşturun.'}
         if stream['image']:
             return {'error': 'Görüntü tabanlı altyazı şu anda desteklenmiyor.'}
         if not stream['supported']:
@@ -257,6 +359,7 @@ class TranslateMixin:
             decisions = series.series_decisions(self._series_slug)
         self._pause = PauseController()
         self._cancelled = False
+        self._job = 'translate'
         self._review_event = threading.Event()
         self._progress = {'done': 0, 'total': 0}
         self._analysis_text = ''
@@ -358,10 +461,14 @@ class TranslateMixin:
         try:
             work_dir.mkdir(parents=True, exist_ok=True)
             video_name = video.stem
-            source = work_dir / f"{video_name}.{stream['extension']}"
-            extract_subtitle(video, stream['index'], source, codec=stream['codec'])
-            self._log('Kaynak altyazı çıkarıldı: ' + str(source))
-            kind, payload = subtitle.parse_by_extension(read(source), source.suffix)
+            if stream['index'] == WHISPER_STREAM:
+                kind, payload = 'srt', subtitle.parse_srt(whisper_srt(self._whisper['segments']))
+                self._log('Kaynak: Whisper transkripti (' + str(len(payload)) + ' satır).')
+            else:
+                source = work_dir / f"{video_name}.{stream['extension']}"
+                extract_subtitle(video, stream['index'], source, codec=stream['codec'])
+                self._log('Kaynak altyazı çıkarıldı: ' + str(source))
+                kind, payload = subtitle.parse_by_extension(read(source), source.suffix)
             cues = subtitle.cues_of(kind, payload)
             engine = TranslationEngine(load_config, log=self._log)
             if do_analysis:
@@ -411,6 +518,7 @@ class TranslateMixin:
                 except (RuntimeError, ValueError) as series_error:
                     self._log('UYARI: bölüm kaydedilemedi: ' + str(series_error))
         self._worker = None
+        self._job = ''
         cancelled = bool(error) and any(marker in error.casefold() for marker in ('ptal', 'kapatıl'))
         self._emit('finished', {'output': output, 'name': Path(output).name if output else '',
                                 'error': error, 'cancelled': cancelled})

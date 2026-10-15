@@ -164,6 +164,44 @@ class BridgeTests(unittest.TestCase):
         self.assertIn('Görüntü', self.bridge.start_translation(3)['error'])
         self.assertIn('error', self.bridge.start_translation(9))
 
+    def test_whisper_srt_wraps_lines_and_keeps_short_cues_visible(self):
+        text = bridge_translate.whisper_srt([
+            {'start': 0, 'end': 1.2, 'text': 'Hello there this is a fairly long sentence that should be wrapped ok'},
+            {'start': 2, 'end': 2.1, 'text': ' Hi '}, {'start': 3, 'end': 4, 'text': '  '}])
+        cues = bridge_translate.subtitle.parse_srt(text)
+        self.assertEqual(len(cues), 2)
+        self.assertEqual(len(cues[0].lines), 2)
+        self.assertEqual((cues[1].start, cues[1].end, cues[1].lines), ('00:00:02,000', '00:00:02,500', ['Hi']))
+        with self.assertRaises(ValueError):
+            bridge_translate.whisper_srt([{'start': 0, 'end': 1, 'text': ''}])
+
+    def test_generate_subtitle_writes_srt_and_adds_whisper_stream(self):
+        video = self.root / 'a.mkv'
+        video.write_bytes(b'')
+        result = {'segments': [{'start': 0.0, 'end': 1.0, 'text': 'Hello.'}], 'language': 'en',
+                  'model': 'small', 'duration': 1.0, 'device': 'cpu', 'audio_track': None}
+        self.bridge._video = video
+        with mock.patch.object(bridge_translate.speech, 'available', return_value=(True, '')), \
+                mock.patch.object(bridge_translate.speech, 'transcribe', return_value=result), \
+                mock.patch.object(bridge_translate, 'load_config', return_value=bridge.load_config()):
+            state = self.bridge.generate_subtitle()
+            self.assertEqual(state['job'], 'whisper')
+            self.bridge._worker.join(5)
+        srt = self.root / 'a.srt'
+        self.assertIn('Hello.', srt.read_text(encoding='utf-8'))
+        state = self.bridge.translate_state()
+        self.assertEqual(state['job'], '')
+        self.assertEqual([item['index'] for item in state['streams']], ['whisper'])
+        ready = [data for event, data in self.events if event == 'subtitle_ready']
+        self.assertEqual((ready[0]['name'], ready[0]['error']), ('a.srt', ''))
+
+    def test_whisper_stream_needs_a_transcript(self):
+        self.bridge._video = self.root / 'a.mkv'
+        self.bridge._streams = [bridge_translate.whisper_entry({'segments': [], 'model': 'small'})]
+        self.assertIn('Whisper', self.bridge.start_translation('whisper')['error'])
+        with mock.patch.object(bridge_translate.speech, 'available', return_value=(False, 'yok')):
+            self.assertEqual(self.bridge.generate_subtitle(), {'error': 'yok'})
+
     def test_close_is_allowed_when_idle(self):
         self.assertTrue(self.bridge.request_close(lambda: None))
 

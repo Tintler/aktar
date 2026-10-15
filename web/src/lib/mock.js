@@ -35,7 +35,7 @@ export function createMock(emit) {
       { index: 4, codec: 'hdmv_pgs_subtitle', language: 'eng', title: 'Blu-ray', supported: false, image: true, extension: '' },
     ],
     probing: false, series: [{ slug: 'one-step-beyond', title: 'One Step Beyond' }], series_slug: 'one-step-beyond',
-    chapter_glossary: [], analysis: '', running: false, paused: false, progress: { done: 80, total: 375 },
+    chapter_glossary: [], analysis: '', running: false, paused: false, progress: { done: 80, total: 375 }, job: '', whisper_available: true,
   };
   const row = (name, kind, where, length, source, status, extra = {}) => ({
     key: name, path: 'D:/Dersler/' + name, name, kind, where, folder: 'D:/Dersler/' + where, length, measured: length !== '—',
@@ -250,7 +250,8 @@ export function createMock(emit) {
     set_series: async (slug) => ({ ...translate, series_slug: slug }),
     series_data: async () => ({ slug: 'one-step-beyond', title: 'One Step Beyond', glossary: [{ source: 'Bridge of the Ancients', target: 'Kadimlerin Köprüsü' }], decisions: ['Karakterler birbirine "sen" der.'] }),
     guess_series_title: async () => 'One Step Beyond',
-    start_translation: async () => ({ ...translate, running: true }),
+    start_translation: async () => ({ ...translate, running: true, job: 'translate' }),
+    generate_subtitle: async () => ({ ...translate, running: true, job: 'whisper', progress: { done: 312, total: 1440 } }),
   };
   // 'then' tanimsiz kalmali: yoksa Promise bu nesneyi "thenable" sanip hic cozulmez.
   return new Proxy(api, { get: (target, name) => (name === 'then' ? undefined : target[name] ?? (async () => null)) });
