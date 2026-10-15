@@ -29,6 +29,7 @@
   $effect(() => {
     entries.length;
     chat?.stream;
+    chat?.thinking;
     chat?.id;
     if (scroller && stick) queueMicrotask(() => (scroller.scrollTop = scroller.scrollHeight));
   });
@@ -233,7 +234,7 @@
               {#if chat.thinking}<Thought text={chat.thinking} live={!chat.stream} />{/if}
               {#if chat.stream}
                 <div class="md selectable streaming">{@html richHtml(chat.stream)}</div>
-              {:else}
+              {:else if !chat.thinking}
                 <div class="thinking"><span class="spark"><Icon name="sparkles" size={16} /></span><span class="dots"><i></i><i></i><i></i></span></div>
               {/if}
             </div>

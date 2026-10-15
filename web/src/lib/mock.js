@@ -149,9 +149,23 @@ export function createMock(emit) {
     assistant_state: async () => conversation,
     assistant_new: async () => (conversation = { ...conversation, id: 'yeni', title: '', entries: [] }),
     assistant_list: async () => ({ items: [{ id: 'c1', title: 'Regresyon notları', updated: new Date().toISOString() }], current: conversation.id }),
-    assistant_ask: async (text) => {
-      conversation.entries = [...conversation.entries, { kind: 'user', text },
-        { kind: 'assistant', parts: [{ type: 'text', text: 'Bu sahte arka uçtan gelen bir **örnek** cevaptır.\n\n- Madde bir\n- Madde iki' }], sources: [] }];
+    assistant_ask: async (text, think) => {
+      // Dusunme aciksa once dusunce kelime kelime akar (F101 canli dusunce alani).
+      const answer = 'Bu sahte arka uçtan gelen bir **örnek** cevaptır.\n\n- Madde bir\n- Madde iki';
+      const thought = think ? 'Kullanıcı bir soru sordu. Önce kütüphanede ilgili notlar var mı bakmalıyım. Notlarda doğrudan bir kayıt yok, genel bilgiyle cevaplayacağım. Cevabı kısa tutup iki maddede özetlemek yeterli olur. Biçim olarak Markdown liste kullanacağım. Son olarak yazım hatalarını kontrol ediyorum ve gereksiz tekrarları çıkarıyorum.' : '';
+      const words = thought ? thought.split(' ') : [];
+      conversation = { ...conversation, busy: true, stream: '', thinking: '', entries: [...conversation.entries, { kind: 'user', text }] };
+      let i = 0;
+      const timer = setInterval(() => {
+        i += 1;
+        if (i <= words.length) emit('assistant_stream', { id: conversation.id, text: '', thinking: words.slice(0, i).join(' ') });
+        else {
+          clearInterval(timer);
+          conversation = { ...conversation, busy: false, stream: null, thinking: null, entries: [...conversation.entries,
+            { kind: 'assistant', think, thinking: thought, parts: [{ type: 'text', text: answer }], sources: [] }] };
+          emit('assistant', { id: conversation.id });
+        }
+      }, 150);
       return conversation;
     },
     files_recent: async () => ({ items: [{ path: 'D:\\Belgeler\\rapor.pdf', name: 'rapor.pdf', folder: 'D:\\Belgeler', kind: 'document', opened: new Date().toISOString(), missing: false }] }),
