@@ -588,13 +588,14 @@ def plan(entries, base=None, progress=None, cancelled=None, cfg=None):
             'index': [entry] (transkript var, indeks yok), 'document': [entry],
             'vision': [entry] (taranmis PDF / gorsel; 'vision_pages' sayfa),
             'subtitle': [entry], 'whisper': [entry], 'failed': [(entry, hata)],
-            'whisper_seconds': float}. Embedding modeli secili degilse transkripti
+            'whisper_seconds': float, 'frames': [entry] (F114: goruntusu okunmamis videolar),
+            'frames_seconds': float}. Embedding modeli secili degilse transkripti
     olan her video 'ready' sayilir.
     """
     cfg = _embedding_cfg(cfg)
     result = {'ready': [], 'summary': [], 'index': [], 'document': [], 'vision': [],
               'subtitle': [], 'whisper': [], 'failed': [], 'whisper_seconds': 0.0,
-              'vision_pages': 0}
+              'vision_pages': 0, 'frames': [], 'frames_seconds': 0.0}
     videos = [entry for entry in entries if not entry['missing']]
     for index, entry in enumerate(videos):
         if cancelled and cancelled():
@@ -636,6 +637,10 @@ def plan(entries, base=None, progress=None, cancelled=None, cfg=None):
             elif info is not None:
                 result['whisper'].append(entry)
                 result['whisper_seconds'] += info['duration']
+        if entry['kind'] == 'video' and not qa.load_visual(entry['path'], base)[1]:
+            result['frames'].append(entry)
+            probed = cached_probe(entry['path'], base)
+            result['frames_seconds'] += float((probed or {}).get('duration') or (session or {}).get('duration') or 0)
         if progress:
             progress(index + 1, len(videos))
     return result

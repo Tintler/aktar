@@ -49,6 +49,9 @@
     return `Tutar ${a.kind === 'price_up' ? 'arttı' : 'azaldı'}: ${money(a.reference, a.currency)} → ${money(a.amount, a.currency)}${pct}`;
   }
   let showIgnored = $state(false);
+  // Oneri karti: oneri yoksa kendiliginden daralir; kullanici actiysa/kapattiysa o gecerli.
+  let sugOpen = $state(null);
+  const sugCollapsed = $derived(sugOpen === null ? !suggestions.length : !sugOpen);
 
   async function startScan(slugs, force) {
     scanOpen = false;
@@ -133,10 +136,6 @@
 <section class="page">
   <div class="page-head">
     <h1>{tab === 'spending' ? 'Harcamalar' : 'Abonelikler'}</h1>
-    <span class="seg" role="tablist">
-      <button role="tab" aria-selected={tab === 'subs'} class:on={tab === 'subs'} onclick={() => (tab = 'subs')}><Icon name="repeat" size={15} />Abonelikler</button>
-      <button role="tab" aria-selected={tab === 'spending'} class:on={tab === 'spending'} onclick={() => (tab = 'spending')}><Icon name="wallet" size={15} />Harcamalar</button>
-    </span>
     <span class="head-actions">
       {#if scan?.busy}
         <button class="btn" onclick={() => act('subs_scan_stop')}><Icon name="stop" size={16} />Taramayı durdur</button>
@@ -144,6 +143,10 @@
         <button class="btn" onclick={() => (scanOpen = true)} title="Banka ve kredi kartı ekstrelerindeki ödemeleri kayıtlara bağlar, yeni faturaları önerir"><Icon name="fileSearch" size={16} />Ekstrelerden tara</button>
       {/if}
       {#if tab === 'subs'}<button class="btn primary" onclick={() => (editing = {})}><Icon name="plus" size={16} />Yeni kayıt</button>{/if}
+    </span>
+    <span class="seg" role="tablist">
+      <button role="tab" aria-selected={tab === 'subs'} class:on={tab === 'subs'} onclick={() => (tab = 'subs')}><Icon name="repeat" size={15} />Abonelikler</button>
+      <button role="tab" aria-selected={tab === 'spending'} class:on={tab === 'spending'} onclick={() => (tab = 'spending')}><Icon name="wallet" size={15} />Harcamalar</button>
     </span>
   </div>
   <div class="page-body">
@@ -206,10 +209,16 @@
 
     {#if suggestions.length || ignoredItems.length}
       <div class="card suggest">
-        <div class="side-title"><Icon name="sparkles" size={16} />Ekstrelerden öneriler<span class="badge accent">{suggestions.length}</span>
+        <div class="side-title">
+          <button class="fold" aria-expanded={!sugCollapsed} onclick={() => (sugOpen = sugCollapsed)}>
+            <Icon name="sparkles" size={16} />Ekstrelerden öneriler<span class="badge" class:accent={suggestions.length}>{suggestions.length}</span>
+            {#if sugCollapsed && !suggestions.length}<span class="dim fold-note">yeni öneri yok</span>{/if}
+          </button>
           <span class="grow"></span>
-          {#if ignoredItems.length}<button class="link" onclick={() => (showIgnored = !showIgnored)}>{showIgnored ? 'Yoksayılanları gizle' : `Yoksayılanlar (${ignoredItems.length})`}</button>{/if}
+          {#if ignoredItems.length}<button class="link" onclick={() => { showIgnored = !showIgnored || sugCollapsed; sugOpen = true; }}>{showIgnored && !sugCollapsed ? 'Yoksayılanları gizle' : `Yoksayılanlar (${ignoredItems.length})`}</button>{/if}
+          <button class="icon-btn sm" title={sugCollapsed ? 'Genişlet' : 'Daralt'} onclick={() => (sugOpen = sugCollapsed)}><Icon name={sugCollapsed ? 'down' : 'up'} size={15} /></button>
         </div>
+        {#if !sugCollapsed}
         {#if !suggestions.length}<p class="dim none-left">Yeni öneri yok.</p>{/if}
         {#each showAll ? suggestions : suggestions.slice(0, SUGGEST_LIMIT) as s (s.key)}
           <div class="sug">
@@ -247,6 +256,7 @@
               </div>
             {/each}
           </div>
+        {/if}
         {/if}
       </div>
     {/if}
@@ -356,7 +366,8 @@
 
 <style>
   .head-actions { display: flex; gap: 8px; }
-  .seg { display: inline-flex; padding: 3px; border-radius: 999px; background: var(--surface); gap: 2px; margin-right: 8px; }
+  /* Sekmeler basligin en sagindadir; 'Yeni kayit' gizlenip gorununce yer degistirmez. */
+  .seg { display: inline-flex; padding: 3px; border-radius: 999px; background: var(--surface); gap: 2px; margin-left: 8px; }
   .seg button { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 14px; border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--secondary); }
   .seg button:hover:not(.on) { color: var(--text); }
   .seg button.on { background: var(--text); color: var(--window); }
@@ -385,6 +396,11 @@
   .alert-row .title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
   .alert-row .title .dim { font-size: 12.5px; white-space: nowrap; }
   .alert-row small { font-size: 11.5px; margin-top: 2px; }
+  .fold { display: inline-flex; align-items: center; gap: 8px; font: inherit; color: inherit; min-width: 0; }
+  .fold :global(svg) { color: var(--accent); }
+  .fold-note { font-weight: 500; font-size: 12px; }
+  .suggest:has(.fold[aria-expanded='false']) { padding-bottom: 10px; }
+  .suggest:has(.fold[aria-expanded='false']) .side-title { margin-bottom: 0; }
   .none-left { font-size: 12.5px; margin: 4px 0 8px; }
   .ignored { margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--outline); }
   .ignored-head { display: flex; justify-content: space-between; align-items: center; font-size: 12px; padding-bottom: 4px; }

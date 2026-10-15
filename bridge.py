@@ -261,6 +261,7 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
         self._stop_document_for_close()
         self._stop_player_for_close()
         self._stop_assistant_for_close()
+        self._stop_watch_for_close()
         if close:
             threading.Timer(0.1, close).start()
         return True
@@ -272,3 +273,4 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
         self._stop_document_for_close()
         self._stop_player_for_close()
         self._stop_assistant_for_close()
+        self._stop_watch_for_close()

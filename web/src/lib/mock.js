@@ -205,7 +205,13 @@ export function createMock(emit) {
         merchants: [['Migros', 'Alışveriş', 0.16], ['Enerjisa', 'Fatura', 0.09], ['Trendyol', 'Alışveriş', 0.08], ['İGDAŞ', 'Fatura', 0.06], ['Shell', 'Alışveriş', 0.05],
           ['Turkcell', 'Fatura', 0.04], ['Netflix', 'Abonelik', 0.02], ['A101', 'Alışveriş', 0.02], ['Yemeksepeti', 'Alışveriş', 0.02], ['Deezer', 'Abonelik', 0.01]]
           .map(([name, category, share]) => ({ key: name, name, category, share, total: +(total * share).toFixed(2), count: Math.max(1, Math.round(share * 30)) })),
-        merchant_count: 47, excluded: { count: 9, total: 48200 },
+        merchant_count: 47, excluded: { count: 4, total: 48200,
+          groups: [{ key: 'transfer', label: 'Hesaplar arası transfer', count: 2, total: 40000 }, { key: 'card_payment', label: 'Kart borcu ödemesi', count: 2, total: 8200 }],
+          rows: [
+            { date: '2026-09-21', description: 'Giden transfer, Cem Acar, Vadeli hesaba aktarım', merchant: '', amount: 25000, reason: 'transfer', account: 'bank_account', file: 'Eylül hesap özeti.pdf' },
+            { date: '2026-09-12', description: 'Ödeme - Enpara.com Cep Şubesi', merchant: 'Enpara', amount: 3104.15, reason: 'card_payment', account: 'bank_account', file: 'Eylül hesap özeti.pdf' },
+            { date: '2026-09-05', description: 'Giden transfer, Cem Acar, Döviz hesabı', merchant: '', amount: 15000, reason: 'transfer', account: 'bank_account', file: 'Eylül hesap özeti.pdf' },
+            { date: '2026-08-12', description: 'Ödeme, Enpara.com kredi kartı ödemesi', merchant: 'Enpara', amount: 5095.85, reason: 'card_payment', account: 'bank_account', file: 'Ağustos hesap özeti.pdf' }] },
         period: { first: '2026-03-12', last: '2026-10-11' }, statements: 2, scan_date: scanInfo.date,
       };
     },
@@ -248,7 +254,7 @@ export function createMock(emit) {
     },
     library_search: async (q) => ({ query: q, keys: library.rows.slice(0, 3).map((r) => r.key), files: 2, limited: false, searched: q.length >= 3,
       hits: [{ path: 'x', name: '03 Gradyan İnişi', start: 754, where: '12:34', text: 'öğrenme oranını küçültünce adımlar da küçülüyor' }, { path: 'y', name: 'Ders notları', start: 12, where: 's.12', text: 'Öğrenme oranı (learning rate) seçimi' }] }),
-    prepare_plan: async () => { setTimeout(() => emit('prepare', { counts: { ready: 4, summary: 1, index: 0, document: 0, subtitle: 1, vision: 1, whisper: 1 }, whisper_seconds: '22:10', vision_pages: 12, failed: [] }), 700); return { files: 7, model: settings.model, whisper: true, whisper_model: 'large-v3-turbo', whisper_device: 'auto', vision_model: settings.model, ocr_engine: 'tesseract', warnings: [] }; },
+    prepare_plan: async () => { setTimeout(() => emit('prepare', { counts: { ready: 4, summary: 1, index: 0, document: 0, subtitle: 1, vision: 1, whisper: 1, frames: 3 }, whisper_seconds: '22:10', vision_pages: 12, failed: [], frames_seconds: '2:41:10', frames_extra: 2 }), 700); return { files: 7, model: settings.model, whisper: true, whisper_model: 'large-v3-turbo', whisper_device: 'auto', vision_model: settings.model, ocr_engine: 'tesseract', warnings: [] }; },
     // F85: yeniden isleme -> kayitlari silinen dosyalar 'Bekliyor' olur
     library_reset: async (paths) => {
       for (const r of library.rows) if (paths.includes(r.path)) Object.assign(r, { status: 'pending', status_text: 'Bekliyor', source: '' });

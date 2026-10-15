@@ -119,7 +119,9 @@ def compact_lines(segments, max_seconds=LINE_SECONDS, max_chars=LINE_CHARS):
     lines = []
     for segment in segments:
         current = lines[-1] if lines else None
-        if (current and segment['start'] - current['start'] <= max_seconds
+        # Kare betimleri (F114) konusmayla birlesmez; '[Görüntü]' satiri ayri kalir.
+        if (current and not current.get('visual') and not segment.get('visual')
+                and segment['start'] - current['start'] <= max_seconds
                 and segment['start'] - current['end'] <= 3.0
                 and len(current['text']) + 1 + len(segment['text']) <= max_chars):
             current['text'] += ' ' + segment['text']
@@ -147,11 +149,47 @@ def format_position(value, document=False):
     return f's.{int(value)}' if document else format_time(value)
 
 
+VISUAL_LABEL = '[Görüntü]'
+
+
+def with_visual(data):
+    """F114: videonun segmentleri + kare betimleri ('[Görüntü] ...' satirlari) zaman sirasiyla.
+    Betimler cached_sessions'ta oturuma 'visual' olarak eklenir (video_frames.py uretir)."""
+    visual = data.get('visual') or []
+    if not visual:
+        return data['segments']
+    extra = [{'start': float(item['start']), 'end': float(item['start']), 'text': f'{VISUAL_LABEL} {item["text"]}',
+              'visual': True} for item in visual]
+    return sorted(list(data['segments']) + extra, key=lambda item: item['start'])
+
+
+def visual_path(video, base=None):
+    """Kare betimlerinin onbellegi; video degisirse yenilenir."""
+    video = Path(video).resolve()
+    stat = video.stat()
+    key = digest(f'visual|{video}|{stat.st_size}|{int(stat.st_mtime)}')[:16]
+    stem = re.sub(r'[^\w.-]+', '_', video.stem)[:40] or 'video'
+    return Path(base or work_dir()) / 'visual' / f'{stem}.{key}.json'
+
+
+def load_visual(video, base=None):
+    """Kaydedilmis kare betimleri [{'start', 'text'}] (yarim kalmis olsa da) ve tamamlandi mi."""
+    try:
+        value = json.loads(read(visual_path(video, base)))
+    except (OSError, ValueError):
+        return [], False
+    frames = value.get('frames') if isinstance(value, dict) else None
+    if not isinstance(frames, list):
+        return [], False
+    return ([item for item in frames if isinstance(item, dict) and str(item.get('text', '')).strip()],
+            bool(value.get('complete')))
+
+
 def lines_of(data):
     """Oturumun satirlari: video icin compact_lines; belgede yalnizca ayni sayfadaki
     paragraflar birlesir (sayfa numarasi atif icin korunur)."""
     if not is_document(data):
-        return compact_lines(data['segments'])
+        return compact_lines(with_visual(data))
     lines = []
     for segment in data['segments']:
         current = lines[-1] if lines else None
@@ -337,6 +375,10 @@ def cached_sessions(video, base=None):
         except (OSError, KeyError, TypeError, ValueError):
             continue
         sessions.append(data)
+    if sessions and not is_document(sessions[0]):
+        visual, _complete = load_visual(video, base)
+        for data in sessions:
+            data['visual'] = visual
     return sessions
 
 
@@ -407,7 +449,7 @@ def extra_instructions(instructions):
     return '\n\n' + instructions if instructions else ''
 
 
-ANSWER_PROMPT = '''You answer a viewer's questions about one specific video. The video's content is given below.
+ANSWER_PROMPT = '''You answer a viewer's questions about one specific video. The video's content is given below. Lines starting with [Görüntü] are not speech: they describe what is visible on screen at that moment (slides, text, scenes), read from video frames.
 
 Rules:
 - Answer in Turkish, naturally and concisely. Use short paragraphs or bullet points when they help.
@@ -571,7 +613,7 @@ class VideoQA:
         self.config_provider = config_provider
         self.log = log
         self.save = save or (lambda _data: None)
-        self.lines = compact_lines(data['segments'])
+        self.lines = compact_lines(with_visual(data))
         self.history = []
 
     # yardimcilar

@@ -35,7 +35,17 @@ class ExpensesTests(unittest.TestCase):
         self.assertEqual(board['total'], 500)
         self.assertEqual(board['count'], 2)
         # kart odemesi, transfer ve 'cep subesi' satiri sayilmaz
-        self.assertEqual(board['excluded'], {'count': 3, 'total': 7050})
+        excluded = board['excluded']
+        self.assertEqual((excluded['count'], excluded['total']), (3, 7050))
+        self.assertEqual([(g['label'], g['count'], g['total']) for g in excluded['groups']],
+                         [('Kart borcu ödemesi', 1, 5000), ('Hesaplar arası transfer', 1, 2000),
+                          ('Kart ödemesi (açıklamadan)', 1, 50)])
+        self.assertEqual([(r['date'], r['reason'], r['amount']) for r in excluded['rows']],
+                         [('2026-08-25', 'words', 50), ('2026-08-21', 'transfer', 2000),
+                          ('2026-08-20', 'card_payment', 5000)])
+        # Sayilmayanlar secili donemindir: Eylul'de yok, tum donemde hepsi.
+        self.assertEqual(expenses.dashboard(ROWS, month='2026-09')['excluded']['count'], 0)
+        self.assertEqual(expenses.dashboard(ROWS, month='all')['excluded']['total'], 7050)
 
     def test_defaults_to_latest_month_and_compares_with_previous(self):
         board = expenses.dashboard(ROWS)

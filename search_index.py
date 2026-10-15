@@ -51,9 +51,12 @@ def primary_session(video, base=None):
 def index_path(video, session, cfg, base=None):
     video = Path(video).resolve()
     stat = video.stat()
-    key = digest('|'.join((str(VERSION), str(video), str(stat.st_size), str(int(stat.st_mtime)),
-                           qa.source_key(session['source']), str(cfg['embedding_model']),
-                           str(cfg['embedding_document_template']))))[:16]
+    parts = [str(VERSION), str(video), str(stat.st_size), str(int(stat.st_mtime)),
+             qa.source_key(session['source']), str(cfg['embedding_model']), str(cfg['embedding_document_template'])]
+    visual = session.get('visual') or []
+    if visual:  # F114: kare betimleri eklenince indeks yenilenir (betimsiz videolarin anahtari ayni kalir)
+        parts.append(f'visual:{len(visual)}')
+    key = digest('|'.join(parts))[:16]
     stem = re.sub(r'[^\w.-]+', '_', video.stem)[:40] or 'video'
     return index_dir(base) / f'{stem}.{key}.json'
 
@@ -67,7 +70,7 @@ def chunk_session(session):
     """Oturumun arama parcalari; belgelerde (F64) sure siniri yok, yalnizca karakter."""
     if qa.is_document(session):
         return _chunk(qa.lines_of(session), float('inf'), CHUNK_CHARS)
-    return chunk_lines(session['segments'])
+    return chunk_lines(qa.with_visual(session))  # F114: kare betimleri de aranir
 
 
 def _chunk(lines, max_seconds, max_chars):

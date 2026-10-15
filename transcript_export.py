@@ -35,7 +35,7 @@ def render(session, fmt):
             cues.append(f'{number}\n{srt_time(segment["start"])} --> {srt_time(end)}\n'
                         f'{segment["text"]}\n')
         return '\n'.join(cues)
-    lines = qa.lines_of(session)
+    lines = qa.lines_of(dict(session, visual=[]))  # kare betimleri (F114) disa aktarilmaz
     if fmt == 'md':
         overview = (session.get('overview') or {}).get('summary', '')
         body = '\n'.join(f'**[{qa.format_position(line["start"], document)}]** {line["text"]}  '

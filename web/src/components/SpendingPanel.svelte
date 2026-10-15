@@ -2,6 +2,7 @@
   // Harcama panosu (F111): taranmis ekstre satirlarindan aylik toplam, tur dagilimi, firmalar.
   // Hesap expenses.py'de; kart odemeleri ve kendi transferleri sayilmaz.
   import Icon from '../lib/Icon.svelte';
+  import ExcludedModal from './ExcludedModal.svelte';
   import { untrack } from 'svelte';
   import { act } from '../lib/state.svelte.js';
   import { plot, seriesColor } from '../lib/chart.js';
@@ -11,6 +12,7 @@
 
   let board = $state(null);
   let month = $state(null);   // null: en son ay
+  let showExcluded = $state(false);
 
   async function load() {
     const result = await act('subs_spending', month);
@@ -105,11 +107,12 @@
       {#if board.average !== null}<b>{money(board.average)}</b><span class="dim">tam aylar ({months.filter((m) => !m.partial).length})</span>
       {:else}<b class="dim">—</b><span class="dim">tam ay verisi yok</span>{/if}
     </div>
-    <div class="stat card">
-      <span class="label">Sayılmayan</span>
+    <button class="stat card clickable" onclick={() => (showExcluded = true)} disabled={!board.excluded.count}
+      title="Kart borcu ödemeleri ve kendi hesaplarınız arasındaki transferler harcama sayılmaz; aynı para iki kez toplanmasın. Ayrıntı için tıklayın.">
+      <span class="label">Sayılmayan<Icon name="external" size={12} /></span>
       <b>{money(board.excluded.total)}</b>
-      <span class="dim" title="Kart borcu ödemeleri ve kendi hesaplarınız arasındaki transferler harcama sayılmaz; aynı para iki kez toplanmasın.">{board.excluded.count} kart ödemesi / transfer (tüm dönem)</span>
-    </div>
+      <span class="dim">{board.excluded.count} kart ödemesi / transfer · {month === 'all' ? 'tüm dönem' : monthName(month, true)}</span>
+    </button>
   </div>
 
   <div class="card chart-card">
@@ -149,6 +152,10 @@
   </div>
 {/if}
 
+{#if showExcluded && board?.excluded}
+  <ExcludedModal excluded={board.excluded} period={month === 'all' ? 'Tüm dönem' : monthName(month, true)} onclose={() => (showExcluded = false)} />
+{/if}
+
 <style>
   .bar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
   .bar select { width: 180px; }
@@ -157,7 +164,11 @@
   .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 16px; }
   .stat { display: flex; flex-direction: column; gap: 4px; padding: 16px 18px; min-width: 0; }
   .stat b { font-size: 22px; font-weight: 700; letter-spacing: -.01em; font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 4px; }
-  .stat .label { margin-bottom: 4px; }
+  .stat .label { margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+  .stat.clickable { text-align: left; font: inherit; color: inherit; cursor: pointer; transition: border-color .15s, background .15s; }
+  .stat.clickable:hover:not(:disabled) { border-color: var(--accent); }
+  .stat.clickable:disabled { cursor: default; }
+  .stat.clickable :global(svg) { opacity: .6; }
   .stat .dim { font-size: 12px; }
   .warn { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--warning); }
   .delta.up :global(svg) { color: var(--danger); }

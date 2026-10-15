@@ -21,6 +21,7 @@ import qa
 import search_index
 import speech
 import transcript_export
+import video_frames
 from app_core import Client, GracefulStop, load_config
 
 CHAT_GREETING = ('Bu koleksiyondaki dosyalar hakkında soru sorun; cevaplar hangi dosyada, '
@@ -35,7 +36,7 @@ STATUS_TEXT = {'ready': 'Hazır', 'transcript': 'Metin hazır', 'pending': 'Bekl
 META_TEXT = {'ready': 'hazır', 'transcript': 'metin hazır', 'pending': 'bekliyor',
              'no_subtitle': 'Whisper bekliyor', 'no_text': 'OCR bekliyor', 'missing': 'bulunamadı'}
 OCR_OVERRIDES = ('tesseract', 'model', 'vision')  # prepare_start: yalnizca bu hazirlik icin
-PLAN_GROUPS = ('ready', 'summary', 'index', 'document', 'subtitle', 'vision', 'whisper')
+PLAN_GROUPS = ('ready', 'summary', 'index', 'document', 'subtitle', 'vision', 'whisper', 'frames')
 
 
 def format_duration(seconds):
@@ -628,10 +629,16 @@ class LibraryMixin:
             self._emit('prepare', {'counts': {key: len(result[key]) for key in PLAN_GROUPS},
                                    'whisper_seconds': format_duration(result['whisper_seconds'])
                                    if result['whisper_seconds'] else '',
-                                   'vision_pages': result['vision_pages'], 'failed': failed})
+                                   'vision_pages': result['vision_pages'], 'failed': failed,
+                                   'frames_seconds': format_duration(result['frames_seconds'])
+                                   if result['frames_seconds'] else '',
+                                   # transkripti hazir olup yalniz goruntusu okunacaklar (sayaca eklenir)
+                                   'frames_extra': len({library._key(entry['path']) for entry in result['frames']}
+                                                       & {library._key(entry['path']) for entry in result['ready']})})
 
         threading.Thread(target=work, name='aktar-library-plan', daemon=True).start()
         return {'files': len(entries), 'model': cfg['model'], 'whisper': whisper_ready,
+                'frames': bool((self._lib_data or {}).get('frames')),
                 'whisper_model': cfg['whisper_model'], 'whisper_device': cfg['whisper_device'],
                 'vision_model': str(cfg.get('vision_model', '')).strip() or cfg['model'],
                 'ocr_engine': documents.ocr_engine(cfg), 'warnings': warnings}
@@ -642,9 +649,10 @@ class LibraryMixin:
         self._lib_plan = None
         return True
 
-    def prepare_start(self, summaries=True, vision=True, whisper=False, ocr_engine=''):
+    def prepare_start(self, summaries=True, vision=True, whisper=False, ocr_engine='', frames=False):
         """`ocr_engine` ('tesseract' | 'model' | 'vision'; bos: Ayarlardaki) yalnizca bu
-        hazirlik icin taranmis sayfalarin motorunu degistirir."""
+        hazirlik icin taranmis sayfalarin motorunu degistirir. `frames` (F114): videolarin
+        goruntusu de okunur; secim koleksiyona yazilir (klasor izleme de ona uyar)."""
         plan = self._lib_plan
         if plan is None:
             return {'error': 'Hazırlık planı hazır değil.'}
@@ -656,15 +664,21 @@ class LibraryMixin:
         entries = ((list(plan['summary']) if summaries else []) + list(plan['index'])
                    + list(plan['document']) + list(plan['subtitle'])
                    + (list(plan['vision']) if vision else []) + (list(plan['whisper']) if whisper else []))
+        if frames:  # transkripti hazir olup yalniz goruntusu okunacak videolar da siraya girer
+            queued = {library._key(entry['path']) for entry in entries}
+            entries += [entry for entry in plan['frames'] if library._key(entry['path']) not in queued]
+        if self._lib_data is not None and bool(self._lib_data.get('frames')) != bool(frames):
+            self._lib_data['frames'] = bool(frames)
+            library.save_collection(self._lib_data, self._lib_slug)
         self._lib_plan = None
         if not entries and not summaries:
             return self.library_state()
         videos = [entry['path'] for entry in self._lib_entries if not entry['missing']]
         collection = (self._lib_slug, self._lib_data['title'], videos) if self._lib_data else None
-        self._start_queue(entries, whisper, summaries, collection, vision, ocr_engine)
+        self._start_queue(entries, whisper, summaries, collection, vision, ocr_engine, frames)
         return self.library_state()
 
-    def _start_queue(self, entries, whisper, summaries, collection, vision=True, ocr_engine=''):
+    def _start_queue(self, entries, whisper, summaries, collection, vision=True, ocr_engine='', frames=False):
         """Kuyrugu baslatir; acik olmayan koleksiyonun dosyalari da olabilir (F114 klasor izleme)."""
         self._queue_cancel = threading.Event()
         self._queue_resume = threading.Event()
@@ -674,7 +688,8 @@ class LibraryMixin:
         self._row_status = {library._key(entry['path']): ('Sırada', 'dim') for entry in entries}
         self._log(f'Toplu hazırlık başladı: {len(entries)} dosya' + (' (Whisper açık).' if whisper else '.'))
         self._queue_worker = threading.Thread(
-            target=self._run_queue, args=(entries, whisper, bool(summaries), collection, bool(vision), ocr_engine),
+            target=self._run_queue, args=(entries, whisper, bool(summaries), collection, bool(vision), ocr_engine,
+                                          bool(frames)),
             name='aktar-library-queue', daemon=True)
         self._queue_worker.start()
 
@@ -712,7 +727,7 @@ class LibraryMixin:
         self._push_queue()
         return self._queue
 
-    def _run_queue(self, entries, allow_whisper, summaries, collection, allow_vision, ocr_engine=''):
+    def _run_queue(self, entries, allow_whisper, summaries, collection, allow_vision, ocr_engine='', frames=False):
         """Eski QueueWorker.run: siradaki dosyalari library.transcribe/index ile isler."""
         done = failed = 0
         last_error, repeats = '', 0
@@ -723,6 +738,7 @@ class LibraryMixin:
             cfg['ocr_engine'] = ocr_engine
             self._log('Bu hazırlıkta taranmış sayfalar için OCR motoru: ' + ocr_engine)
         client = Client(cfg, log=self._log)  # indeksleme icin tek istemci
+        frame_reader = []  # F114: ilk videoda kurulur
 
         def started(index, path, step):
             queue.update(index=index, name=Path(path).name, step=step, percent=None,
@@ -765,6 +781,15 @@ class LibraryMixin:
                 outcome = library.transcribe(entry, cfg, allow_whisper, log=log, progress=whisper_progress,
                                              cancelled=cancel.is_set, allow_vision=allow_vision,
                                              vision_progress=counted('Görü' if reader == 'görü modeli' else 'OCR'))
+                if (frames and outcome != 'skipped' and entry['kind'] == 'video'
+                        and not qa.load_visual(path)[1]):
+                    started(index, path, 'görüntüler okunuyor')
+                    if not frame_reader:
+                        frame_reader.append(library.vision_reader(cfg, self._log))
+                    count = video_frames.read_video(path, cfg, frame_reader[0], log=log, progress=counted('Kare'),
+                                                    cancelled=cancel.is_set)
+                    log(f'{count} kare betimlendi')
+                    has_text = False  # indeks kare betimleriyle yeniden kurulur
                 if outcome != 'skipped' and str(cfg.get('embedding_model', '')).strip():
                     if not has_text:
                         started(index, path, 'indeksleniyor')

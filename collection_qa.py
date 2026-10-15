@@ -46,7 +46,7 @@ _MONTH_WORDS = re.compile(r'\b(?:ocak|şubat|mart|nisan|mayıs|haziran|temmuz|a�
                           r'|kasım|aralık|january|february|march|april|may|june|july|august'
                           r'|september|october|november|december)\w*')
 
-ANSWER_PROMPT = '''You answer questions about a collection of videos (for example a lecture series). Relevant excerpts from the videos' timestamped transcripts are given below; each video has an id such as V3. Some items may be documents (PDF or text files) instead of videos: their excerpts carry page numbers like [s.12] instead of timestamps.
+ANSWER_PROMPT = '''You answer questions about a collection of videos (for example a lecture series). Relevant excerpts from the videos' timestamped transcripts are given below; each video has an id such as V3. Some items may be documents (PDF or text files) instead of videos: their excerpts carry page numbers like [s.12] instead of timestamps. Transcript lines starting with [Görüntü] are not speech: they describe what is visible on screen at that moment (slides, text, scenes), read from video frames.
 
 Rules:
 - Answer in Turkish, naturally and concisely. Use short paragraphs or bullet points when they help.

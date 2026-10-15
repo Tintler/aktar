@@ -33,7 +33,7 @@ class FakeBridge(bridge_watch.WatchMixin, bridge_subscriptions.SubscriptionsMixi
     def _queue_running(self):
         return self.running
 
-    def _start_queue(self, entries, whisper, summaries, collection, vision=True, ocr_engine=''):
+    def _start_queue(self, entries, whisper, summaries, collection, vision=True, ocr_engine='', frames=False):
         self.queued.append(([entry['path'].name for entry in entries], collection[0]))
 
     def _rescan(self):

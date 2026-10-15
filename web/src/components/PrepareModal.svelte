@@ -10,6 +10,7 @@
   let summaries = $state(true);
   let vision = $state(true);
   let whisper = $state(false);
+  let frames = $state(false);   // F114: video goruntuleri (koleksiyonun son secimi hatirlanir)
   let ocr = $state('');   // bos: Ayarlardaki motor (F85: yalnizca bu hazirlik icin degistirilebilir)
   const ENGINES = { tesseract: 'Tesseract (yerel)', model: 'OCR modeli (LM Studio)', vision: 'Görü modeli' };
 
@@ -18,6 +19,7 @@
     if (!info) { app.prepare = null; onclose(); return; }
     app.prepare = { ...app.prepare, ...info, loading: false };
     whisper = info.whisper;
+    frames = !!info.frames;
   });
 
   const p = $derived(app.prepare ?? {});
@@ -33,7 +35,7 @@
   ];
   const readyCount = $derived(counts ? counts.ready + (summaries ? 0 : counts.summary) : 0);
   const queued = $derived(counts ? (summaries ? counts.summary : 0) + counts.index + counts.document + counts.subtitle
-    + (vision ? counts.vision : 0) + (whisper && p.whisper ? counts.whisper : 0) : 0);
+    + (vision ? counts.vision : 0) + (whisper && p.whisper ? counts.whisper : 0) + (frames ? p.frames_extra ?? 0 : 0) : 0);
 
   function close() {
     call('prepare_cancel');
@@ -42,7 +44,7 @@
   }
 
   async function start() {
-    const state = await act('prepare_start', summaries, vision, whisper && p.whisper, ocr);
+    const state = await act('prepare_start', summaries, vision, whisper && p.whisper, ocr, frames);
     app.prepare = null;
     if (state) setLibrary(state);
     onclose();
@@ -70,6 +72,10 @@
     <Toggle bind:checked={summaries} label="Dosya özetleri ve koleksiyon özeti çıkar" />
     <Toggle bind:checked={vision} label={`Taranmış PDF'leri ${ENGINES[ocr || p.ocr_engine] ?? 'OCR'} ile, görselleri görü modeliyle oku`} />
     <Toggle bind:checked={whisper} disabled={!p.whisper} label="Altyazısız videolarda Whisper kullan" />
+    <div class="frames">
+      <Toggle bind:checked={frames} disabled={!counts?.frames} label="Videoların görüntüsünü de oku (slayt yazıları, sahneler)" />
+      <small>{#if counts?.frames}{counts.frames} video{p.frames_seconds ? ` · toplam ${p.frames_seconds}` : ''} · görüntü değişince kare alınır; yazı {ENGINES[ocr || p.ocr_engine] === 'Görü modeli' ? 've sahneler görü modeliyle' : `${ENGINES[ocr || p.ocr_engine] ?? 'OCR'} ile, sahneler görü modeliyle`} okunur. Sunum videolarında video saati başına birkaç dakika, sık sahne değişen videolarda daha uzun sürer.{:else if counts}Görüntüsü okunacak video yok.{/if}</small>
+    </div>
     {#if vision && counts?.vision}
       <label class="engine">
         <span>Taranmış sayfalar için OCR motoru<small>Görseller her zaman görü modeliyle tarif edilir</small></span>
@@ -104,5 +110,7 @@
   .engine span { flex: 1; min-width: 0; }
   .engine small { display: block; color: var(--dim); font-size: 11.5px; }
   .engine select { width: 220px; }
+  .frames { display: flex; flex-direction: column; gap: 4px; }
+  .frames small { color: var(--dim); font-size: 11.5px; padding-left: 42px; line-height: 1.45; }
   .warn { display: flex; gap: 8px; align-items: center; color: var(--warning); font-size: 12px; }
 </style>

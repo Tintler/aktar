@@ -13,6 +13,9 @@ import subscriptions
 CATEGORIES = {
     'bill': 'Fatura', 'subscription': 'Abonelik', 'purchase': 'Alışveriş', 'fee': 'Masraf ve faiz', 'other': 'Diğer',
 }
+# Sayilmayan satirlarin nedeni (F114: Sayilmayan kartina tiklayinca ayrinti)
+EXCLUDED = {'card_payment': 'Kart borcu ödemesi', 'transfer': 'Hesaplar arası transfer',
+            'words': 'Kart ödemesi (açıklamadan)'}
 MERCHANT_LIMIT = 10
 MONTH_LIMIT = 12
 EDGE_DAYS = 3   # verinin ilk/son ayi bu kadar gunden fazla eksikse 'kismi' sayilir
@@ -60,6 +63,26 @@ def _partial(month, rows):
     first, last = rows[0]['date'], rows[-1]['date']
     return (first[:7] == month and int(first[8:]) > 1 + EDGE_DAYS) \
         or (last[:7] == month and int(last[8:]) < days - EDGE_DAYS)
+
+
+def reason(row):
+    """Harcama sayilmayan giden satirin nedeni (subscriptions.spending'in tersi)."""
+    return row.get('type') if row.get('type') in ('card_payment', 'transfer') else 'words'
+
+
+def excluded(rows):
+    """Sayilmayan satirlar: nedene gore toplamlar ve satirlar (en yenisi basta)."""
+    groups = {}
+    for row in rows:
+        groups.setdefault(reason(row), []).append(row)
+    return {
+        'count': len(rows), 'total': _total(rows),
+        'groups': sorted(({'key': key, 'label': EXCLUDED[key], 'count': len(group), 'total': _total(group)}
+                          for key, group in groups.items()), key=lambda group: -group['total']),
+        'rows': [{'date': row['date'], 'description': row.get('description', ''), 'merchant': row.get('merchant', ''),
+                  'amount': row['amount'], 'reason': reason(row), 'account': row.get('account', ''),
+                  'file': row.get('file', '')} for row in sorted(rows, key=lambda row: row['date'], reverse=True)],
+    }
 
 
 def _total(rows):
@@ -116,6 +139,7 @@ def dashboard(rows, items=(), month=None):
         'average': round(sum(entry['total'] for entry in full) / len(full), 2) if full else None,
         'categories': categories,
         'merchants': merchants[:MERCHANT_LIMIT], 'merchant_count': len(merchants),
-        'excluded': {'count': len(skipped), 'total': _total(skipped)},
+        # Secili donemin sayilmayanlari (ay ya da tum donem)
+        'excluded': excluded(skipped if month == 'all' else [row for row in skipped if row['date'][:7] == month]),
         'period': {'first': rows[0]['date'], 'last': rows[-1]['date']} if rows else None,
     }

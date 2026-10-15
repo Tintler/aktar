@@ -1,10 +1,12 @@
 """Klasor izleme (F114): 'izlenen' koleksiyonlara dusen yeni dosyalar kendiliginden hazirlanir.
 
-Uygulama acikken WATCH_SECONDS'de bir izlenen koleksiyonlarin klasorleri taranir. Yeni bir
-dosya, boyutu iki tarama arasinda degismeyince (kopyalama/indirme bitti) hazirlik kuyruguna
-girer; kuyruk doluysa sonraki turda tekrar denenir. Uygulama kapaliyken gelen dosyalar
-koleksiyonun bilinen dosyalarinda ('known') olmadigi icin ilk turda yakalanir. Izlenen
-koleksiyonlarin e-posta kurallari da (F89) acik olmasalar bile arka planda kontrol edilir.
+Yalniz uygulama acikken calisir: ayri servis ya da zamanlanmis gorev yoktur; izleme uygulamanin
+icindeki bir is parcacigidir ve pencere kapaninca durur. Uygulama acikken WATCH_SECONDS'de bir
+izlenen koleksiyonlarin klasorleri taranir. Yeni bir dosya, boyutu iki tarama arasinda
+degismeyince (kopyalama/indirme bitti) hazirlik kuyruguna girer; kuyruk doluysa sonraki turda
+tekrar denenir. Uygulama kapaliyken klasore konan dosyalar, uygulama yeniden acildiginda ilk
+turda yakalanir (koleksiyonun bilinen dosyalarinda 'known' yoklar). Izlenen koleksiyonlarin
+e-posta kurallari da (F89), uygulama acikken, koleksiyon acik olmasa bile kontrol edilir.
 """
 from __future__ import annotations
 
@@ -31,6 +33,12 @@ class WatchMixin:
         self._watch_stop = threading.Event()
         self._watch_thread = threading.Thread(target=self._watch_loop, name='aktar-watch', daemon=True)
         self._watch_thread.start()
+
+    def _stop_watch_for_close(self):
+        """Pencere kapaninca izleme ve ekstre taramasi durur; uygulama kapaliyken hicbir sey calismaz."""
+        if self._watch_thread is not None:
+            self._watch_stop.set()
+        self._subs_stop = True
 
     def _watch_loop(self):
         while not self._watch_stop.wait(WATCH_SECONDS):
@@ -105,18 +113,22 @@ class WatchMixin:
         else:
             library.save_collection(probe, slug)
         pending -= stable
-        self._watch_prepare(slug, data['title'], entries, targets)
+        self._watch_prepare(slug, data['title'], entries, targets, bool(data.get('frames')))
 
-    def _watch_prepare(self, slug, title, entries, targets):
+    def _watch_prepare(self, slug, title, entries, targets, frames=False):
+        """`frames`: koleksiyonda son 'Hepsini hazirla'da video goruntuleri secildiyse (F114)."""
         plan = library.plan(targets)
         whisper = speech.available()[0]
         jobs = (list(plan['summary']) + list(plan['index']) + list(plan['document']) + list(plan['subtitle'])
                 + list(plan['vision']) + (list(plan['whisper']) if whisper else []))
+        if frames:
+            queued = {library._key(entry['path']) for entry in jobs}
+            jobs += [entry for entry in plan['frames'] if library._key(entry['path']) not in queued]
         names = ', '.join(entry['path'].name for entry in targets[:3]) + (' …' if len(targets) > 3 else '')
         self._log(f'Klasör izleme · {title}: {len(targets)} yeni dosya ({names})')
         if jobs:
             videos = [entry['path'] for entry in entries if not entry['missing']]
             self._emit('toast', {'message': f'{title}: {len(targets)} yeni dosya bulundu, hazırlanıyor.', 'kind': 'info'})
-            self._start_queue(jobs, whisper, True, (slug, title, videos))
+            self._start_queue(jobs, whisper, True, (slug, title, videos), frames=frames)
         elif hasattr(self, '_subs_auto_scan'):
             self._subs_auto_scan(slug)  # hazirlik gerekmiyorsa ekstreler hemen okunur
