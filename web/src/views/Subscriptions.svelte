@@ -2,6 +2,9 @@
   // Abonelikler (F106): tekrarlayan ve tek seferlik odemeler; tutar, banka/kart, durum, yenileme.
   import Icon from '../lib/Icon.svelte';
   import SubscriptionModal from '../components/SubscriptionModal.svelte';
+  import StatementScanModal from '../components/StatementScanModal.svelte';
+  import { onDestroy } from 'svelte';
+  import { on } from '../lib/api.js';
   import { act, toast, onDrop } from '../lib/state.svelte.js';
   import { confirm } from '../lib/confirm.svelte.js';
   import { CYCLES, STATUSES, METHODS, money, shortDate, daysText, logoDrop } from '../lib/subscriptions.js';
@@ -12,12 +15,55 @@
   let kind = $state('');
   let sort = $state('due');
   let editing = $state(null);   // null: kapali, {}: yeni kayit, kayit: duzenleme
+  let scanOpen = $state(false);
+  let showAll = $state(false);   // onerilerin hepsi (varsayilan ilk SUGGEST_LIMIT)
+  const SUGGEST_LIMIT = 5;
 
   async function load() {
     const result = await act('subs_state');
     if (result) data = result;
   }
   load();
+
+  // F110: ekstre taramasi arka planda surer; ilerleme ve sonuc olayla gelir.
+  const offScan = on('subs_scan', ({ busy, state, message, error }) => {
+    if (state) data = state;
+    else if (data) data.scan = { ...data.scan, busy };
+    if (message) toast('Ekstre taraması: ' + message, 'ok');
+    if (error) toast(error, 'error');
+  });
+  onDestroy(offScan);
+
+  const scan = $derived(data?.scan);
+  const suggestions = $derived(data?.suggestions ?? []);
+
+  async function startScan(slugs, force) {
+    scanOpen = false;
+    const result = await act('subs_scan', slugs, force);
+    if (result) data = result;
+  }
+
+  async function suggestionAct(method, ...args) {
+    const result = await act(method, ...args);
+    if (result) data = result;
+    return result;
+  }
+
+  async function accept(s) {
+    if (await suggestionAct('subs_accept', s.key)) toast(`"${s.name}" eklendi; ödemeleri ekstrelerden bağlandı.`, 'ok');
+  }
+
+  async function linkTo(s, event) {
+    const id = event.currentTarget.value;
+    event.currentTarget.value = '';
+    if (id && await suggestionAct('subs_link', s.key, id)) toast(`Ödemeler "${items.find((i) => i.id === id)?.name}" kaydına bağlandı.`, 'ok');
+  }
+
+  function suggestionInfo(s) {
+    const parts = [s.subscriber_no ? `Abone no ${s.subscriber_no}` : '', `${s.count} ödeme`, `son ${shortDate(s.last_date)}`];
+    if (s.months > 1) parts.push(`ayın ~${s.day}. günü`);
+    return parts.filter(Boolean).join(' · ');
+  }
 
   // Birakilan gorsel acik kaydin logosu olur (F107).
   onDrop('subscriptions', (paths) => {
@@ -74,7 +120,14 @@
 <section class="page">
   <div class="page-head">
     <h1>Abonelikler</h1>
-    <button class="btn primary" onclick={() => (editing = {})}><Icon name="plus" size={16} />Yeni kayıt</button>
+    <span class="head-actions">
+      {#if scan?.busy}
+        <button class="btn" onclick={() => act('subs_scan_stop')}><Icon name="stop" size={16} />Taramayı durdur</button>
+      {:else}
+        <button class="btn" onclick={() => (scanOpen = true)} title="Banka ve kredi kartı ekstrelerindeki ödemeleri kayıtlara bağlar, yeni faturaları önerir"><Icon name="fileSearch" size={16} />Ekstrelerden tara</button>
+      {/if}
+      <button class="btn primary" onclick={() => (editing = {})}><Icon name="plus" size={16} />Yeni kayıt</button>
+    </span>
   </div>
   <div class="page-body">
     {#if summary}
@@ -99,6 +152,46 @@
           <b>{summary.active}</b>
           <span class="dim">{items.length} kayıttan</span>
         </div>
+      </div>
+    {/if}
+
+    {#if scan?.busy}
+      <div class="card scanning">
+        <Icon name="loader" size={16} spin />
+        <span class="ellipsis">Ekstreler okunuyor · {scan.busy.done + 1}/{scan.busy.total}{#if scan.busy.name}<span class="dim"> · {scan.busy.name}</span>{/if}</span>
+        <span class="progress"><i style:width={`${(scan.busy.done / Math.max(1, scan.busy.total)) * 100}%`}></i></span>
+      </div>
+    {/if}
+
+    {#if suggestions.length}
+      <div class="card suggest">
+        <div class="side-title"><Icon name="sparkles" size={16} />Ekstrelerden öneriler<span class="badge accent">{suggestions.length}</span>
+          <span class="grow"></span>
+          {#if scan?.ignored}<button class="link" onclick={() => suggestionAct('subs_unignore_all')}>{scan.ignored} yoksayılanı geri getir</button>{/if}
+        </div>
+        {#each showAll ? suggestions : suggestions.slice(0, SUGGEST_LIMIT) as s (s.key)}
+          <div class="sug">
+            <span class="mark">{s.name.slice(0, 1).toLocaleUpperCase('tr')}</span>
+            <div class="info">
+              <span class="title"><b class="ellipsis">{s.name}</b>{#if s.category}<span class="badge">{s.category}</span>{/if}</span>
+              <small class="dim ellipsis" title={s.description}>{suggestionInfo(s)}</small>
+            </div>
+            <div class="num"><b>{money(s.count > 1 ? s.average : s.last)}</b><small class="dim">{s.count > 1 ? (s.variable ? 'ortalama · değişken' : 'her ödeme') : 'tek ödeme'}</small></div>
+            <div class="sug-actions">
+              <button class="btn sm primary" onclick={() => accept(s)}><Icon name="plus" size={14} />Ekle</button>
+              {#if items.length}
+                <select class="field sm" title="Ödemeleri var olan bir kayda bağla" onchange={(e) => linkTo(s, e)}>
+                  <option value="">Kayda bağla…</option>
+                  {#each items as item (item.id)}<option value={item.id}>{item.name}</option>{/each}
+                </select>
+              {/if}
+              <button class="icon-btn sm" title="Yoksay (bir daha önerilmez)" onclick={() => suggestionAct('subs_ignore', s.key)}><Icon name="x" size={15} /></button>
+            </div>
+          </div>
+        {/each}
+        {#if suggestions.length > SUGGEST_LIMIT}
+          <button class="link more" onclick={() => (showAll = !showAll)}>{showAll ? 'Daha az göster' : `${suggestions.length - SUGGEST_LIMIT} öneri daha`}</button>
+        {/if}
       </div>
     {/if}
 
@@ -144,8 +237,10 @@
                         <div class="ellipsis"><b>{item.name}</b><small class="dim">{[item.category, item.kind === 'once' ? 'Tek seferlik' : CYCLES[item.cycle]].filter(Boolean).join(' · ')}</small></div></div>
                     </td>
                     <td class="num">
-                      <b>{money(item.amount, item.currency)}</b>
-                      {#if item.kind === 'recurring' && item.cycle !== 'monthly' && item.monthly}<small class="dim">aylık {money(item.monthly, item.currency)}</small>{/if}
+                      <b>{money(item.estimate ?? item.amount, item.currency)}</b>
+                      {#if item.variable && item.last_payment}<small class="dim" title={`En düşük ${money(item.low, item.currency)} · en yüksek ${money(item.high, item.currency)}`}>ort. · son {money(item.last_payment.amount, item.currency)}</small>
+                      {:else if item.variable}<small class="dim">değişken</small>
+                      {:else if item.kind === 'recurring' && item.cycle !== 'monthly' && item.monthly}<small class="dim">aylık {money(item.monthly, item.currency)}</small>{/if}
                     </td>
                     <td>
                       <div class="pay"><Icon name={METHODS[item.method].icon} size={16} />
@@ -193,12 +288,34 @@
   </div>
 </section>
 
+{#if scanOpen}
+  <StatementScanModal {scan} onstart={startScan} onclose={() => (scanOpen = false)} />
+{/if}
+
 {#if editing}
   <SubscriptionModal item={editing.id ? editing : null} categories={data?.categories ?? []} {banks}
     onsave={save} ondelete={remove} onclose={() => (editing = null)} />
 {/if}
 
 <style>
+  .head-actions { display: flex; gap: 8px; }
+  .scanning { display: flex; align-items: center; gap: 12px; padding: 12px 16px; margin-bottom: 16px; font-size: 13px; color: var(--text); }
+  .scanning :global(svg) { color: var(--accent); flex: none; }
+  .scanning .ellipsis { flex: 1; min-width: 0; }
+  .progress { width: 180px; height: 6px; border-radius: 999px; background: var(--surface-active); overflow: hidden; flex: none; }
+  .progress i { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+  .suggest { padding: 14px 16px 8px; margin-bottom: 16px; display: flex; flex-direction: column; }
+  .suggest .side-title { margin-bottom: 6px; }
+  .sug { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--outline); min-width: 0; }
+  .sug .info { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .sug .title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .sug small { font-size: 11.5px; margin-top: 2px; }
+  .sug .num { display: flex; flex-direction: column; }
+  .sug-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+  .sug-actions select { width: 140px; }
+  .link { color: var(--accent); font-weight: 600; font-size: 12px; }
+  .link:hover { text-decoration: underline; }
+  .more { align-self: flex-start; padding: 8px 0 6px; }
   .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
   .stat { display: flex; flex-direction: column; gap: 4px; padding: 16px 18px; }
   .stat b { font-size: 22px; font-weight: 700; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }

@@ -98,20 +98,37 @@ export function createMock(emit) {
   const mailState = () => ({ rules: mailRules, account: true, address: settings.mail_address, checked: '2026-10-15T09:12:00', busy: false,
     what: [{ id: 'pdf', label: 'Ekler (PDF, Excel, Word…)' }, { id: 'html', label: 'E-posta gövdesi' }, { id: 'both', label: 'Ekler ve gövde' }] });
   const sub = (values) => ({ category: '', currency: 'TRY', kind: 'recurring', cycle: 'monthly', status: 'active', start_date: '2025-01-01',
-    end_date: '', auto_renew: true, method: 'credit', bank: '', card: '', card_last4: '', notes: '', ...values });
+    end_date: '', auto_renew: true, method: 'credit', bank: '', card: '', card_last4: '', notes: '', variable: false, match: '', payments: [], ...values });
+  // F110: ekstre taramasi (sahte): oneriler ve okunan ekstreler
+  let suggestions = [
+    { key: 'no:1617', name: 'PALGAZ', match: '1617', category: 'Fatura', count: 3, months: 3, average: 241.67, last: 175, last_date: '2026-09-14', first_date: '2026-07-14',
+      day: 14, variable: true, method: 'transfer', subscriber_no: '1617', description: 'Ödeme, PALGAZ - Gebze Tüketim faturası, abone no : 1617', payments: [] },
+    { key: 'no:1130192198', name: 'Türksat Kablo TV', match: '1130192198', category: 'Fatura', count: 1, months: 1, average: 435.4, last: 435.4, last_date: '2026-09-21',
+      first_date: '2026-09-21', day: 21, variable: false, method: 'transfer', subscriber_no: '1130192198', description: 'Ödeme, Türksat Kablo TV faturası', payments: [] },
+    { key: 'm:deezer', name: 'Deezer', match: 'Deezer', category: '', count: 2, months: 2, average: 99.99, last: 99.99, last_date: '2026-09-07', first_date: '2026-08-07',
+      day: 7, variable: false, method: 'credit', subscriber_no: '', description: 'DEEZER SA DEEZER', payments: [] },
+  ];
+  let ignored = 0;
+  const scanInfo = { date: '2026-10-15T09:30:00', busy: null, sources: ['finans'], collections: [{ slug: 'finans', title: 'Finans' }, { slug: 'ml', title: 'Makine öğrenmesi' }],
+    statements: [{ name: 'Enpara Kredi Kartı ekstreniz.pdf', path: 'a', account: 'credit_card', status: 'ok', problem: '', count: 7 },
+      { name: '2026 Eylül ayı hesap özetiniz.pdf', path: 'b', account: 'bank_account', status: 'mismatch', problem: 'fark var', count: 6 }] };
   let subs = [
     sub({ id: 's1', name: 'Netflix', category: 'Dijital yayın', amount: 229.99, renewal_date: '2026-10-18', bank: 'Garanti BBVA', card: 'Bonus', card_last4: '4821' }),
     sub({ id: 's2', name: 'Amazon Prime', category: 'Dijital yayın', amount: 69.9, renewal_date: '2026-11-02', bank: 'Akbank', card: 'Axess', card_last4: '1290' }),
-    sub({ id: 's3', name: 'Elektrik', category: 'Fatura', amount: 840, renewal_date: '2026-10-25', method: 'transfer', bank: 'İş Bankası', card: 'Otomatik ödeme talimatı' }),
+    sub({ id: 's3', name: 'Elektrik', category: 'Fatura', amount: 840, renewal_date: '2026-10-02', method: 'transfer', bank: 'Enpara', card: 'Abone no 100104418533',
+      variable: true, match: '100104418533', payments: [['2026-05-04', 612.4], ['2026-06-02', 455.1], ['2026-07-03', 588], ['2026-08-02', 702.35], ['2026-09-02', 504]]
+        .map(([date, amount]) => ({ date, amount, file: 'Hesap özeti.pdf' })) }),
     sub({ id: 's4', name: 'iCloud+', category: 'Bulut', amount: 99.99, currency: 'USD', cycle: 'yearly', renewal_date: '2027-03-12', method: 'debit', bank: 'Akbank', card_last4: '7730' }),
     sub({ id: 's5', name: 'Spor salonu', category: 'Spor', amount: 1500, status: 'paused', renewal_date: '2026-12-01', bank: 'Garanti BBVA' }),
   ];
   const subsView = () => {
     const rate = { weekly: 52 / 12, monthly: 1, quarterly: 1 / 3, semiannual: 1 / 6, yearly: 1 / 12 };
     const live = (s) => s.kind === 'recurring' && ['active', 'trial'].includes(s.status);
-    const items = subs.map((s) => ({ ...s, next_due: ['paused', 'cancelled'].includes(s.status) ? '' : s.renewal_date,
+    const avg = (s) => s.variable && s.payments.length ? +(s.payments.slice(-6).reduce((a, p) => a + p.amount, 0) / Math.min(6, s.payments.length)).toFixed(2) : s.amount;
+    const items = subs.map((s) => ({ ...s, estimate: avg(s), last_payment: s.payments.at(-1) ?? null,
+      low: s.payments.length ? Math.min(...s.payments.map((p) => p.amount)) : null, high: s.payments.length ? Math.max(...s.payments.map((p) => p.amount)) : null, next_due: ['paused', 'cancelled'].includes(s.status) ? '' : s.renewal_date,
       days_left: ['paused', 'cancelled'].includes(s.status) ? null : Math.round((new Date(s.renewal_date) - new Date('2026-10-15')) / 864e5),
-      monthly: live(s) ? +(s.amount * rate[s.cycle]).toFixed(2) : 0 }));
+      monthly: live(s) ? +(avg(s) * rate[s.cycle]).toFixed(2) : 0 }));
     const sum = (list, f) => list.reduce((acc, s) => ({ ...acc, [s.currency]: +((acc[s.currency] ?? 0) + f(s)).toFixed(2) }), {});
     const monthly = sum(items.filter((s) => s.monthly), (s) => s.monthly);
     const groups = {};
@@ -123,7 +140,8 @@ export function createMock(emit) {
       monthly, yearly: Object.fromEntries(Object.entries(monthly).map(([k, v]) => [k, +(v * 12).toFixed(2)])),
       upcoming: sum(items.filter((s) => s.days_left !== null && s.days_left <= 30), (s) => s.amount), upcoming_days: 30,
       active: items.filter((s) => ['active', 'trial'].includes(s.status)).length,
-      by_payment: Object.values(groups).sort((a, b) => b.monthly - a.monthly) } };
+      by_payment: Object.values(groups).sort((a, b) => b.monthly - a.monthly) },
+      scan: { ...scanInfo, ignored }, suggestions };
   };
   const api = {
     library_open: async () => library,
@@ -138,6 +156,24 @@ export function createMock(emit) {
       return subsView();
     },
     subs_delete: async (id) => { subs = subs.filter((s) => s.id !== id); return subsView(); },
+    subs_accept: async (key) => {
+      const s = suggestions.find((x) => x.key === key);
+      subs.push(sub({ id: 'm' + Date.now(), name: s.name, category: s.category, amount: s.average, renewal_date: s.last_date, method: s.method, variable: s.variable, match: s.match }));
+      suggestions = suggestions.filter((x) => x.key !== key);
+      return subsView();
+    },
+    subs_link: async (key) => { suggestions = suggestions.filter((x) => x.key !== key); return subsView(); },
+    subs_ignore: async (key) => { suggestions = suggestions.filter((x) => x.key !== key); ignored++; return subsView(); },
+    subs_unignore_all: async () => { ignored = 0; return subsView(); },
+    subs_scan_stop: async () => ({ ok: true }),
+    subs_scan: async () => {
+      let done = 0;
+      const timer = setInterval(() => {
+        if (done < 3) emit('subs_scan', { busy: { done: done++, total: 3, name: `Ekstre ${done}.pdf` } });
+        else { clearInterval(timer); scanInfo.busy = null; emit('subs_scan', { busy: null, state: subsView(), message: '2 ekstre, 3 öneri' }); }
+      }, 700);
+      return { ...subsView(), scan: { ...scanInfo, ignored, busy: { done: 0, total: 3, name: '' } } };
+    },
     // F104: sohbet sablonlari
     templates_list: async () => templates.map((t) => ({ ...t })),
     templates_save: async (items) => (templates = items.filter((t) => t.name.trim() && t.text.trim()).map((t, i) => ({ ...t, id: t.id || 'm' + Date.now() + i }))),

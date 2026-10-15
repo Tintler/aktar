@@ -5,6 +5,11 @@ Kayitlar kutuphane klasorunde `subscriptions.data.json` dosyasinda, logolar (F10
 library.list_collections bunlari koleksiyon saymaz). Saklanan `renewal_date` yinelenen
 kayitlarda donemin capasidir; gecmiste kaldiysa bir sonraki odeme tarihi (`next_due`) her
 okumada capadan donem eklenerek hesaplanir, dosya kendiliginden degismez.
+
+F110: Elektrik, doğalgaz gibi tutari degisen faturalar (`variable`) ekstrelerden bulunan
+odemelerle (`payments`) izlenir; tutar son odemelerin ortalamasidir. Kaydin `match` metni
+(abone no ya da firma adi, virgulle birden fazla) ekstre satirlarini kayda baglar; hicbir
+kayda uymayan duzenli odemeler oneri olarak listelenir. Satirlari statements.py cikarir.
 """
 from __future__ import annotations
 
@@ -33,6 +38,11 @@ UPCOMING_DAYS = 30
 LOGO_SIZE = 128
 LOGO_SOURCE_LIMIT = 15 * 1024 * 1024
 LOGO_TYPES = ('*.png', '*.jpg', '*.jpeg', '*.webp', '*.gif', '*.bmp', '*.ico')
+PAYMENT_LIMIT = 60          # kayit basina saklanan en fazla odeme
+ESTIMATE_COUNT = 6          # degisken tutarin tahmini: son bu kadar odemenin ortalamasi
+# Abonelik sayilmayan satirlar: kart borcu odemesi, kendi hesaplari arasi transfer.
+SKIP_TYPES = ('card_payment', 'transfer')
+SKIP_WORDS = ('kredi karti odemesi', 'kart borcu', 'cep subesi')
 
 
 def path():
@@ -150,21 +160,63 @@ def clean(item):
         'card': _text(item.get('card'), 60),
         'card_last4': last4 if len(last4) == 4 else '',
         'notes': str(item.get('notes') or '').strip()[:NOTE_LIMIT],
+        'variable': bool(item.get('variable', False)),
+        'match': _text(item.get('match'), TEXT_LIMIT),
+        'payments': clean_payments(item.get('payments')),
     }
 
 
-def load():
+def clean_payments(values):
+    """[{date, amount, file}] tarih sirasinda, ayni gun + tutar bir kez; en yeni PAYMENT_LIMIT."""
+    found = {}
+    for value in values if isinstance(values, list) else []:
+        if not isinstance(value, dict):
+            continue
+        when = _date(value.get('date'))
+        try:
+            amount = round(float(value.get('amount')), 2)
+        except (TypeError, ValueError):
+            continue
+        if when and 0 < amount < 1e9:
+            found.setdefault((when, amount), {'date': when, 'amount': amount, 'file': _text(value.get('file'), 160)})
+    return [found[key] for key in sorted(found)][-PAYMENT_LIMIT:]
+
+
+def _read_file():
     try:
         value = json.loads(read(path()))
     except (OSError, ValueError):
-        return []
-    items = value.get('items') if isinstance(value, dict) else None
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def load():
+    items = _read_file().get('items')
     return [item for item in map(clean, items) if item] if isinstance(items, list) else []
 
 
-def _write(items):
+def settings():
+    """Ekstre taramasi ayarlari: taranan koleksiyonlar, yoksayilan oneriler, son tarama."""
+    value = _read_file()
+    sources = value.get('sources')
+    ignored = value.get('ignored')
+    scan = value.get('scan') if isinstance(value.get('scan'), dict) else {}
+    return {'sources': [str(slug) for slug in sources] if isinstance(sources, list) else [],
+            'ignored': [str(key) for key in ignored] if isinstance(ignored, list) else [],
+            'scan': {'date': str(scan.get('date') or ''),
+                     'files': [str(item) for item in scan.get('files') or [] if isinstance(item, str)]}}
+
+
+def save_settings(**values):
+    current = settings()
+    current.update({key: value for key, value in values.items() if key in current})
+    _write(load(), current)
+    return current
+
+
+def _write(items, extra=None):
     library.library_dir().mkdir(parents=True, exist_ok=True)
-    save_json(path(), {'version': 1, 'items': items})
+    save_json(path(), {'version': 1, 'items': items, **(extra if extra is not None else settings())})
 
 
 def upsert(item):
@@ -242,11 +294,20 @@ def _negate(iso):
     return -date.fromisoformat(iso).toordinal()
 
 
+def estimate(item):
+    """Odeme basina tutar: degisken faturada son odemelerin ortalamasi, yoksa kayitli tutar."""
+    payments = item.get('payments') or []
+    if item.get('variable') and payments:
+        recent = [payment['amount'] for payment in payments[-ESTIMATE_COUNT:]]
+        return round(sum(recent) / len(recent), 2)
+    return item['amount']
+
+
 def monthly_cost(item):
     """Aylik esdeger tutar; tek seferlik ve iptal/durdurulmus kayitlarda 0."""
     if item.get('kind') == 'once' or item.get('status') in ('paused', 'cancelled'):
         return 0.0
-    return item['amount'] * CYCLES[item['cycle']]
+    return estimate(item) * CYCLES[item['cycle']]
 
 
 def view(today=None):
@@ -256,9 +317,12 @@ def view(today=None):
     for item in load():
         due = next_due(item, today)
         cost = monthly_cost(item)
+        amounts = [payment['amount'] for payment in item['payments']]
         row = dict(item, logo=_read_logo(item['id']), next_due=due.isoformat() if due else '',
                    last_date='' if due else last_date(item),
-                   days_left=(due - today).days if due else None, monthly=round(cost, 2))
+                   days_left=(due - today).days if due else None, monthly=round(cost, 2),
+                   estimate=estimate(item), last_payment=item['payments'][-1] if amounts else None,
+                   low=min(amounts) if amounts else None, high=max(amounts) if amounts else None)
         rows.append(row)
         currency = item['currency']
         if cost:
@@ -269,7 +333,7 @@ def view(today=None):
             group['monthly'] += cost
             group['count'] += 1
         if due and (due - today).days <= UPCOMING_DAYS:
-            upcoming[currency] = upcoming.get(currency, 0) + item['amount']
+            upcoming[currency] = upcoming.get(currency, 0) + estimate(item)
     # Once odemesi yaklasanlar (en yakin basta), sonra odemesi olmayanlar (durdurulmus, iptal,
     # odenmis tek seferlik) kendi tarihlerine gore en yenisi basta, en sonda tarihsizler.
     rows.sort(key=lambda row: (0, row['next_due'], row['name'].lower()) if row['next_due']
@@ -292,3 +356,138 @@ def view(today=None):
         'categories': CATEGORIES,
         'today': today.isoformat(),
     }
+
+
+# ---------------------------------------------------------------- ekstre eslestirme (F110)
+def _terms(item):
+    return [library.fold(term) for term in str(item.get('match') or '').split(',') if term.strip()]
+
+
+def _row_text(row):
+    return library.fold(' '.join((row.get('description', ''), row.get('merchant', ''), row.get('subscriber_no', ''))))
+
+
+def spending(row):
+    """Abonelige donusebilecek satir mi: giden para; kart odemesi ve transfer degil."""
+    if row.get('direction') != 'out' or row.get('type') in SKIP_TYPES:
+        return False
+    text = _row_text(row)
+    return not any(word in text for word in SKIP_WORDS)
+
+
+def matches(item, row):
+    """Arama metinlerinden biri satirda tam kelime olarak geciyor mu ('1617' '16170'e uymaz)."""
+    text = _row_text(row)
+    return any(re.search(r'(?<![0-9a-z])' + re.escape(term) + r'(?![0-9a-z])', text) for term in _terms(item))
+
+
+def row_key(row):
+    """Oneri gruplamasi: abone no varsa o (iki Turkcell hatti ayri kalir), yoksa firma adi."""
+    number = library.fold(row.get('subscriber_no', ''))
+    if number:
+        return 'no:' + number
+    name = re.sub(r'[^0-9a-z]+', '', library.fold(row.get('merchant') or row.get('description', '')[:30]))
+    return 'm:' + name if name else ''
+
+
+def _payment(row):
+    return {'date': row['date'], 'amount': row['amount'], 'file': row.get('file', '')}
+
+
+def sync(rows):
+    """Arama metni olan kayitlara eslesen ekstre odemelerini ekler; yinelenen aktif kaydin
+    capasi en son odeme tarihine tasinir (sonraki odeme oradan hesaplanir). Degisen kayit sayisi."""
+    items, changed = load(), 0
+    rows = [row for row in rows if spending(row)]
+    for item in items:
+        if not _terms(item):
+            continue
+        found = [_payment(row) for row in rows if matches(item, row)]
+        payments = clean_payments(item['payments'] + found)
+        anchor = item['renewal_date']
+        if payments and item['kind'] == 'recurring' and item['status'] in ('active', 'trial') \
+                and payments[-1]['date'] > (anchor or ''):
+            anchor = payments[-1]['date']
+        if payments != item['payments'] or anchor != item['renewal_date']:
+            item['payments'], item['renewal_date'] = payments, anchor
+            changed += 1
+    if changed:
+        _write(items)
+    return changed
+
+
+def suggestions(rows, items=None, ignored=()):
+    """Hicbir kayda uymayan duzenli odemeler: fatura/abonelik turundekiler ya da en az iki ayri
+    ayda gorulen ayni firma. En yeni odemesi olan basta."""
+    items = load() if items is None else items
+    ignored = set(ignored)
+    groups = {}
+    for row in rows:
+        if not spending(row) or any(matches(item, row) for item in items):
+            continue
+        key = row_key(row)
+        if key and key not in ignored:
+            groups.setdefault(key, []).append(row)
+    result = []
+    for key, group in groups.items():
+        months = {row['date'][:7] for row in group}
+        if len(months) < 2 and not any(row['type'] in ('bill', 'subscription') for row in group):
+            continue
+        amounts = [row['amount'] for row in group]
+        names = [row['merchant'] for row in group if row.get('merchant')]
+        name = max(reversed(names), key=names.count) if names else group[-1]['description'][:40]  # esitse en yenisi
+        number = group[-1].get('subscriber_no', '')
+        days = sorted(int(row['date'][8:]) for row in group)
+        bill = any(row['type'] == 'bill' for row in group)
+        result.append({
+            'key': key, 'name': name[:NAME_LIMIT], 'match': number or name,
+            'category': 'Fatura' if bill else '',
+            'count': len(group), 'months': len(months),
+            'average': round(sum(amounts) / len(amounts), 2), 'last': group[-1]['amount'],
+            'last_date': group[-1]['date'], 'first_date': group[0]['date'], 'day': days[len(days) // 2],
+            # Faturalar (elektrik, su...) tek odemede de degisken sayilir.
+            'variable': bill or max(amounts) - min(amounts) > 0.01 * max(amounts),
+            'method': 'credit' if group[-1].get('account') == 'credit_card' else 'transfer',
+            'subscriber_no': number, 'description': group[-1]['description'],
+            'payments': [_payment(row) for row in group],
+        })
+    result.sort(key=lambda item: item['last_date'], reverse=True)
+    return result
+
+
+def accept(suggestion, overrides=None):
+    """Oneriyi kayda cevirir: yinelenen, aylik; tutar ortalama, capa son odeme."""
+    values = {
+        'name': suggestion['name'], 'category': suggestion['category'], 'amount': suggestion['average'],
+        'kind': 'recurring', 'cycle': 'monthly', 'status': 'active', 'variable': suggestion['variable'],
+        'start_date': suggestion['first_date'], 'renewal_date': suggestion['last_date'],
+        'method': suggestion['method'], 'match': suggestion['match'], 'payments': suggestion['payments'],
+        'card': f'Abone no {suggestion["subscriber_no"]}' if suggestion['subscriber_no']
+        and suggestion['method'] != 'credit' else '',
+    }
+    values.update({key: value for key, value in (overrides or {}).items() if key not in ('id', 'payments')})
+    return upsert(values)
+
+
+def link(suggestion, ident):
+    """Oneriyi var olan kayda baglar: arama metni eklenir, odemeleri kayda gecer."""
+    items = load()
+    item = next((item for item in items if item['id'] == ident), None)
+    if item is None:
+        raise ValueError('Kayıt bulunamadı.')
+    terms = [term.strip() for term in item['match'].split(',') if term.strip()]
+    if library.fold(suggestion['match']) not in map(library.fold, terms):
+        terms.append(suggestion['match'])
+    item['match'] = _text(', '.join(terms), TEXT_LIMIT)
+    item['payments'] = clean_payments(item['payments'] + suggestion['payments'])
+    if item['kind'] == 'recurring' and item['payments'][-1]['date'] > (item['renewal_date'] or ''):
+        item['renewal_date'] = item['payments'][-1]['date']
+    _write(items)
+    return item
+
+
+def ignore(key, undo=False):
+    ignored = [value for value in settings()['ignored'] if value != key]
+    if not undo:
+        ignored.append(key)
+    return save_settings(ignored=ignored)

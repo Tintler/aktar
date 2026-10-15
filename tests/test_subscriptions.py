@@ -118,5 +118,92 @@ class SubscriptionTests(unittest.TestCase):
         self.assertEqual(result['items'][2]['last_date'], '2026-09-01')
 
 
+def row(day, amount, description, merchant='', number='', kind='bill', direction='out', account='bank_account'):
+    return {'date': day, 'amount': amount, 'description': description, 'merchant': merchant, 'subscriber_no': number,
+            'type': kind, 'direction': direction, 'account': account, 'file': 'ekstre.pdf'}
+
+
+ROWS = [
+    row('2026-08-02', 612.4, 'Ödeme, Sakarya Elektrik (SEPAŞ) faturası, abone no : 100104418533', 'SEPAŞ', '100104418533'),
+    row('2026-09-02', 504.0, 'Ödeme, Sakarya Elektrik (SEPAŞ) faturası, abone no : 100104418533', 'SEPAŞ', '100104418533'),
+    row('2026-09-14', 175.0, 'Ödeme, PALGAZ - Gebze Tüketim faturası, abone no : 16170', 'PALGAZ', '16170'),
+    row('2026-09-08', 3104.15, 'Ödeme, Enpara.com kredi kartı ödemesi, Cem Acar', 'Enpara.com', kind='other'),
+    row('2026-09-08', 8851.0, 'Gelen Transfer', kind='transfer', direction='in'),
+    row('2026-09-19', 316.05, 'Diğer, MIGROS-GEBZE MUTLUKENT', 'Migros', kind='purchase'),
+    row('2026-08-07', 99.99, 'DEEZER SA DEEZER', 'Deezer', kind='purchase', account='credit_card'),
+    row('2026-09-07', 99.99, 'DEEZER SA DEEZER', 'Deezer', kind='purchase', account='credit_card'),
+]
+
+
+class StatementMatchTests(unittest.TestCase):
+    """F110: ekstre satirlarinin kayitlara baglanmasi ve oneriler."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        patcher = mock.patch.dict(os.environ, {'AKTAR_LIBRARY_DIR': str(Path(self.temp.name) / 'store')})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self.temp.cleanup)
+
+    def test_variable_bill_uses_average_of_recent_payments(self):
+        payments = [{'date': f'2026-0{month}-02', 'amount': amount}
+                    for month, amount in zip(range(1, 10), (900, 800, 700, 100, 200, 300, 400, 500, 600))]
+        saved = subscriptions.upsert({'name': 'Elektrik', 'amount': 0, 'variable': True,
+                                      'payments': payments + [payments[-1], {'date': 'x', 'amount': 5}]})
+        self.assertEqual(len(saved['payments']), 9)  # tekrar eden ve tarihsiz odeme atilir
+        self.assertEqual(subscriptions.estimate(saved), 350.0)  # son 6: 100..600
+        self.assertEqual(subscriptions.monthly_cost(saved), 350.0)
+        row_ = subscriptions.view(date(2026, 10, 15))['items'][0]
+        self.assertEqual((row_['estimate'], row_['low'], row_['high']), (350.0, 100.0, 900.0))
+        self.assertEqual(row_['last_payment']['amount'], 600.0)
+        fixed = dict(saved, variable=False, amount=42)
+        self.assertEqual(subscriptions.estimate(fixed), 42)
+
+    def test_sync_links_payments_and_moves_anchor(self):
+        elektrik = subscriptions.upsert({'name': 'Elektrik', 'amount': 500, 'variable': True, 'match': '100104418533',
+                                         'renewal_date': '2026-07-01'})
+        gaz = subscriptions.upsert({'name': 'Doğalgaz', 'amount': 200, 'match': '1617'})  # 16170'e uymaz
+        self.assertEqual(subscriptions.sync(ROWS), 1)
+        items = {item['id']: item for item in subscriptions.load()}
+        self.assertEqual([p['amount'] for p in items[elektrik['id']]['payments']], [612.4, 504.0])
+        self.assertEqual(items[elektrik['id']]['renewal_date'], '2026-09-02')
+        self.assertEqual(items[gaz['id']]['payments'], [])
+        self.assertEqual(subscriptions.sync(ROWS), 0)  # ayni satirlar ikinci kez eklenmez
+
+    def test_suggestions_group_bills_and_repeated_payments(self):
+        subscriptions.upsert({'name': 'Elektrik', 'amount': 500, 'match': 'SEPAŞ'})
+        found = {item['key']: item for item in subscriptions.suggestions(ROWS)}
+        # Elektrik kayda uyar; kart odemesi, transfer ve tek seferlik market onerilmez.
+        self.assertEqual(set(found), {'no:16170', 'm:deezer'})
+        deezer = found['m:deezer']
+        self.assertEqual((deezer['count'], deezer['months'], deezer['average'], deezer['variable']), (2, 2, 99.99, False))
+        self.assertEqual((deezer['method'], deezer['category'], deezer['day']), ('credit', '', 7))
+        self.assertEqual((found['no:16170']['category'], found['no:16170']['match']), ('Fatura', '16170'))
+        self.assertEqual([item['key'] for item in subscriptions.suggestions(ROWS, ignored=['m:deezer'])], ['no:16170'])
+
+    def test_accept_link_and_ignore(self):
+        suggestion = next(item for item in subscriptions.suggestions(ROWS) if item['key'] == 'no:100104418533')
+        self.assertTrue(suggestion['variable'])
+        saved = subscriptions.accept(suggestion)
+        self.assertEqual((saved['name'], saved['match'], saved['method'], saved['amount']),
+                         ('SEPAŞ', '100104418533', 'transfer', 558.2))
+        self.assertEqual((saved['renewal_date'], saved['start_date'], saved['card']),
+                         ('2026-09-02', '2026-08-02', 'Abone no 100104418533'))
+        self.assertNotIn('no:100104418533', [item['key'] for item in subscriptions.suggestions(ROWS)])
+
+        music = subscriptions.upsert({'name': 'Müzik', 'amount': 99.99, 'match': 'Spotify'})
+        deezer = next(item for item in subscriptions.suggestions(ROWS) if item['key'] == 'm:deezer')
+        linked = subscriptions.link(deezer, music['id'])
+        self.assertEqual((linked['match'], len(linked['payments']), linked['renewal_date']),
+                         ('Spotify, Deezer', 2, '2026-09-07'))
+
+        subscriptions.ignore('no:16170')
+        self.assertEqual(subscriptions.settings()['ignored'], ['no:16170'])
+        subscriptions.upsert({'name': 'Yeni', 'amount': 1})  # kayit yazmak ayarlari silmez
+        self.assertEqual(subscriptions.settings()['ignored'], ['no:16170'])
+        subscriptions.ignore('no:16170', undo=True)
+        self.assertEqual(subscriptions.settings()['ignored'], [])
+
+
 if __name__ == '__main__':
     unittest.main()
