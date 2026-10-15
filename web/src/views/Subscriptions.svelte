@@ -3,6 +3,7 @@
   import Icon from '../lib/Icon.svelte';
   import SubscriptionModal from '../components/SubscriptionModal.svelte';
   import StatementScanModal from '../components/StatementScanModal.svelte';
+  import SpendingPanel from '../components/SpendingPanel.svelte';
   import { onDestroy } from 'svelte';
   import { on } from '../lib/api.js';
   import { act, toast, onDrop } from '../lib/state.svelte.js';
@@ -17,6 +18,8 @@
   let editing = $state(null);   // null: kapali, {}: yeni kayit, kayit: duzenleme
   let scanOpen = $state(false);
   let showAll = $state(false);   // onerilerin hepsi (varsayilan ilk SUGGEST_LIMIT)
+  let tab = $state('subs');      // F111: 'subs' | 'spending' (harcama panosu)
+  let scanVersion = $state(0);   // tarama bitince harcama panosu yeniden yuklenir
   const SUGGEST_LIMIT = 5;
 
   async function load() {
@@ -27,7 +30,7 @@
 
   // F110: ekstre taramasi arka planda surer; ilerleme ve sonuc olayla gelir.
   const offScan = on('subs_scan', ({ busy, state, message, error }) => {
-    if (state) data = state;
+    if (state) { data = state; scanVersion++; }
     else if (data) data.scan = { ...data.scan, busy };
     if (message) toast('Ekstre taraması: ' + message, 'ok');
     if (error) toast(error, 'error');
@@ -119,17 +122,32 @@
 
 <section class="page">
   <div class="page-head">
-    <h1>Abonelikler</h1>
+    <h1>{tab === 'spending' ? 'Harcamalar' : 'Abonelikler'}</h1>
+    <span class="seg" role="tablist">
+      <button role="tab" aria-selected={tab === 'subs'} class:on={tab === 'subs'} onclick={() => (tab = 'subs')}><Icon name="repeat" size={15} />Abonelikler</button>
+      <button role="tab" aria-selected={tab === 'spending'} class:on={tab === 'spending'} onclick={() => (tab = 'spending')}><Icon name="wallet" size={15} />Harcamalar</button>
+    </span>
     <span class="head-actions">
       {#if scan?.busy}
         <button class="btn" onclick={() => act('subs_scan_stop')}><Icon name="stop" size={16} />Taramayı durdur</button>
       {:else}
         <button class="btn" onclick={() => (scanOpen = true)} title="Banka ve kredi kartı ekstrelerindeki ödemeleri kayıtlara bağlar, yeni faturaları önerir"><Icon name="fileSearch" size={16} />Ekstrelerden tara</button>
       {/if}
-      <button class="btn primary" onclick={() => (editing = {})}><Icon name="plus" size={16} />Yeni kayıt</button>
+      {#if tab === 'subs'}<button class="btn primary" onclick={() => (editing = {})}><Icon name="plus" size={16} />Yeni kayıt</button>{/if}
     </span>
   </div>
   <div class="page-body">
+    {#if scan?.busy}
+      <div class="card scanning">
+        <Icon name="loader" size={16} spin />
+        <span class="ellipsis">Ekstreler okunuyor · {scan.busy.done + 1}/{scan.busy.total}{#if scan.busy.name}<span class="dim"> · {scan.busy.name}</span>{/if}</span>
+        <span class="progress"><i style:width={`${(scan.busy.done / Math.max(1, scan.busy.total)) * 100}%`}></i></span>
+      </div>
+    {/if}
+
+    {#if tab === 'spending'}
+      <SpendingPanel version={scanVersion} onscan={() => (scanOpen = true)} />
+    {:else}
     {#if summary}
       <div class="stats">
         <div class="stat card">
@@ -152,14 +170,6 @@
           <b>{summary.active}</b>
           <span class="dim">{items.length} kayıttan</span>
         </div>
-      </div>
-    {/if}
-
-    {#if scan?.busy}
-      <div class="card scanning">
-        <Icon name="loader" size={16} spin />
-        <span class="ellipsis">Ekstreler okunuyor · {scan.busy.done + 1}/{scan.busy.total}{#if scan.busy.name}<span class="dim"> · {scan.busy.name}</span>{/if}</span>
-        <span class="progress"><i style:width={`${(scan.busy.done / Math.max(1, scan.busy.total)) * 100}%`}></i></span>
       </div>
     {/if}
 
@@ -285,6 +295,7 @@
         </aside>
       {/if}
     </div>
+    {/if}
   </div>
 </section>
 
@@ -299,6 +310,10 @@
 
 <style>
   .head-actions { display: flex; gap: 8px; }
+  .seg { display: inline-flex; padding: 3px; border-radius: 999px; background: var(--surface); gap: 2px; margin-right: 8px; }
+  .seg button { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 14px; border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--secondary); }
+  .seg button:hover:not(.on) { color: var(--text); }
+  .seg button.on { background: var(--text); color: var(--window); }
   .scanning { display: flex; align-items: center; gap: 12px; padding: 12px 16px; margin-bottom: 16px; font-size: 13px; color: var(--text); }
   .scanning :global(svg) { color: var(--accent); flex: none; }
   .scanning .ellipsis { flex: 1; min-width: 0; }

@@ -166,6 +166,31 @@ export function createMock(emit) {
     subs_ignore: async (key) => { suggestions = suggestions.filter((x) => x.key !== key); ignored++; return subsView(); },
     subs_unignore_all: async () => { ignored = 0; return subsView(); },
     subs_scan_stop: async () => ({ ok: true }),
+    // F111: harcama panosu (sabit ornek; gercek hesap expenses.py'de)
+    subs_spending: async (month) => {
+      const totals = [['2026-03', 8120.4, true], ['2026-04', 14250.9], ['2026-05', 12980.35], ['2026-06', 16840], ['2026-07', 13110.6],
+        ['2026-08', 15420.75], ['2026-09', 17985.2], ['2026-10', 6240.5, true]];
+      const months = totals.map(([m, total, partial]) => ({ month: m, total, count: Math.round(total / 380), partial: !!partial }));
+      const keys = months.map((m) => m.month);
+      if (month !== 'all' && !keys.includes(month)) month = keys.at(-1);
+      const index = keys.indexOf(month);
+      const total = month === 'all' ? +months.reduce((a, m) => a + m.total, 0).toFixed(2) : months[index].total;
+      const split = (parts) => parts.map(([key, label, share]) => ({ key, label, share, total: +(total * share).toFixed(2), count: Math.max(1, Math.round(share * 40)) }));
+      const full = months.filter((m) => !m.partial);
+      return {
+        month, months, options: [...keys].reverse(), total, count: Math.round(total / 380),
+        previous: index > 0 && month !== 'all' ? { month: keys[index - 1], total: months[index - 1].total, change: +(total - months[index - 1].total).toFixed(2),
+          ratio: +((total - months[index - 1].total) / months[index - 1].total).toFixed(4) } : null,
+        partial: month !== 'all' && months[index].partial,
+        average: +(full.reduce((a, m) => a + m.total, 0) / full.length).toFixed(2),
+        categories: split([['purchase', 'Alışveriş', 0.52], ['bill', 'Fatura', 0.24], ['subscription', 'Abonelik', 0.11], ['other', 'Diğer', 0.09], ['fee', 'Masraf ve faiz', 0.04]]),
+        merchants: [['Migros', 'Alışveriş', 0.16], ['Enerjisa', 'Fatura', 0.09], ['Trendyol', 'Alışveriş', 0.08], ['İGDAŞ', 'Fatura', 0.06], ['Shell', 'Alışveriş', 0.05],
+          ['Turkcell', 'Fatura', 0.04], ['Netflix', 'Abonelik', 0.02], ['A101', 'Alışveriş', 0.02], ['Yemeksepeti', 'Alışveriş', 0.02], ['Deezer', 'Abonelik', 0.01]]
+          .map(([name, category, share]) => ({ key: name, name, category, share, total: +(total * share).toFixed(2), count: Math.max(1, Math.round(share * 30)) })),
+        merchant_count: 47, excluded: { count: 9, total: 48200 },
+        period: { first: '2026-03-12', last: '2026-10-11' }, statements: 2, scan_date: scanInfo.date,
+      };
+    },
     subs_scan: async () => {
       let done = 0;
       const timer = setInterval(() => {
@@ -288,6 +313,8 @@ export function createMock(emit) {
     guess_series_title: async () => 'One Step Beyond',
     start_translation: async () => ({ ...translate, running: true, job: 'translate' }),
     generate_subtitle: async () => ({ ...translate, running: true, job: 'whisper', progress: { done: 312, total: 1440 } }),
+    voice_status: async () => ({ available: true, hint: '', max_seconds: 120 }),
+    voice_transcribe: async () => { await new Promise((r) => setTimeout(r, 900)); return { text: 'Bu videoda hangi konular anlatılıyor?', language: 'tr' }; },
   };
   // 'then' tanimsiz kalmali: yoksa Promise bu nesneyi "thenable" sanip hic cozulmez.
   return new Proxy(api, { get: (target, name) => (name === 'then' ? undefined : target[name] ?? (async () => null)) });

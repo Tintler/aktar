@@ -84,7 +84,7 @@ const format = (value, unit) => {
   return unit ? (unit === '%' ? `%${text}` : `${text} ${unit}`) : text;
 };
 
-function config(spec) {
+export function chartConfig(spec) {
   const dark = document.documentElement.dataset.base !== 'light';
   const colors = PALETTE[dark ? 'dark' : 'light'];
   const surface = css('--panel') || css('--window') || (dark ? '#111' : '#fff');
@@ -162,7 +162,7 @@ export function charts(node) {
           : spec.type === 'hbar' ? `${Math.min(520, 90 + spec.labels.length * (18 + 8 * spec.series.length))}px` : '280px';
         holder.append(document.createElement('canvas'));
       }
-      live.set(holder, new Chart(holder.firstChild, config(spec)));
+      live.set(holder, new Chart(holder.firstChild, chartConfig(spec)));
     } catch (error) {
       live.delete(holder);
       holder.className = 'chart-error';
@@ -185,4 +185,30 @@ export function charts(node) {
       for (const chart of live.values()) chart.destroy();
     },
   };
+}
+
+// F111: Svelte eylemi; uygulamanin kendi verisini (model JSON'u degil) dogrudan cizer.
+// params: {spec, tune(config, colors)}; tune yapilandirmayi cizimden once degistirir.
+export function plot(node, params) {
+  let chart = null;
+  const canvas = document.createElement('canvas');
+  node.append(canvas);
+  function render() {
+    chart?.destroy();
+    const dark = document.documentElement.dataset.base !== 'light';
+    const cfg = chartConfig({ type: 'bar', title: '', unit: '', x: '', y: '', labels: [], ...params.spec });
+    params.tune?.(cfg, PALETTE[dark ? 'dark' : 'light']);
+    chart = new Chart(canvas, cfg);
+  }
+  window.addEventListener('aktar-theme', render);
+  render();
+  return {
+    update(next) { params = next; render(); },
+    destroy() { window.removeEventListener('aktar-theme', render); chart?.destroy(); },
+  };
+}
+
+// Grafik paletinin ilk rengi (HTML cubuklar grafikle ayni renkte olsun).
+export function seriesColor() {
+  return PALETTE[document.documentElement.dataset.base !== 'light' ? 'dark' : 'light'][0];
 }

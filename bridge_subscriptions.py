@@ -9,6 +9,7 @@ from __future__ import annotations
 import threading
 from datetime import datetime
 
+import expenses
 import library
 import statements
 import subscriptions
@@ -59,6 +60,16 @@ class SubscriptionsMixin:
 
     def subs_state(self):
         return self._subs_view()
+
+    def subs_spending(self, month=None):
+        """F111: Harcamalar sekmesi; taranmis ekstrelerin satirlarindan pano (expenses.py)."""
+        options = subscriptions.settings()
+        records = self._subs_records(options['scan']['files'])
+        board = expenses.dashboard(statements.transactions(records), subscriptions.load(),
+                                   str(month) if month else None)
+        board['statements'] = len(records)
+        board['scan_date'] = options['scan']['date']
+        return board
 
     def subs_save(self, item):
         try:
