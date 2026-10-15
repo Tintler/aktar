@@ -244,12 +244,12 @@ class Assistant:
             + context.replace('VIDEOS IN THE EXCERPTS:', 'FILES IN THE NOTES:', 1)
         return text, videos, session
 
-    def ask(self, question, on_delta=None, cancelled=None, client=None):
+    def ask(self, question, on_delta=None, cancelled=None, client=None, think=None):
         """Cevaplar. Donen: {'question', 'answer', 'parts', 'sources', 'stopped'}."""
         question = ' '.join(str(question).split()) if '\n' not in str(question) else str(question).strip()
         if not question:
             raise ValueError('Mesaj boş olamaz.')
-        cfg = qa_config(self.config_provider())
+        cfg = qa_config(self.config_provider(), think)
         client = client or Client(cfg, log=self.log)
         notes, videos, session = self.notes(question, cfg, client)
         records = self.backlog(self._query(question), cfg, log=self.log)

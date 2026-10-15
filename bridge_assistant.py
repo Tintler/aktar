@@ -78,7 +78,7 @@ class AssistantMixin:
         self._conv_cancel.set()
         return True
 
-    def assistant_ask(self, text):
+    def assistant_ask(self, text, think=None):
         text = str(text or '').strip()
         data = self._conv
         if not text or self._conv_busy:
@@ -102,7 +102,7 @@ class AssistantMixin:
             log = lambda message: self._log('[Sohbet] ' + str(message))  # noqa: E731
             try:
                 turn = assistant.Assistant(data['history'], log=log).ask(
-                    text, on_delta=delta, cancelled=self._conv_cancel.is_set)
+                    text, on_delta=delta, cancelled=self._conv_cancel.is_set, think=think)
             except Exception as failure:  # baglanti/model hatasi sohbete yazilir
                 log('Cevap alınamadı: ' + str(failure))
                 data['entries'].append(('error', 'Cevap alınamadı: ' + str(failure)))

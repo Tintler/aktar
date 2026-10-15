@@ -98,6 +98,7 @@ export function createMock(emit) {
   const api = {
     library_open: async () => library,
     library_state: async () => library,
+    library_overview: async () => library.collections.map((c) => ({ ...c, count: c.files, summary: chat.overview.summary, topics: chat.overview.topics })),
     chat_state: async () => chat,
     library_search: async (q) => ({ query: q, keys: library.rows.slice(0, 3).map((r) => r.key), files: 2, limited: false, searched: q.length >= 3,
       hits: [{ path: 'x', name: '03 Gradyan İnişi', start: 754, where: '12:34', text: 'öğrenme oranını küçültünce adımlar da küçülüyor' }, { path: 'y', name: 'Ders notları', start: 12, where: 's.12', text: 'Öğrenme oranı (learning rate) seçimi' }] }),

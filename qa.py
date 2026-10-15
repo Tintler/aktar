@@ -704,12 +704,12 @@ class VideoQA:
         return text + '\n\n'.join(parts), sorted(chosen)
 
     # soru
-    def ask(self, question, cancelled=None):
+    def ask(self, question, cancelled=None, think=None):
         """Soruyu cevaplar. Donen: {'question','answer','parts','sections'}."""
         question = ' '.join(str(question).split())
         if not question:
             raise ValueError('Soru boş olamaz.')
-        cfg = qa_config(self.config_provider())  # F72: soru-cevap modeli
+        cfg = qa_config(self.config_provider(), think)  # F72: soru-cevap modeli
         client = Client(cfg, log=self.log)
         ranked = None
         if self.data.get('mode') == 'map' and self.sections:

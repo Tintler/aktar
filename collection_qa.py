@@ -354,12 +354,12 @@ class CollectionQA:
         return (bool(date), date, self._order(video))
 
     # soru
-    def ask(self, question, client=None):
+    def ask(self, question, client=None, think=None):
         """Soruyu cevaplar. Donen: {'question','answer','parts','sources'}."""
         question = ' '.join(str(question).split())
         if not question:
             raise ValueError('Soru boş olamaz.')
-        cfg = qa_config(self.config_provider())  # F72: soru-cevap modeli
+        cfg = qa_config(self.config_provider(), think)  # F72: soru-cevap modeli
         client = client or Client(cfg, log=self.log)
         latest = [] if len(self.videos) == 1 else self.latest_documents(question, cfg)
         hits = self.whole_hits(cfg) or (self.latest_hits(latest, cfg) + search_index.search(

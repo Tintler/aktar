@@ -2,6 +2,7 @@
   // Genel sohbet: serbest konusma; soru kutuphanedeki dosyalarla ilgiliyse model atif yapar.
   import Icon from '../lib/Icon.svelte';
   import Logo from '../components/Logo.svelte';
+  import ThinkToggle from '../components/ThinkToggle.svelte';
   import { app, act, loadAssistant, refreshConversations, openFile, toast } from '../lib/state.svelte.js';
   import { prompt, confirm } from '../lib/confirm.svelte.js';
   import { openMenu } from '../lib/menu.svelte.js';
@@ -52,7 +53,7 @@
     text = '';
     queueMicrotask(grow);
     stick = true;
-    const state = await act('assistant_ask', message);
+    const state = await act('assistant_ask', message, app.think);
     if (state) app.assistant = state;
     refreshConversations();
   }
@@ -160,6 +161,7 @@
     <textarea bind:this={input} bind:value={text} rows="1" oninput={grow} onkeydown={keydown} disabled={!chat || chat.locked}
       placeholder={chat?.locked ? 'Başka bir sohbette cevap hazırlanıyor…' : big ? 'Bir şey sorun ya da konuşmaya başlayın…' : 'Yanıtlayın…'}></textarea>
     <div class="row">
+      <ThinkToggle label />
       <span class="grow"></span>
       {#if chat?.busy}
         <button class="send stop" type="button" title="Durdur" onclick={() => act('assistant_stop')}><Icon name="stop" size={14} /></button>

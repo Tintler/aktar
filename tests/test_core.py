@@ -788,6 +788,7 @@ class EngineTests(unittest.TestCase):
         client.request = fake_request
         client.generate('sys', 'user')
         self.assertEqual(captured['payload'].get('chat_template_kwargs'), {'enable_thinking': False})
+        self.assertEqual(captured['payload'].get('reasoning_effort'), 'none')
 
     def test_thinking_disabled_by_default(self):
         client = app_core.Client(dict(app_core.DEFAULT_CONFIG), log=lambda _m: None)
@@ -800,6 +801,13 @@ class EngineTests(unittest.TestCase):
         client.request = fake_request
         client.generate('sys', 'user')
         self.assertNotIn('chat_template_kwargs', captured['payload'])
+        self.assertNotIn('reasoning_effort', captured['payload'])
+
+    def test_qa_config_think_overrides_setting(self):
+        cfg = dict(app_core.DEFAULT_CONFIG, disable_thinking=True)
+        self.assertTrue(app_core.qa_config(cfg)['disable_thinking'])
+        self.assertFalse(app_core.qa_config(cfg, think=True)['disable_thinking'])
+        self.assertTrue(app_core.qa_config(dict(cfg, disable_thinking=False), think=False)['disable_thinking'])
 
 
 class SubtitleFormatTests(unittest.TestCase):

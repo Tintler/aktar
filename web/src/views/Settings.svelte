@@ -133,7 +133,7 @@
           </div>
           {#if app.models.state === 'failed'}<p class="err small selectable">{app.models.message}</p>{/if}
           <div class="fr">
-            <div class="l">Thinking kapat<small>LM Studio chat_template_kwargs destekliyorsa düşünme (reasoning) modu kapatılır.</small></div>
+            <div class="l">Thinking kapat<small>Analiz, çeviri, özet ve indeksleme gibi arka plan işlerinde düşünme (reasoning) kapatılır. Sohbetlerde soru kutusundaki beyin düğmesi geçerlidir.</small></div>
             <Toggle bind:checked={cfg.disable_thinking} disabled={locked('disable_thinking')} />
           </div>
         </section>

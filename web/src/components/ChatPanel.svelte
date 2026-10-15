@@ -2,6 +2,7 @@
   // Koleksiyona sor: Deeverse'teki sag panel (kuyruk/sozler) yerinde. Indeksli dosyalarda atifli sohbet.
   import Icon from '../lib/Icon.svelte';
   import ChatMessages from './ChatMessages.svelte';
+  import ThinkToggle from './ThinkToggle.svelte';
   import { app, act, refreshChat, selectedPaths, openFile } from '../lib/state.svelte.js';
   import { confirm } from '../lib/confirm.svelte.js';
   import { dragArea } from '../lib/frame.svelte.js';
@@ -21,7 +22,7 @@
     const value = text.trim();
     if (!value || !chat?.enabled) return;
     question = '';
-    const state = await act('chat_ask', value, view.scope === 'selected' ? selectedPaths() : null);
+    const state = await act('chat_ask', value, view.scope === 'selected' ? selectedPaths() : null, app.think);
     if (state) app.chat = state;
   }
 
@@ -69,6 +70,7 @@
   <div class="note">{chat?.note ?? ''}</div>
   <form class="ask" onsubmit={(e) => { e.preventDefault(); ask(); }}>
     <input bind:value={question} disabled={!chat?.enabled} placeholder={view.scope === 'selected' ? 'Seçili dosyalara sor…' : 'Tüm dosyalara sor…'} />
+    <ThinkToggle />
     <button class="send" type="submit" title="Gönder" disabled={!chat?.enabled || !question.trim()}><Icon name="send" size={16} /></button>
   </form>
 </aside>

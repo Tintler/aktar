@@ -866,7 +866,7 @@ class LibraryMixin:
         self._log('Koleksiyon sohbeti temizlendi: ' + self._lib_data['title'])
         return self.chat_state()
 
-    def chat_ask(self, question, selected=None):
+    def chat_ask(self, question, selected=None, think=None):
         question = ' '.join(str(question or '').split())
         videos = self._scope_videos(selected)
         if not question or not videos or self._ask_busy or self._lib_data is None:
@@ -888,7 +888,7 @@ class LibraryMixin:
         def work():
             turn, error = None, ''
             try:
-                turn = session.ask(question)
+                turn = session.ask(question, think=think)
             except Exception as failure:  # baglanti/model hatasi sohbete yazilir
                 error = str(failure)
             chat['entries'] = [item for item in chat['entries'] if item[0] != 'pending']

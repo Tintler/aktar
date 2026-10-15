@@ -80,9 +80,9 @@ DEFAULT_CONFIG = {
     'backlog_url': '',
     'tesseract_path': '',     # bos: PATH / Program Files / bin/tesseract icinde aranir
     'tesseract_lang': 'tur+eng',
-    # Reasoning/thinking ureten modellerde dusunmeyi kapatma denemesi
-    # (LM Studio chat_template_kwargs desteklerse). Desteklenmezse yok sayilir;
-    # o durumda LM Studio model preset'inden thinking kapatilmalidir.
+    # Reasoning/thinking ureten modellerde dusunmeyi kapatir (reasoning_effort='none').
+    # Analiz, ceviri, ozet gibi arka plan isleri icindir; sohbetlerde (F99) her
+    # sorunun yanindaki dugme gecerlidir.
     'disable_thinking': False,
 }
 
@@ -256,10 +256,15 @@ def validate_config(cfg):
         raise ValueError('disable_thinking true veya false olmalı.')
 
 
-def qa_config(cfg):
-    """Soru-cevap icin ayarlar: `qa_model` seciliyse sohbet istekleri onunla yapilir."""
+def qa_config(cfg, think=None):
+    """Soru-cevap icin ayarlar: `qa_model` seciliyse sohbet istekleri onunla yapilir.
+
+    `think` (F99) sohbetteki dusunme dugmesidir: None ise Ayarlar'daki disable_thinking gecerli."""
     model = str(cfg.get('qa_model', '')).strip()
-    return dict(cfg, model=model) if model else dict(cfg)
+    value = dict(cfg, model=model) if model else dict(cfg)
+    if think is not None:
+        value['disable_thinking'] = not think
+    return value
 
 
 def tr_lower(text):
@@ -584,6 +589,13 @@ class Client:
         except TimeoutError:
             raise RuntimeError('LM Studio istegi zaman asimina ugradi.') from None
 
+    def _thinking(self, payload):
+        """disable_thinking: LM Studio reasoning_effort='none' ile dusunmeyi kapatir
+        (chat_template_kwargs LM Studio'da yok sayiliyor; vLLM/llama.cpp icin kalir)."""
+        if self.cfg.get('disable_thinking'):
+            payload['reasoning_effort'] = 'none'
+            payload['chat_template_kwargs'] = {'enable_thinking': False}
+
     def models(self):
         value = self.request('/models')
         return [item['id'] for item in value.get('data', []) if item.get('id')]
@@ -597,8 +609,7 @@ class Client:
                        {'type': 'text', 'text': prompt},
                        {'type': 'image_url', 'image_url': {
                            'url': f'data:{mime};base64,' + base64.b64encode(image).decode()}}]}]}
-        if self.cfg.get('disable_thinking'):
-            payload['chat_template_kwargs'] = {'enable_thinking': False}
+        self._thinking(payload)
         value = self.request('/chat/completions', payload)
         try:
             return str(value['choices'][0]['message'].get('content') or '')
@@ -636,10 +647,7 @@ class Client:
             'max_tokens': self.cfg['max_tokens'] if max_tokens is None else max_tokens,
             'stream': False,
         }
-        # Reasoning/thinking modellerinde dusunmeyi kapatma denemesi. LM Studio
-        # bu alani desteklemezse yok sayar; kalici cozum model preset'idir.
-        if self.cfg.get('disable_thinking'):
-            payload['chat_template_kwargs'] = {'enable_thinking': False}
+        self._thinking(payload)
         value = self.request('/chat/completions', payload)
         try:
             choice = value['choices'][0]
@@ -680,8 +688,7 @@ class Client:
             'max_tokens': self.cfg['max_tokens'] if max_tokens is None else max_tokens,
             'stream': True,
         }
-        if self.cfg.get('disable_thinking'):
-            payload['chat_template_kwargs'] = {'enable_thinking': False}
+        self._thinking(payload)
         headers = {'Content-Type': 'application/json'}
         token = os.environ.get('LM_STUDIO_API_KEY')
         if token:

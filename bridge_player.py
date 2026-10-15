@@ -397,7 +397,7 @@ class PlayerMixin:
         return self._player_state()
 
     # ------------------------------------------------------------------ soru-cevap
-    def player_ask(self, question):
+    def player_ask(self, question, think=None):
         video = self._player_video
         text = ' '.join(str(question or '').split())
         if video is None or not text or video.session is None or not video.ready or video.asking:
@@ -408,7 +408,7 @@ class PlayerMixin:
 
         def work():
             try:
-                turn = video.session.ask(text)
+                turn = video.session.ask(text, think=think)
             except (GracefulStop, RuntimeError, ValueError, OSError) as error:
                 self._log('[Soru] ' + str(error))
                 video.entries = [item for item in video.entries if item[0] != 'pending']

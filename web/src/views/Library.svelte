@@ -259,7 +259,7 @@
               <span class="csum empty">Henüz özet yok. Koleksiyonu açıp "Hepsini hazırla" ile hazırlayınca burada özeti görünür.</span>
             {/if}
             {#if c.topics?.length}
-              <span class="ctopics">{#each c.topics as topic}<span class="badge">{topic}</span>{/each}</span>
+              <span class="ctopics">{#each c.topics as topic}<span class="badge ellipsis" title={topic}>{topic}</span>{/each}</span>
             {/if}
           </button>
         {/each}
@@ -392,7 +392,7 @@
 
   .lead { font-size: 13px; margin: 0 0 18px; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
-  .ccard { display: flex; flex-direction: column; align-items: stretch; gap: 10px; text-align: left; padding: 18px; min-height: 190px;
+  .ccard { display: flex; flex-direction: column; align-items: stretch; gap: 10px; text-align: left; padding: 18px; min-height: 190px; min-width: 0; overflow: hidden;
     border-radius: 14px; background: var(--panel); border: 1px solid var(--outline); color: var(--text);
     transition: border-color .15s, transform .15s, box-shadow .15s; }
   .ccard:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--outline)); transform: translateY(-2px);
@@ -405,7 +405,8 @@
   .csum { width: 100%; text-align: left; font-size: 13px; line-height: 1.55; color: var(--secondary); display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4;
     -webkit-box-orient: vertical; overflow: hidden; }
   .csum.empty { color: var(--dim); font-style: italic; }
-  .ctopics { display: flex; flex-wrap: wrap; gap: 4px; margin-top: auto; }
+  .ctopics { display: flex; flex-wrap: wrap; gap: 4px; margin-top: auto; min-width: 0; }
+  .ctopics .badge { max-width: 100%; min-width: 0; display: block; }
   .ccard.add { align-items: center; justify-content: center; gap: 8px; border-style: dashed; background: transparent; color: var(--secondary); }
   .ccard.add:hover { color: var(--text); }
   .ccard.add b { font-size: 15px; color: var(--text); }

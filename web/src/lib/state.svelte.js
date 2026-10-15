@@ -34,7 +34,17 @@ export const app = $state({
   files: [],                  // Dosya incele: son incelenen dosyalar
   assistant: null,            // genel sohbet: acik sohbetin durumu (bridge_assistant)
   conversations: [],          // genel sohbet listesi [{id, title, updated}]
+  think: readThink(),         // sohbetlerde dusunme (reasoning) acik mi (F99; tarayici deposunda kalir)
 });
+
+function readThink() {
+  try { return localStorage.getItem('aktar.think') === '1'; } catch { return false; }
+}
+
+export function setThink(value) {
+  app.think = !!value;
+  try { localStorage.setItem('aktar.think', app.think ? '1' : '0'); } catch { /* depo yok */ }
+}
 
 const VIEWS = ['chat', 'library', 'files', 'translate', 'console'];
 
