@@ -55,6 +55,13 @@
     mailStatus = (await call('mail_test')) ?? null;
   }
 
+  // F94: Backlog sitesi; genel sohbette soruda gecen oyun/anime/film/kitap basliklari aranir.
+  let backlogStatus = $state(null);
+  async function testBacklog() {
+    backlogStatus = { busy: true, message: 'Bağlanıyor…' };
+    backlogStatus = (await call('backlog_test', cfg.backlog_url)) ?? null;
+  }
+
   async function save() {
     saving = true;
     const result = await act('save_settings', $state.snapshot(cfg));
@@ -236,6 +243,18 @@
           <div class="fr">
             <div class="l">Bağlantı<small class:okc={mailStatus?.ok} class:errc={mailStatus?.ok === false}>{mailStatus?.message ?? (mail.address && !mail.has_password ? 'Uygulama şifresini kaydedin.' : "Gmail'e giriş yapıp tüm postalar kutusunu bulur.")}</small></div>
             <button class="btn sm" disabled={!mail.has_password || mailStatus?.busy || dirty} onclick={testMail}><Icon name="mail" size={14} />Bağlantıyı dene</button>
+          </div>
+        </section>
+
+        <section>
+          <h2>Backlog sitesi</h2>
+          <div class="fr">
+            <div class="l">Site adresi<small>Genel sohbette sorudaki oyun, anime, manga, film ve kitap adları bu sitede aranır ("Cyberpunk 2077'ye Steam'de mi sahiptim?"). Boş: kapalı.</small></div>
+            <input class="field w" type="url" bind:value={cfg.backlog_url} placeholder="https://site.pages.dev" />
+          </div>
+          <div class="fr">
+            <div class="l">Bağlantı<small class:okc={backlogStatus?.ok} class:errc={backlogStatus?.ok === false}>{backlogStatus?.message ?? 'Başlık listesini çekmeyi dener.'}</small></div>
+            <button class="btn sm" disabled={!cfg.backlog_url?.trim() || backlogStatus?.busy} onclick={testBacklog}>Bağlantıyı dene</button>
           </div>
         </section>
 

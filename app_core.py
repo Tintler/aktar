@@ -17,6 +17,7 @@ import urllib.request
 from collections import Counter
 from pathlib import Path
 
+import backlog
 import fonts
 import subtitle
 
@@ -75,6 +76,8 @@ DEFAULT_CONFIG = {
     'ocr_model_prompt': 'Text Recognition:',  # OCR modelleri kisa, kendi komutlarini bekler
     # E-postadan iceri aktarma (F89): Gmail adresi; uygulama sifresi secret_store'da durur.
     'mail_address': '',
+    # Backlog sitesi (F94): genel sohbette oyun/anime/film/kitap kayitlari aranir (bos: kapali).
+    'backlog_url': '',
     'tesseract_path': '',     # bos: PATH / Program Files / bin/tesseract icinde aranir
     'tesseract_lang': 'tur+eng',
     # Reasoning/thinking ureten modellerde dusunmeyi kapatma denemesi
@@ -235,6 +238,8 @@ def validate_config(cfg):
     if not isinstance(address, str) or (address.strip() and not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+',
                                                                               address.strip())):
         raise ValueError('E-posta adresi geçersiz (örn. ad@gmail.com).')
+    if not isinstance(cfg.get('backlog_url', ''), str) or not backlog.valid_url(cfg.get('backlog_url', '')):
+        raise ValueError('Backlog adresi https:// ile başlamalı (örn. https://site.pages.dev).')
     if not isinstance(cfg.get('vision_model', ''), str):
         raise ValueError('vision_model model adı (metin) olmalı.')
     if not isinstance(cfg.get('embedding_model', ''), str):

@@ -23,7 +23,7 @@ export function createMock(emit) {
     temperature: 0.2, timeout_seconds: 1800, auto_retry_count: 2, glossary_strict: false, analysis_chunk_chars: 12000,
     qa_context_chars: 24000, whisper_model: 'large-v3-turbo', whisper_device: 'auto', whisper_language: '', whisper_cuda_dir: '',
     embedding_model: 'text-embedding-embeddinggemma-2', vision_model: '', qa_model: '', ocr_engine: 'auto', ocr_model: '',
-    tesseract_path: '', tesseract_lang: 'tur+eng', disable_thinking: true, mail_address: 'ornek@gmail.com',
+    tesseract_path: '', tesseract_lang: 'tur+eng', disable_thinking: true, mail_address: 'ornek@gmail.com', backlog_url: 'https://ornek.pages.dev',
   };
   let prefs = { theme: 'system' };
   let conversation = { id: 'c1', title: '', entries: [], busy: false, stream: null, locked: false, saved: false };
@@ -103,6 +103,7 @@ export function createMock(emit) {
     mail_account: async () => ({ address: settings.mail_address, has_password: true }),
     mail_set_password: async () => ({ address: settings.mail_address, has_password: true }),
     mail_test: async () => ({ ok: true, message: 'Bağlandı · postalar "[Gmail]/Tüm Postalar" kutusunda aranacak' }),
+    backlog_test: async () => ({ ok: true, message: 'Bağlandı · 3120 başlık' }),
     mail_rules: async () => mailState(),
     mail_save_rule: async (rule) => {
       const clean = { ...rule, id: rule.id || 'r' + (mailRules.length + 1), title: rule.title || rule.subject || rule.sender };

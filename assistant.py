@@ -18,6 +18,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import backlog
 import collection_qa
 import library
 import qa
@@ -45,7 +46,8 @@ SYSTEM_PROMPT = '''You are the assistant inside Aktar, a desktop app for the use
 - Reply in the language the user writes in (usually Turkish). Be natural and to the point; use Markdown (short paragraphs, lists, tables, code blocks) when it helps. Do not use LaTeX; write formulas with plain text and Unicode (R², x₁, ≤).
 - Below you may find LIBRARY NOTES: excerpts that an automatic search pulled from the user's own videos and documents for the latest message. They can be irrelevant. Use them only when the user asks about their files or the content clearly helps answer; otherwise ignore them completely and do not mention the library, the search or the notes.
 - When you do use the notes, cite them in square brackets right after the sentence they support: file id + timestamp for videos, e.g. [V2 12:34] or [V2 12:34-13:10], file id + page for documents, e.g. [V3 s.12]. Use only ids and positions that appear in the notes; never invent a citation. Do not cite your own general knowledge.
-- LIBRARY OVERVIEW lists the user's collections; use it when they ask what is in their library.'''
+- LIBRARY OVERVIEW lists the user's collections; use it when they ask what is in their library.
+- BACKLOG RECORDS, when present, are entries from the user's own game/anime/manga/film/book tracker for titles mentioned in the conversation. Use them to answer questions about what the user owns, played, watched or read (platform, store/digital service, status, playtime, score, dates). Several lines with the same title mean several copies or entries; mention all relevant ones. If a title the user asks about is not in the records, say it is not in their backlog. Do not cite backlog records with brackets.'''
 
 _CITE = re.compile(r'\s?\[(?:V\d+[^\[\]\n]{0,150})\]')
 _OPEN_THINK = re.compile(r'(?is)<think>.*$')
@@ -205,11 +207,13 @@ def forget_snapshot():
 class Assistant:
     """Bir sohbetin cevaplayicisi. history: [{'question', 'answer'}]."""
 
-    def __init__(self, history=None, config_provider=load_config, log=print, snapshot=library_snapshot):
+    def __init__(self, history=None, config_provider=load_config, log=print, snapshot=library_snapshot,
+                 backlog_notes=backlog.notes):
         self.history = list(history or [])
         self.config_provider = config_provider
         self.log = log
         self.snapshot = snapshot
+        self.backlog = backlog_notes
 
     def _query(self, question):
         previous = self.history[-1]['question'] if self.history else ''
@@ -248,7 +252,8 @@ class Assistant:
         cfg = qa_config(self.config_provider())
         client = client or Client(cfg, log=self.log)
         notes, videos, session = self.notes(question, cfg, client)
-        system = SYSTEM_PROMPT + ('\n\n' + notes if notes else '')
+        records = self.backlog(self._query(question), cfg, log=self.log)
+        system = SYSTEM_PROMPT + ''.join('\n\n' + part for part in (notes, records) if part)
         messages = [{'role': 'system', 'content': system}]
         for turn in self.history[-HISTORY_TURNS:]:
             messages.append({'role': 'user', 'content': turn['question']})

@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 import assistant
+import backlog
 import library
 from bridge_library import KIND_LABELS, chat_entries
 
@@ -37,6 +38,10 @@ class AssistantMixin:
 
     def assistant_state(self):
         return self._assistant_state()
+
+    def backlog_test(self, url):
+        """Ayarlar: Backlog sitesine baglanip baslik listesini ceker (F94)."""
+        return backlog.check(url)
 
     def assistant_new(self):
         if self._conv['entries'] or self._conv_busy == self._conv['id']:
