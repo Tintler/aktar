@@ -78,6 +78,14 @@ export function createMock(emit) {
         { type: 'cite', items: [{ path: 'x', start: 70, label: 'V1 1:10', title: '01 Doğrusal Regresyon' }, { path: 'y', start: 12, label: 'V7 s.12', title: 'Ders notları' }] },
         { type: 'text', text: '.' }],
         sources: [{ path: 'x', start: 754, label: 'V3', title: '03 Gradyan İnişi', count: 1 }, { path: 'x', start: 70, label: 'V1', title: '01 Doğrusal Regresyon', count: 1 }, { path: 'y', start: 12, label: 'V7', title: 'Ders notları', count: 1 }] },
+      { kind: 'user', text: 'Güncel varlıklarımın TL karşılığı?' },
+      { kind: 'assistant', parts: [
+        { type: 'text', text: '**Envanter (Fiziksel Varlıklar)** ' },
+        { type: 'cite', items: [{ path: 'y', start: 1, label: 'V7 s.1', title: 'Inventory', document: true }] },
+        { type: 'text', text: '\n\n| Kalem | Miktar | Hesap |\n|---|---|---|\n| Altın | 420,06 g × 6.569 TL/gr = **2.759.374,14 TL** ' },
+        { type: 'cite', items: [{ path: 'y', start: 1, label: 'V7 s.1', title: 'Inventory', document: true }] },
+        { type: 'text', text: ' |\n| Euro (fiziksel) | 2.145 € × 55,52 TL/€ | **119.090,40 TL** |\n\n**Toplam:** ≈ 2.878.464,54 TL' }],
+        sources: [{ path: 'y', start: 1, label: 'V7', title: 'Inventory', count: 2 }] },
     ],
   };
   setTimeout(() => {

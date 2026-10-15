@@ -1,25 +1,46 @@
 <script>
   // Sohbet kayitlari: kullanici balonu, atifli model cevabi, notlar. Koleksiyon, belge ve
   // video sohbeti ortak kullanir. oncite({path, start, document}) atfa tiklaninca.
-  import { inlineHtml } from '../lib/markdown.js';
+  // F98: cevap blok Markdown olarak cizilir (tablo, baslik, liste); atiflar yer tutucuyla
+  // Markdown'u bolmeden dugmeye donusur (genel sohbetteki answerHtml ile ayni yol).
+  import { richHtml, escapeHtml } from '../lib/markdown.js';
 
   let { entries = [], oncite, single = false } = $props();
   const label = (item) => (single ? item.label.split(' ').slice(1).join(' ') || item.label : item.label);
+
+  let cites = [];
+  function answerHtml(entry) {
+    const tokens = [];
+    let source = '';
+    for (const part of entry.parts) {
+      if (part.type === 'cite') {
+        source += `\u0001${tokens.length}\u0001`;
+        tokens.push(part.items.map((item) => {
+          const key = cites.push(item) - 1;
+          return `<button class="cite" data-cite="${key}" title="${escapeHtml(item.title)}">${escapeHtml(label(item))}</button>`;
+        }).join(' '));
+      } else source += part.text;
+    }
+    return richHtml(source, tokens);
+  }
+  const rendered = $derived.by(() => {
+    cites = [];
+    return entries.map((entry) => (entry.kind === 'assistant' ? answerHtml(entry) : null));
+  });
+
+  function clickAnswer(event) {
+    const button = event.target.closest('button.cite[data-cite]');
+    const item = button && cites[Number(button.dataset.cite)];
+    if (item) oncite?.(item);
+  }
 </script>
 
-{#each entries as entry}
+{#each entries as entry, index}
   {#if entry.kind === 'user'}
     <div class="user selectable">{entry.text}</div>
   {:else if entry.kind === 'assistant'}
-    <div class="answer selectable">
-      {#each entry.parts as part}
-        {#if part.type === 'cite'}
-          {#each part.items as item}
-            <button class="cite" title={item.title} onclick={() => oncite?.(item)}>{label(item)}</button>{' '}
-          {/each}
-        {:else}{@html inlineHtml(part.text)}{/if}
-      {/each}
-    </div>
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <div class="answer md selectable" onclick={clickAnswer}>{@html rendered[index]}</div>
     {#if entry.sources?.length && !single}
       <div class="sources">
         <span>Kaynaklar</span>
@@ -41,10 +62,28 @@
 
 <style>
   .user { align-self: flex-end; max-width: 85%; background: var(--surface-active); padding: 9px 14px; border-radius: 16px 16px 4px 16px; font-size: 13.5px; white-space: pre-wrap; }
-  .answer { font-size: 13.5px; line-height: 1.6; color: var(--text); }
-  .cite { display: inline-block; padding: 0 7px; margin: 0 1px; border-radius: 999px; font-size: 11.5px; font-weight: 700; line-height: 19px;
+  .answer { font-size: 13.5px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; min-width: 0; }
+  .md :global(p) { margin: 0 0 .7em; }
+  .md :global(p:last-child), .md :global(ul:last-child), .md :global(ol:last-child) { margin-bottom: 0; }
+  .md :global(h3), .md :global(h4), .md :global(h5), .md :global(h6) { margin: 1em 0 .4em; font-size: 1.05em; font-weight: 700; line-height: 1.35; }
+  .md :global(:first-child) { margin-top: 0; }
+  .md :global(ul), .md :global(ol) { margin: 0 0 .7em; padding-left: 1.4em; }
+  .md :global(li) { margin: .15em 0; }
+  .md :global(li::marker) { color: var(--secondary); }
+  .md :global(code) { font: .88em/1.5 var(--mono); padding: .1em .35em; border-radius: 5px; background: var(--surface); }
+  .md :global(pre) { margin: .3em 0 .8em; padding: 10px 12px; border-radius: 10px; background: var(--surface); overflow: auto; }
+  .md :global(pre code) { padding: 0; background: none; font-size: 12px; white-space: pre; }
+  .md :global(blockquote) { margin: 0 0 .7em; padding: 2px 0 2px 12px; border-left: 3px solid var(--outline); color: var(--secondary); }
+  .md :global(hr) { border: 0; border-top: 1px solid var(--outline); margin: 1em 0; }
+  .md :global(.table-wrap) { overflow-x: auto; margin: 0 0 .8em; }
+  .md :global(table) { border-collapse: collapse; font-size: .95em; overflow-wrap: normal; }
+  .md :global(th), .md :global(td) { border: 1px solid var(--outline); padding: 5px 9px; text-align: left; vertical-align: top; }
+  .md :global(th) { background: var(--surface); font-weight: 600; }
+  .md :global(.link) { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+  .md :global(.cite.raw) { opacity: .7; }
+  .cite, .md :global(.cite) { display: inline-block; padding: 0 7px; margin: 0 1px; border-radius: 999px; font-size: 11.5px; font-weight: 700; line-height: 19px;
     color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); vertical-align: 1px; white-space: nowrap; }
-  button.cite:hover { background: var(--accent); color: var(--on-accent); }
+  .md :global(button.cite:hover) { background: var(--accent); color: var(--on-accent); }
   .sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); margin-top: -4px; }
   .sources > span { font-weight: 600; text-transform: uppercase; letter-spacing: .05em; font-size: 10.5px; }
   .source { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 8px 3px 3px; border-radius: 999px; background: var(--surface); font-size: 12px; color: var(--secondary); }

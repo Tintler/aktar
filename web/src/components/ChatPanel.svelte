@@ -36,10 +36,14 @@
   }
 </script>
 
-<aside class="panel">
+<aside class="panel" class:wide={view.chatWide}>
   <div class="head" use:dragArea>
     <span class="pill">Koleksiyona sor</span>
     <span class="grow"></span>
+    <!-- F98: uzun cevaplar/tablolar icin genis panel; uygulama her acilista dar baslar -->
+    <button class="icon-btn sm" title={view.chatWide ? 'Paneli küçült' : 'Paneli büyüt'} onclick={() => (view.chatWide = !view.chatWide)}>
+      <Icon name={view.chatWide ? 'shrink' : 'expand'} size={15} />
+    </button>
     <button class="icon-btn sm" title="Sohbeti temizle" disabled={!chat || chat.busy} onclick={clear}><Icon name="trash" size={15} /></button>
     <button class="icon-btn sm" title="Paneli kapat" onclick={() => (view.chatOpen = false)}><Icon name="x" size={16} /></button>
   </div>
@@ -71,6 +75,7 @@
 
 <style>
   .panel { width: 360px; flex: none; height: 100%; background: var(--panel); display: flex; flex-direction: column; padding: 14px 16px 12px; min-height: 0; }
+  .panel.wide { width: clamp(560px, 55vw, 1040px); }
   .head { display: flex; align-items: center; gap: 4px; padding: 30px 0 10px; }
   .pill { background: var(--text); color: var(--window); font-weight: 600; font-size: 13px; padding: 5px 12px; border-radius: 999px; }
   .grow { flex: 1; }
