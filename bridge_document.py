@@ -17,7 +17,7 @@ import collection_qa
 import documents
 import library
 from app_core import WINDOWS, load_config
-from bridge_library import chat_entries
+from bridge_library import chat_entries, reasoning_feed
 
 VISION_PAGES_ON_OPEN = 20  # acilista gorsel modelle okunacak en fazla taranmis sayfa
 GREETING = ('Bu belgeye soru sorun; cevaplar hangi sayfada geçtiğini gösterir. '
@@ -148,7 +148,8 @@ class DocumentMixin:
         def work():
             turn, error = None, ''
             try:
-                turn = doc.session.ask(text, think=think)
+                turn = doc.session.ask(text, think=think, on_reasoning=reasoning_feed(
+                    lambda: doc.entries, lambda: self._push_doc(doc)))
             except Exception as failure:  # baglanti/model hatasi sohbete yazilir
                 error = str(failure)
             doc.entries = [item for item in doc.entries if item[0] != 'pending']

@@ -15,6 +15,7 @@ import media_server
 import qa
 import speech
 from app_core import GracefulStop, load_config, save_json
+from bridge_library import pending_entry, reasoning_feed
 from media import audio_label, audio_streams, sidecar_subtitles, subtitle_streams
 
 GREETING = ('Merhaba! İzlediğiniz videoyla ilgili sorularınız mı var? '
@@ -112,6 +113,8 @@ class PlayerMixin:
                 turn = value if isinstance(value, dict) else {'parts': value}  # F100 oncesi: yalniz parcalar
                 entries.append({'kind': 'assistant', 'parts': video_parts(turn['parts'], video.path), 'sources': [],
                                 'thinking': str(turn.get('thinking') or ''), 'think': turn.get('think')})
+            elif kind == 'pending':
+                entries.append(pending_entry(value))
             else:
                 entries.append({'kind': kind, 'text': str(value)})
         return {'path': str(video.path), 'name': video.path.name, 'duration': info.get('duration') or 0.0,
@@ -410,7 +413,8 @@ class PlayerMixin:
 
         def work():
             try:
-                turn = video.session.ask(text, think=think)
+                turn = video.session.ask(text, think=think, on_reasoning=reasoning_feed(
+                    lambda: video.entries, lambda: self._push_player(video)))
             except (GracefulStop, RuntimeError, ValueError, OSError) as error:
                 self._log('[Soru] ' + str(error))
                 video.entries = [item for item in video.entries if item[0] != 'pending']

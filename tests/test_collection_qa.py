@@ -62,6 +62,24 @@ class CollectionQATests(unittest.TestCase):
                                           log=QUIET, base=self.work)
         return chat, client
 
+    def test_live_reasoning_streams_final_answer(self):
+        chat, client = self.session('kullanilmaz')
+        seen = []
+
+        def chat_stream(messages, cancelled=None, on_reasoning=None, **_kwargs):
+            client.messages = messages
+            for piece in ('Plan', 'Plan yap'):
+                on_reasoning(piece)
+            client.last_reasoning = 'Plan yap'
+            return 'Budama ezberi önler [V2 0:41].', 'stop'
+
+        client.chat_stream = chat_stream
+        turn = chat.ask('budama ne işe yarar', client, think=True, on_reasoning=seen.append)
+        self.assertEqual(seen, ['Plan', 'Plan yap'])
+        self.assertEqual(turn['thinking'], 'Plan yap')
+        self.assertEqual([cite['label'] for kind, value in turn['parts'] if kind == 'cite' for cite in value],
+                         ['V2 0:41'])
+
     def test_answer_cites_videos_and_drops_invented_ones(self):
         chat, client = self.session('Budama ezberi önler [V2 0:41]. Uydurma [V9 0:30] '
                                     've yanlış zaman [V1 50:00]. Regresyon [V1 0:30-0:45; V2 0:40].')

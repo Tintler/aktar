@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import threading
+import time
 from pathlib import Path
 
 import collection_qa
@@ -108,11 +109,42 @@ def _length_sort(entry, info):
         return None
 
 
+STREAM_INTERVAL = 0.08  # saniye: akis olaylarinin en sik gonderilme araligi
+
+
+def pending_entry(value):
+    """Bekleyen kayit: duz metin ya da canli dusunceli {'text', 'thinking'} (F102)."""
+    if isinstance(value, dict):
+        return {'kind': 'pending', 'text': str(value.get('text') or ''), 'thinking': str(value.get('thinking') or '')}
+    return {'kind': 'pending', 'text': str(value), 'thinking': ''}
+
+
+def reasoning_feed(entries, push):
+    """Uretim sirasindaki dusunceyi bekleyen kayda yazan on_reasoning geri cagrisi (F102).
+
+    entries() guncel kayit listesini verir; push() arayuze olay yayar (STREAM_INTERVAL ile seyreltilir)."""
+    last = [0.0]
+
+    def feed(text):
+        items = entries()
+        for index, (kind, value) in enumerate(items):
+            if kind == 'pending':
+                label = value.get('text', '') if isinstance(value, dict) else value
+                items[index] = ('pending', {'text': label, 'thinking': text})
+        now = time.monotonic()
+        if now - last[0] >= STREAM_INTERVAL:
+            last[0] = now
+            push()
+    return feed
+
+
 def chat_entries(entries):
     """Sohbet kayitlari (tur, deger) -> arayuzun ciz(ebil)ecegi JSON."""
     result = []
     for kind, value in entries:
-        if kind == 'assistant':
+        if kind == 'pending':
+            result.append(pending_entry(value))
+        elif kind == 'assistant':
             parts = []
             for part_kind, part in value.get('parts', []):
                 if part_kind == 'cite':
@@ -889,7 +921,8 @@ class LibraryMixin:
         def work():
             turn, error = None, ''
             try:
-                turn = session.ask(question, think=think)
+                turn = session.ask(question, think=think, on_reasoning=reasoning_feed(
+                    lambda: chat['entries'], lambda: self._emit('chat', {'slug': slug})))
             except Exception as failure:  # baglanti/model hatasi sohbete yazilir
                 error = str(failure)
             chat['entries'] = [item for item in chat['entries'] if item[0] != 'pending']

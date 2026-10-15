@@ -446,5 +446,56 @@ class CoreChangeTests(unittest.TestCase):
         self.assertEqual([item['title'] for item in info['chapters']], ['Introduction', 'Benchmarks'])
 
 
+class StreamClient:
+    """chat_stream sahtesi: dusunceyi parca parca bildirir, (metin, finish_reason) dondurur."""
+
+    def __init__(self, *results):
+        self.results = list(results)
+        self.last_reasoning = ''
+
+    def chat_stream(self, messages, cancelled=None, on_reasoning=None, **_kwargs):
+        result = self.results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        for piece in ('Düşün', 'Düşün biraz'):
+            on_reasoning(piece)
+        self.last_reasoning = 'Düşün biraz'
+        if cancelled and cancelled():
+            return '', 'cancelled'
+        return result
+
+
+class ModelAnswerTests(unittest.TestCase):
+    def test_streams_reasoning_and_returns_text(self):
+        seen = []
+        self.assertEqual(qa.model_answer(StreamClient(('Cevap', 'stop')), [], seen.append), 'Cevap')
+        self.assertEqual(seen, ['Düşün', 'Düşün biraz'])
+
+    def test_without_callback_uses_plain_chat(self):
+        self.assertEqual(qa.model_answer(FakeClient(['Düz']), []), 'Düz')
+
+    def test_errors_match_plain_chat(self):
+        for result, prefix in ((('', 'stop'), 'Boş veya kod bloğu'), (('Yarım', 'length'), 'Yanıt token'),
+                               (('x', 'tool_calls'), 'Yanıt tamamlanmadı')):
+            with self.assertRaises(ValueError) as caught:
+                qa.model_answer(StreamClient(result), [], lambda _text: None)
+            self.assertTrue(str(caught.exception).startswith(prefix))
+            self.assertTrue(app_core.retryable_translation_error(caught.exception))
+
+    def test_cancel_stops_gracefully(self):
+        with self.assertRaises(app_core.GracefulStop):
+            qa.model_answer(StreamClient(('x', 'stop')), [], lambda _text: None, cancelled=lambda: True)
+
+    def test_video_ask_streams_and_retries(self):
+        # bos yanit gecici hata sayilir: ikinci akisli denemede cevap gelir
+        client = StreamClient(('', 'stop'), ('Cevap [0:10].', 'stop'))
+        session = qa.VideoQA.__new__(qa.VideoQA)
+        session.log = lambda _message: None
+        seen = []
+        answer = session._call(client, {'auto_retry_count': 1}, [], qa.strip_thinking, seen.append)
+        self.assertEqual(answer, 'Cevap [0:10].')
+        self.assertEqual(seen.count('Düşün biraz'), 2)
+
+
 if __name__ == '__main__':
     unittest.main()

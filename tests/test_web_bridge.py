@@ -214,6 +214,18 @@ class LibraryBridgeTests(unittest.TestCase):
         self.assertEqual(entries[1]['sources'][0]['count'], 1)
         self.assertEqual(entries[2]['kind'], 'note')
 
+    def test_live_reasoning_fills_pending_entry_and_throttles_events(self):
+        entries = [('user', 'Soru?'), ('pending', 'Dosyalarda aranıyor…')]
+        pushes = []
+        feed = bridge_library.reasoning_feed(lambda: entries, lambda: pushes.append(1))
+        with mock.patch.object(bridge_library.time, 'monotonic', side_effect=[10.0, 10.01, 10.2]):
+            for text in ('Plan', 'Plan yap', 'Plan yap bitti'):
+                feed(text)
+        self.assertEqual(len(pushes), 2)  # ikinci parca araliga takildi
+        self.assertEqual(bridge_library.chat_entries(entries)[1],
+                         {'kind': 'pending', 'text': 'Dosyalarda aranıyor…', 'thinking': 'Plan yap bitti'})
+        self.assertEqual(bridge_library.chat_entries([('pending', 'Bekle')])[0]['thinking'], '')
+
     def test_dropping_a_folder_creates_a_collection_and_scans_it(self):
         folder = self.root / 'Dersler'
         (folder / 'Hafta-1').mkdir(parents=True)

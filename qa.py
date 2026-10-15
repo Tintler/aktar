@@ -408,6 +408,27 @@ def strip_thinking(text):
     return _THINK.sub('', str(text or '')).strip()
 
 
+def model_answer(client, messages, on_reasoning=None, cancelled=None):
+    """Son cevap istegi. on_reasoning verildiyse akisli istenir ve dusunce canli gelir (F102);
+    bos yanit / token siniri / iptal client.chat ile ayni hatalari verir."""
+    if on_reasoning is None:
+        return client.chat(messages)
+    text, finish = client.chat_stream(messages, cancelled=cancelled, on_reasoning=on_reasoning)
+    if finish == 'cancelled':
+        raise GracefulStop('Soru durduruldu.')
+    if not str(text).strip():
+        raise ValueError(
+            'Boş veya kod bloğu içeren yanıt alındı: model metin döndürmedi '
+            f'(finish_reason={finish or "yok"}, düşünce_uzunluğu={len(getattr(client, "last_reasoning", ""))}). '
+            'Model düşünmeye tüm token bütçesini harcamış olabilir: düşünmeyi kapatın '
+            'veya max_tokens değerini artırın.')
+    if finish == 'length':
+        raise ValueError('Yanıt token sınırında kesildi; eksik çeviri kabul edilmedi.')
+    if finish not in (None, 'stop'):
+        raise ValueError('Yanıt tamamlanmadı: ' + str(finish))
+    return text
+
+
 def parse_json_object(text):
     """Model yanitindan tek JSON nesnesini cikarir (kod blogu/onsoz toleransli)."""
     value = strip_thinking(text)
@@ -566,11 +587,11 @@ class VideoQA:
         head = f'{number}. [{format_range(section["start"], section["end"])}]'
         return head + (' ' + label if label else '')
 
-    def _call(self, client, cfg, messages, parse):
+    def _call(self, client, cfg, messages, parse, on_reasoning=None, cancelled=None):
         retries = int(cfg['auto_retry_count'])
         for attempt in range(retries + 1):
             try:
-                return parse(client.chat(messages))
+                return parse(model_answer(client, messages, on_reasoning, cancelled))
             except (ValueError, RuntimeError) as error:
                 if not retryable_translation_error(error) or attempt >= retries:
                     raise
@@ -704,8 +725,10 @@ class VideoQA:
         return text + '\n\n'.join(parts), sorted(chosen)
 
     # soru
-    def ask(self, question, cancelled=None, think=None):
-        """Soruyu cevaplar. Donen: {'question','answer','parts','sections'}."""
+    def ask(self, question, cancelled=None, think=None, on_reasoning=None):
+        """Soruyu cevaplar. Donen: {'question','answer','parts','sections'}.
+
+        on_reasoning(simdiye kadarki dusunce) verildiyse cevap akisli istenir (F102)."""
         question = ' '.join(str(question).split())
         if not question:
             raise ValueError('Soru boş olamaz.')
@@ -728,7 +751,7 @@ class VideoQA:
                 raise ValueError('Yanıt boş döndü.')
             return value
 
-        answer = self._call(client, cfg, messages, parse)
+        answer = self._call(client, cfg, messages, parse, on_reasoning, cancelled)
         turn = {'question': question, 'answer': answer, 'sections': used,
                 'parts': split_citations(answer, self.lines, self.data.get('duration', 0)),
                 'thinking': getattr(client, 'last_reasoning', ''), 'think': think}

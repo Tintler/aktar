@@ -56,7 +56,12 @@
   {:else if entry.kind === 'error'}
     <div class="error selectable">{entry.text}</div>
   {:else if entry.kind === 'pending'}
-    <div class="note pending"><span class="dots"><i></i><i></i><i></i></span>{entry.text}</div>
+    {#if entry.thinking}
+      <!-- F102: uretim sirasinda dusunce kucuk alanda canli akar -->
+      <Thought text={entry.thinking} live />
+    {:else}
+      <div class="note pending"><span class="dots"><i></i><i></i><i></i></span>{entry.text}</div>
+    {/if}
   {:else}
     <div class="note">{entry.text}</div>
   {/if}

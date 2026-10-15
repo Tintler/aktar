@@ -354,8 +354,10 @@ class CollectionQA:
         return (bool(date), date, self._order(video))
 
     # soru
-    def ask(self, question, client=None, think=None):
-        """Soruyu cevaplar. Donen: {'question','answer','parts','sources'}."""
+    def ask(self, question, client=None, think=None, on_reasoning=None, cancelled=None):
+        """Soruyu cevaplar. Donen: {'question','answer','parts','sources'}.
+
+        on_reasoning(simdiye kadarki dusunce) verildiyse cevap akisli istenir (F102)."""
         question = ' '.join(str(question).split())
         if not question:
             raise ValueError('Soru boş olamaz.')
@@ -382,18 +384,18 @@ class CollectionQA:
             messages.append({'role': 'user', 'content': turn['question']})
             messages.append({'role': 'assistant', 'content': turn['answer']})
         messages.append({'role': 'user', 'content': question})
-        answer = self._chat(client, cfg, messages)
+        answer = self._chat(client, cfg, messages, on_reasoning, cancelled)
         parts = self.split_citations(answer, videos)
         turn = {'question': question, 'answer': answer, 'parts': parts,
                 'sources': self._sources(parts), 'thinking': getattr(client, 'last_reasoning', ''), 'think': think}
         self.history.append(turn)
         return turn
 
-    def _chat(self, client, cfg, messages):
+    def _chat(self, client, cfg, messages, on_reasoning=None, cancelled=None):
         retries = int(cfg.get('auto_retry_count', 2))
         for attempt in range(retries + 1):
             try:
-                text = qa.strip_thinking(client.chat(messages))
+                text = qa.strip_thinking(qa.model_answer(client, messages, on_reasoning, cancelled))
                 if not text:
                     raise ValueError('Yanıt boş döndü.')
                 return text

@@ -99,7 +99,28 @@ export function createMock(emit) {
     library_open: async () => library,
     library_state: async () => library,
     library_overview: async () => library.collections.map((c) => ({ ...c, count: c.files, summary: chat.overview.summary, topics: chat.overview.topics })),
-    chat_state: async () => chat,
+    chat_state: async () => ({ ...chat, entries: chat.entries.map((e) => ({ ...e })) }),
+    chat_ask: async (text, _selected, think) => {
+      // F102: dusunme aciksa bekleyen kayitta dusunce canli akar, sonra cevaba donusur.
+      const thought = think ? 'Soru öğrenme oranıyla ilgili. V3 videosunda salınım anlatılıyor, V1 yakınsama hızından bahsediyor. Ders notlarında da tipik değer aralığı var. Önce etkisini, sonra önerilen aralığı yazıp atıfları ekleyeceğim.' : '';
+      const words = thought ? thought.split(' ') : [];
+      const pending = { kind: 'pending', text: 'Dosyalarda aranıyor…', thinking: '' };
+      chat.entries = [...chat.entries, { kind: 'user', text }, pending];
+      Object.assign(chat, { busy: true, enabled: false });
+      let i = 0;
+      const timer = setInterval(() => {
+        i += 1;
+        if (i <= words.length) pending.thinking = words.slice(0, i).join(' ');
+        else {
+          clearInterval(timer);
+          chat.entries = [...chat.entries.filter((e) => e !== pending), { kind: 'assistant', think, thinking: thought,
+            parts: [{ type: 'text', text: 'Sahte arka uçtan örnek cevap ' }, { type: 'cite', items: [{ path: 'x', start: 754, label: 'V3 12:34', title: '03 Gradyan İnişi' }] }], sources: [] }];
+          Object.assign(chat, { busy: false, enabled: true });
+        }
+        emit('chat', { slug: chat.slug });
+      }, 150);
+      return { ...chat, entries: [...chat.entries] };
+    },
     library_search: async (q) => ({ query: q, keys: library.rows.slice(0, 3).map((r) => r.key), files: 2, limited: false, searched: q.length >= 3,
       hits: [{ path: 'x', name: '03 Gradyan İnişi', start: 754, where: '12:34', text: 'öğrenme oranını küçültünce adımlar da küçülüyor' }, { path: 'y', name: 'Ders notları', start: 12, where: 's.12', text: 'Öğrenme oranı (learning rate) seçimi' }] }),
     prepare_plan: async () => { setTimeout(() => emit('prepare', { counts: { ready: 4, summary: 1, index: 0, document: 0, subtitle: 1, vision: 1, whisper: 1 }, whisper_seconds: '22:10', vision_pages: 12, failed: [] }), 700); return { files: 7, model: settings.model, whisper: true, whisper_model: 'large-v3-turbo', whisper_device: 'auto', vision_model: settings.model, ocr_engine: 'tesseract', warnings: [] }; },

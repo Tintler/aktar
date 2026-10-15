@@ -14,9 +14,8 @@ from pathlib import Path
 import assistant
 import backlog
 import library
-from bridge_library import KIND_LABELS, chat_entries
+from bridge_library import KIND_LABELS, STREAM_INTERVAL, chat_entries
 
-STREAM_INTERVAL = 0.08  # saniye: akis olaylarinin en sik gonderilme araligi
 
 
 class AssistantMixin:
