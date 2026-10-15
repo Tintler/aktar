@@ -8,7 +8,7 @@ Is mantigi app_core / library / qa modullerinde kalir; burada yalnizca arayuz ak
 Bolumler: bu dosyada genel (ayarlar, tema, pencere), bridge_translate.py'de Altyazi Cevir,
 bridge_library.py'de Kutuphane (bridge_mail.py'de e-postadan iceri aktarma), bridge_player.py'de oynatici ve videoya soru sor,
 bridge_document.py'de belge goruntuleyici, bridge_assistant.py'de genel sohbet ve tekil dosyalar,
-bridge_subscriptions.py'de abonelik takibi.
+bridge_subscriptions.py'de abonelik takibi, bridge_voice.py'de sesle soru sorma.
 """
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ from bridge_mail import MailMixin
 from bridge_player import PlayerMixin
 from bridge_subscriptions import SubscriptionsMixin
 from bridge_translate import TranslateMixin
+from bridge_voice import VoiceMixin
 
 UI_FILE = 'ui.json'
 WHISPER_MODELS = ('large-v3-turbo', 'large-v3', 'medium', 'small', 'base')
@@ -49,7 +50,7 @@ def _error(error):
 
 
 class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin, AssistantMixin, FilesMixin,
-             SubscriptionsMixin):
+             SubscriptionsMixin, VoiceMixin):
     def __init__(self, emit=None, dialogs=None):
         self._emit = emit or (lambda _event, _data: None)
         self._dialogs = dialogs          # desktop.Dialogs: open_file(), open_folder() ...

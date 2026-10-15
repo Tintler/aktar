@@ -14,6 +14,7 @@ from pathlib import Path
 import webview
 from webview.dom import DOMEventHandler
 
+import mic_permission
 import themes
 from app_core import ROOT
 from bridge import Bridge
@@ -122,6 +123,8 @@ def main():
     def on_loaded():
         # Pencereye birakilan dosya/klasorler: arayuz acik sayfaya gore yonlendirir.
         window.dom.document.events.drop += DOMEventHandler(on_drop, prevent_default=True)
+        # F112: sohbetlerdeki mikrofon dugmesi icin yerel sayfaya mikrofon izni.
+        mic_permission.allow_microphone(window, log=bridge._log)
 
     window.events.loaded += on_loaded
     # Dosya yoneticisinden "Birlikte ac" ile gelen video Altyazi Cevir'de acilir.

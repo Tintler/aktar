@@ -3,6 +3,7 @@
   import Icon from '../lib/Icon.svelte';
   import Logo from '../components/Logo.svelte';
   import ThinkToggle from '../components/ThinkToggle.svelte';
+  import MicButton from '../components/MicButton.svelte';
   import TemplatePicker from '../components/TemplatePicker.svelte';
   import { templateFor } from '../lib/templates.svelte.js';
   import Thought from '../components/Thought.svelte';
@@ -169,6 +170,7 @@
       <ThinkToggle label />
       <TemplatePicker kind="assistant" label />
       <span class="grow"></span>
+      <MicButton bind:value={text} disabled={!chat || chat.locked} ontext={() => queueMicrotask(() => { grow(); input?.focus(); })} />
       {#if chat?.busy}
         <button class="send stop" type="button" title="Durdur" onclick={() => act('assistant_stop')}><Icon name="stop" size={14} /></button>
       {:else}

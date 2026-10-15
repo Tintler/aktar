@@ -33,6 +33,8 @@ DEVICES = ('auto', 'cuda', 'cpu')
 CUE_CHARS = 84       # bir altyazi cue'sunda en fazla karakter (2 x 42)
 CUE_SECONDS = 6.0    # bir cue'nun en uzun suresi
 LINE_CHARS = 42      # gosterimde satir genisligi
+CLIP_RATE = 16000        # sesle soru kaydi (F112): arayuz 16 kHz mono WAV gonderir
+CLIP_MAX_SECONDS = 120
 HELPER_NAME = 'aktar-whisper'
 BUILD_WHISPER_SCRIPT = 'DERLE_WHISPER.cmd' if WINDOWS else 'derle_whisper.sh'
 INSTALL_HINT = ('Konuşmadan metin için faster-whisper kurulu değil. Kurmak için uygulama '
@@ -304,6 +306,45 @@ def transcribe(video, model_name=DEFAULT_MODEL, device='auto', language='', base
     log(f'Konuşmadan metin hazır: {len(result["segments"])} satır, dil: '
         f'{language_label(result["language"])}, cihaz: {result["device"]}.')
     return result
+
+
+def check_clip(path, max_seconds=CLIP_MAX_SECONDS):
+    """Sesle soru kaydi (F112) 16 kHz mono 16 bit PCM WAV mi? Suresini (saniye) dondurur."""
+    import wave
+    try:
+        with wave.open(str(path), 'rb') as stream:
+            shape = (stream.getnchannels(), stream.getsampwidth(), stream.getframerate())
+            frames = stream.getnframes()
+    except (wave.Error, EOFError) as error:
+        raise ValueError(f'Ses kaydı okunamadı: {error}') from None
+    if shape != (1, 2, CLIP_RATE):
+        raise ValueError('Ses kaydı 16 kHz mono 16 bit WAV olmalı.')
+    seconds = frames / CLIP_RATE
+    if seconds < 0.3:
+        raise ValueError('Ses kaydı çok kısa.')
+    if seconds > max_seconds + 5:
+        raise ValueError(f'Ses kaydı en fazla {max_seconds} saniye olabilir.')
+    return seconds
+
+
+def transcribe_clip(audio, model_name=DEFAULT_MODEL, device='auto', language='', log=print, cuda_dir=''):
+    """Sesle soru (F112): kisa mikrofon kaydini metne cevirir; ag kullanilmaz, onbellek yok.
+
+    Video transkriptiyle ayni yol (uygulama ici faster-whisper ya da aktar-whisper paketi).
+    Donen: {'text', 'language', 'device'}. Konusma yoksa ValueError.
+    """
+    mode = backend()
+    if mode is None:
+        raise RuntimeError(available()[1])
+    check_clip(audio)
+    runner = run_whisper if mode == 'inprocess' else _run_helper
+    result = runner(audio, model_name, device, language, log=log, download_root=str(model_dir()),
+                    cuda_dir=cuda_dir)
+    text = ' '.join(' '.join(str(item.get('text', '')).split()) for item in result.get('segments') or [])
+    text = text.strip()
+    if not text:
+        raise ValueError('Kayıtta konuşma algılanmadı.')
+    return {'text': text, 'language': result.get('language', ''), 'device': result.get('device', '')}
 
 
 def _local_model(model_name, download_root):

@@ -347,6 +347,11 @@ Yenileme tarihi geçmişte kaldıysa bir sonraki ödeme tarihi dönem eklenerek 
 
 Her kayda bir **logo** eklenebilir: düzenleme penceresinde logo kutusuna ya da **Logo seç**'e tıklayıp görsel seçin (PNG, JPG, WebP, GIF, BMP, ICO), panodaki görseli **Ctrl+V** ile yapıştırın (tarayıcıda logoya sağ tık → *Resmi kopyala*) ya da görsel dosyasını pencereye sürükleyip bırakın. Görselin çevresindeki saydam boşluk kırpılır, en fazla 128 piksele küçültülüp `subscriptions.logos` klasörüne PNG olarak kaydedilir. **Kaldır** logoyu siler; logosu olmayan kayıtta adın baş harfi görünür.
 
+### 3.12 Sesle soru sorma
+Sohbet, Koleksiyona sor, Bu videoya sor ve Bu belgeye sor kutularındaki **mikrofon** düğmesine tıklayıp konuşun; düğme kırmızıya döner ve süreyi gösterir. Tekrar tıklayınca kayıt biter, konuşma bilgisayarınızda Whisper ile metne çevrilir ve kutudaki metnin sonuna eklenir. Metni düzeltip kendiniz gönderirsiniz. **Esc** kaydı vazgeçerek kapatır; kayıt en fazla 2 dakika sürer. Konuşmanın dili kendiliğinden algılanır; model ve cihaz Ayarlar'daki Whisper ayarlarından gelir.
+
+Ses hiçbir yere gönderilmez: kayıt `work_files\qa` altına geçici bir WAV olarak yazılır, metne çevrilir ve hemen silinir. Mikrofon izni yalnızca uygulamanın kendi sayfasına verilir. Whisper kurulu değilse (bkz. 1.5) düğme soluk görünür ve üzerine gelince nedenini söyler. Linux'ta mikrofon WebKitGTK'nin GStreamer eklentileriyle alınır; mikrofon bulunamıyorsa `gstreamer1.0-pulseaudio` (PipeWire'da `gstreamer1.0-pipewire`) paketini kurun.
+
 ---
 
 ## 4. Terim sözlüğü (glossary)

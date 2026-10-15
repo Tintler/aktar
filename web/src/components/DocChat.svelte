@@ -3,6 +3,7 @@
   import Icon from '../lib/Icon.svelte';
   import ChatMessages from './ChatMessages.svelte';
   import ThinkToggle from './ThinkToggle.svelte';
+  import MicButton from './MicButton.svelte';
   import TemplatePicker from './TemplatePicker.svelte';
   import { templateFor } from '../lib/templates.svelte.js';
   import { app, act } from '../lib/state.svelte.js';
@@ -47,6 +48,7 @@
     {#if chat.note}<div class="note">{#if !chat.ready && !chat.note.startsWith('Bu belge')}<Icon name="loader" size={13} spin />{/if}{chat.note}</div>{/if}
     <form class="ask" onsubmit={(e) => { e.preventDefault(); ask(); }}>
       <input bind:value={question} disabled={!chat.enabled} placeholder="Belgeye sor…" />
+      <MicButton bind:value={question} disabled={!chat.enabled} />
       <TemplatePicker kind="doc" />
       <ThinkToggle />
       <button class="send" type="submit" title="Gönder" disabled={!chat.enabled || !question.trim()}><Icon name="send" size={16} /></button>

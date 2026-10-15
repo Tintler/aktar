@@ -10,9 +10,11 @@
 #   ./kur.sh --kisayol    + uygulama menusune "Aktar" kisayolu (KDE/GNOME)
 # Secenekler birlikte verilebilir. Sistem paketleri (Debian/Ubuntu):
 #   sudo apt install python3-venv python3-gi gir1.2-webkit2-4.1 nodejs npm ffmpeg fontconfig \
-#                    gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
+#                    gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav \
+#                    gstreamer1.0-pulseaudio
 # Pencere WebKitGTK ile acilir (python3-gi sistemden gelir; sanal ortam sistem paketlerini gorur).
-# Videolar GStreamer ile oynatilir: H.264/AAC icin gstreamer1.0-libav gerekir.
+# Videolar GStreamer ile oynatilir: H.264/AAC icin gstreamer1.0-libav gerekir; sesle soru
+# (mikrofon) icin gstreamer1.0-pulseaudio (PipeWire'da pipewire-pulse ile de calisir).
 set -e
 cd "$(dirname "$0")"
 
