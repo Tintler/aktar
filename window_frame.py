@@ -37,12 +37,55 @@ def frameless():
     return SUPPORTED
 
 
+def fit_geometry(saved, screens, default, minimum):
+    """Window size and place to open with (F92), in logical pixels: the saved one if it still fits a
+    screen, otherwise the default size, centred by the system.
+
+    saved: {'x', 'y', 'width', 'height', 'maximized'} or None; screens: [(x, y, width, height)].
+    Returns {'width', 'height', 'x', 'y', 'maximized', 'bounds'} (x and y None: let the system place it;
+    bounds: the saved physical rectangle to put back exactly, only when nothing had to be moved)."""
+    result = {'width': default[0], 'height': default[1], 'x': None, 'y': None, 'maximized': False,
+              'bounds': None}
+    if not isinstance(saved, dict):
+        return result
+    try:
+        width, height = int(saved['width']), int(saved['height'])
+        x, y = (int(saved['x']), int(saved['y'])) if saved.get('x') is not None else (None, None)
+    except (KeyError, TypeError, ValueError):
+        return result
+    result['maximized'] = bool(saved.get('maximized'))
+    result['width'], result['height'] = max(width, minimum[0]), max(height, minimum[1])
+    if x is None or not screens:
+        return result
+    # The title strip must land on a connected screen (a monitor may have been unplugged since).
+    for left, top, screen_width, screen_height in screens:
+        if left <= x + 100 <= left + screen_width and top <= y + 10 <= top + screen_height:
+            result['width'] = min(result['width'], screen_width)
+            result['height'] = min(result['height'], screen_height)
+            result['x'] = min(max(x, left), left + screen_width - result['width'])
+            result['y'] = min(max(y, top), top + screen_height - result['height'])
+            bounds = saved.get('bounds')
+            if ((result['x'], result['y'], result['width'], result['height']) == (x, y, width, height)
+                    and isinstance(bounds, list) and len(bounds) == 4
+                    and all(isinstance(item, int) for item in bounds)):
+                result['bounds'] = bounds
+            return result
+    return result
+
+
 class WindowFrame:
-    def __init__(self, window, emit):
+    def __init__(self, window, emit, maximized=False, bounds=None):
         self.window = window
         self._emit = emit
         self._hwnd = None
         self._maximized = None
+        self._start_maximized = maximized  # last session ended maximised (F92)
+        # The window opens a few pixels off the size asked for (pywebview takes off frame margins);
+        # the saved physical rectangle is put back exactly once it is shown.
+        self._start_bounds = bounds
+        # Last normal (not maximised/minimised) rectangle in physical pixels. WinForms' RestoreBounds
+        # comes back scaled wrongly on some DPI setups, so the frame keeps track itself.
+        self._normal_rect = None
         if SUPPORTED:
             self._user32 = ctypes.WinDLL('user32', use_last_error=True)
             self._user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
@@ -51,6 +94,7 @@ class WindowFrame:
             self._user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
             self._user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND] + [ctypes.c_int] * 4 + [wintypes.UINT]
             self._user32.IsZoomed.argtypes = [wintypes.HWND]
+            self._user32.IsIconic.argtypes = [wintypes.HWND]
             self._user32.IsWindowVisible.argtypes = [wintypes.HWND]
             self._user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
             self._user32.GetAsyncKeyState.restype = ctypes.c_short
@@ -83,7 +127,14 @@ class WindowFrame:
                                                        ctypes.byref(corner), ctypes.sizeof(corner))
         except (AttributeError, OSError):
             pass
+        if self._start_bounds:
+            self._user32.SetWindowPos(hwnd, None, *self._start_bounds, SWP_NOZORDER | SWP_NOACTIVATE)
+            self._start_bounds = None
         self._sync()
+        if self._start_maximized:
+            self._start_maximized = False
+            self._fit_maximized()
+            self._command(SC_MAXIMIZE)
 
     def _fit_maximized(self):
         """A frameless window would maximise over the taskbar; keep it to the screen's working area."""
@@ -106,9 +157,29 @@ class WindowFrame:
         except Exception:
             pass
         maximized = bool(self._user32.IsZoomed(self._hwnd))
+        if not maximized and not self._user32.IsIconic(self._hwnd):
+            rect = wintypes.RECT()
+            self._user32.GetWindowRect(self._hwnd, ctypes.byref(rect))
+            self._normal_rect = [rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top]
         if maximized != self._maximized:
             self._maximized = maximized
             self._emit('window', self.state())
+
+    def geometry(self):
+        """Size and place to remember (logical pixels); the restored size even when maximised."""
+        def read():
+            from System.Windows.Forms import FormWindowState
+            form = self.window.native
+            scale = float(getattr(form, '_scale', 1.0) or 1.0)
+            if form.WindowState == FormWindowState.Normal or not self._normal_rect:
+                bounds = form.Bounds
+                rect = [bounds.X, bounds.Y, bounds.Width, bounds.Height]
+            else:
+                rect = list(self._normal_rect)
+            return {'x': round(rect[0] / scale), 'y': round(rect[1] / scale),
+                    'width': round(rect[2] / scale), 'height': round(rect[3] / scale),
+                    'maximized': form.WindowState == FormWindowState.Maximized, 'bounds': rect}
+        return self._ui(read)
 
     # ------------------------------------------------------------------ commands from the interface
     def state(self):

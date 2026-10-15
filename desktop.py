@@ -17,9 +17,10 @@ from webview.dom import DOMEventHandler
 import themes
 from app_core import ROOT
 from bridge import Bridge
-from window_frame import WindowFrame, frameless
+from window_frame import WindowFrame, fit_geometry, frameless
 
 DEV_URL = 'http://localhost:5173'
+MIN_SIZE = (1000, 640)
 
 
 class Dialogs:
@@ -71,23 +72,40 @@ def main():
     themes.install_presets()
     _base, palette = themes.resolve(bridge.ui_prefs().get('theme'))
     width, height = 1360, 860
-    if webview.screens:
+    screens = [(screen.x, screen.y, screen.width, screen.height) for screen in webview.screens or []]
+    if screens:
         # Kucuk ya da yuksek olcekli ekranlarda gorev cubuguna yer kalsin.
-        screen = webview.screens[0]
-        width, height = min(width, int(screen.width * 0.92)), min(height, int(screen.height * 0.88))
+        width, height = min(width, int(screens[0][2] * 0.92)), min(height, int(screens[0][3] * 0.88))
+    # F92: son kapanistaki boyut ve konum (ekran hala bagliysa)
+    geometry = fit_geometry(bridge.ui_prefs().get('window'), screens, (width, height), MIN_SIZE)
     window = webview.create_window('Aktar', DEV_URL if dev else str(index), js_api=bridge,
-                                   width=width, height=height, min_size=(1000, 640),
+                                   width=geometry['width'], height=geometry['height'],
+                                   x=geometry['x'], y=geometry['y'], min_size=MIN_SIZE,
+                                   maximized=geometry['maximized'] and not frameless(),
                                    background_color=palette['window'][:7],
                                    frameless=frameless(), easy_drag=False)
     state['window'] = dialogs.window = window
     if frameless():
-        bridge._frame = WindowFrame(window, emit)
+        bridge._frame = WindowFrame(window, emit, maximized=geometry['maximized'], bounds=geometry['bounds'])
+
+    def remember_geometry():
+        try:
+            if bridge._frame is not None:
+                value = bridge._frame.geometry()
+            else:
+                value = {'x': window.x, 'y': window.y, 'width': window.width, 'height': window.height,
+                         'maximized': False}
+            if value and value['width'] > 0 and value['height'] > 0:
+                bridge.save_ui_prefs({'window': value})
+        except Exception:
+            pass  # boyut kaydedilemezse bir dahaki acilis varsayilanla olur
 
     def close_later():
         state['closing_ok'] = True
         window.destroy()
 
     def on_closing():
+        remember_geometry()
         if state['closing_ok']:
             return True
         return bridge.request_close(close_later)
