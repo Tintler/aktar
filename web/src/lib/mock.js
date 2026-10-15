@@ -23,7 +23,7 @@ export function createMock(emit) {
     temperature: 0.2, timeout_seconds: 1800, auto_retry_count: 2, glossary_strict: false, analysis_chunk_chars: 12000,
     qa_context_chars: 24000, whisper_model: 'large-v3-turbo', whisper_device: 'auto', whisper_language: '', whisper_cuda_dir: '',
     embedding_model: 'text-embedding-embeddinggemma-2', vision_model: '', qa_model: '', ocr_engine: 'auto', ocr_model: '',
-    tesseract_path: '', tesseract_lang: 'tur+eng', disable_thinking: true,
+    tesseract_path: '', tesseract_lang: 'tur+eng', disable_thinking: true, mail_address: 'ornek@gmail.com',
   };
   let prefs = { theme: 'system' };
   let conversation = { id: 'c1', title: '', entries: [], busy: false, stream: null, locked: false, saved: false };
@@ -78,6 +78,9 @@ export function createMock(emit) {
     for (const line of ['Video açıldı: D:\Diziler\One Step Beyond - S00E01 - Extended Pilot.mkv', 'Çeviri partisi 6/38 (10 çeviri birimi)', 'BİLGİ: model satır sayısını değiştirdi (beklenen 2, bulunan 1).', 'Çeviri partisi 7/38 (10 çeviri birimi)'])
       emit('log', { line: '[10:42:0' + Math.floor(Math.random() * 9) + '] ' + line });
   }, 300);
+  let mailRules = [{ id: 'r1', title: 'World Gold ekstreleri', sender: '@worldcard.com.tr', subject: 'Hesap Özeti', what: 'pdf', since: '2025-01-01', folder: 'D:\Finans\Ekstreler', enabled: true, has_password: false, fetched: 9 }];
+  const mailState = () => ({ rules: mailRules, account: true, address: settings.mail_address, checked: '2026-10-15T09:12:00', busy: false,
+    what: [{ id: 'pdf', label: 'PDF ekleri' }, { id: 'html', label: 'E-posta gövdesi' }, { id: 'both', label: 'PDF ekleri ve gövde' }] });
   const api = {
     library_open: async () => library,
     library_state: async () => library,
@@ -90,6 +93,23 @@ export function createMock(emit) {
       for (const r of library.rows) if (paths.includes(r.path)) Object.assign(r, { status: 'pending', status_text: 'Bekliyor', source: '' });
       return { ...library };
     },
+    // F89: e-postadan al
+    mail_account: async () => ({ address: settings.mail_address, has_password: true }),
+    mail_set_password: async () => ({ address: settings.mail_address, has_password: true }),
+    mail_test: async () => ({ ok: true, message: 'Bağlandı · postalar "[Gmail]/Tüm Postalar" kutusunda aranacak' }),
+    mail_rules: async () => mailState(),
+    mail_save_rule: async (rule) => {
+      const clean = { ...rule, id: rule.id || 'r' + (mailRules.length + 1), title: rule.title || rule.subject || rule.sender };
+      const i = mailRules.findIndex((r) => r.id === clean.id);
+      if (i < 0) mailRules.push(clean); else mailRules[i] = clean;
+      return mailState();
+    },
+    mail_delete_rule: async (id) => { mailRules = mailRules.filter((r) => r.id !== id); return mailState(); },
+    mail_preview: async () => new Promise((resolve) => setTimeout(() => resolve({ items: [
+      { date: '2026-10-03', subject: 'Hesap Özetiniz', sender: 'World <ekstre@worldcard.com.tr>', done: false },
+      { date: '2026-09-04', subject: 'Hesap Özetiniz', sender: 'World <ekstre@worldcard.com.tr>', done: true },
+      { date: '2026-08-05', subject: 'Hesap Özetiniz', sender: 'World <ekstre@worldcard.com.tr>', done: true }] }), 600)),
+    mail_fetch: async () => new Promise((resolve) => setTimeout(() => resolve({ ...mailState(), message: "E-postadan 1 yeni dosya indirildi." }), 800)),
     library_set_date: async (paths, value) => {
       for (const r of library.rows) if (paths.includes(r.path)) Object.assign(r, { date: value, date_text: value, date_manual: !!value });
       return { ...library };

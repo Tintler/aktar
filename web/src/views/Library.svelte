@@ -1,6 +1,7 @@
 <script>
   import Icon from '../lib/Icon.svelte';
   import PrepareModal from '../components/PrepareModal.svelte';
+  import MailModal from '../components/MailModal.svelte';
   import { app, act, setLibrary, onDrop, toast, runSearch, refreshChat, openInTranslate, openFile } from '../lib/state.svelte.js';
   import { choose, prompt, confirm } from '../lib/confirm.svelte.js';
   import { openMenu } from '../lib/menu.svelte.js';
@@ -186,6 +187,7 @@
     if (row.busy_text) return 'badge ' + (row.busy_tone === 'danger' ? 'danger' : row.busy_tone === 'dim' ? '' : 'accent');
     return { ready: 'badge ok', transcript: 'badge', no_subtitle: 'badge warning', no_text: 'badge warning', missing: 'badge danger' }[row.status] ?? 'plain';
   }
+  let mailOpen = $state(false);
   const queue = $derived(lib.queue);
   const queuePercent = $derived(queue ? Math.round(((queue.done + (queue.percent ?? 0) / 100) * 100) / Math.max(1, queue.total)) : 0);
 </script>
@@ -251,6 +253,7 @@
       <div class="actions">
           <button class="btn" onclick={() => add('library_choose_folder')}><Icon name="folderPlus" size={16} />Klasör ekle</button>
           <button class="btn" onclick={() => add('library_choose_files')}><Icon name="filePlus" size={16} />Dosya ekle</button>
+          <button class="btn" onclick={() => (mailOpen = true)} title="Gmail'deki ekstre ve raporları kurallara göre bu koleksiyona indirir"><Icon name="mail" size={16} />E-postadan al</button>
           <button class="btn primary lg" disabled={!!queue || !lib.rows.some((r) => !r.missing)} onclick={() => (view.preparing = true)}
             title="Transkriptleri çıkarır, indeksler ve özetler"><Icon name="sparkles" size={16} />Hepsini hazırla</button>
           <button class="btn" disabled={!!queue || !lib.rows.length} onclick={resetCollection}
@@ -316,7 +319,7 @@
               <td class="ic"><span class="kind"><Icon name={KIND_ICON[row.kind] ?? 'file'} size={16} /></span></td>
               <td class="name"><span class="ellipsis" title={row.path}>{row.name}</span>{#if row.new}<span class="badge accent">yeni</span>{/if}</td>
               <td class="dim ellipsis where" title={row.folder}>{row.where}</td>
-              <td class="secondary nowrap date" title={row.date ? (row.date_manual ? 'Elle girildi' : 'İçerikten çıkarıldı') + ' · sağ tık: Tarihi düzenle' : 'Tarih yok · sağ tık: Tarihi düzenle'}>
+              <td class="secondary nowrap date" class:dim={row.date_mail} title={row.date ? (row.date_manual ? 'Elle girildi' : row.date_mail ? 'E-postanın geliş tarihi (içerikten tarih henüz çıkarılmadı)' : 'İçerikten çıkarıldı') + ' · sağ tık: Tarihi düzenle' : 'Tarih yok · sağ tık: Tarihi düzenle'}>
                 {#if row.date}{row.date_text}{#if row.date_manual}<Icon name="pencil" size={11} />{/if}{:else}<span class="dim">—</span>{/if}</td>
               <td class:dim={!row.measured} class="secondary nowrap">{row.length}</td>
               <td class:dim={!row.source} class="secondary ellipsis src">{row.source || '—'}</td>
@@ -332,6 +335,7 @@
 </section>
 
 {#if view.preparing}<PrepareModal onclose={() => (view.preparing = false)} />{/if}
+{#if mailOpen}<MailModal onclose={() => (mailOpen = false)} />{/if}
 
 <style>
   .center { display: grid; place-items: center; }

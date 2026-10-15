@@ -110,10 +110,13 @@ class CollectionQA:
     """Bir koleksiyonun indeksli videolari uzerinde cok turlu soru-cevap."""
 
     def __init__(self, videos, title='', config_provider=load_config, log=print, base=None,
-                 overview=None, dates=None):
+                 overview=None, dates=None, fallback_dates=None):
         self.videos = [Path(path) for path in videos]
         # F88: elle girilen belge tarihleri {yol: '2026-09'}; yoksa ozetten cikarilan kullanilir
         self.dates = {_key(path): normalize_date(value) for path, value in (dates or {}).items()}
+        # F89: e-postadan gelen dosyada icerikte tarih yoksa postanin gelis tarihi
+        self.fallback_dates = {_key(path): normalize_date(value)
+                               for path, value in (fallback_dates or {}).items()}
         self.title = title
         self.overview = overview or {}  # F61: koleksiyon ozeti (library.load_overview)
         self._summaries = None
@@ -144,7 +147,8 @@ class CollectionQA:
         manual = self.dates.get(_key(video))
         if manual:
             return manual
-        return session_date(search_index.primary_session(video, self.base))
+        return (session_date(search_index.primary_session(video, self.base))
+                or self.fallback_dates.get(_key(video), ''))
 
     def _query(self, question):
         """Devam sorularinda ("peki neden?") onceki soru da aranir."""

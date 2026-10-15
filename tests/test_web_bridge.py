@@ -251,6 +251,30 @@ class LibraryBridgeTests(unittest.TestCase):
         self.wait_scan()
         self.assertEqual(self.bridge.library_state()['rows'][0]['date'], '')
 
+    def test_mail_rule_adds_its_folder_and_keeps_password_out_of_collection(self):
+        """F89: kural kaydedilince klasoru koleksiyona eklenir; PDF sifresi kayda yazilmaz."""
+        import bridge_mail
+        secrets = {}
+        folder = self.root / 'Finans'
+        folder.mkdir()
+        target = self.root / 'Ekstreler'
+        with mock.patch.object(bridge_mail.secret_store, 'set_secret', lambda key, value: secrets.__setitem__(key, value)), \
+                mock.patch.object(bridge_mail.secret_store, 'get_secret', lambda key: secrets.get(key, '')):
+            state = self.bridge.library_add_paths([str(folder)])
+            self.wait_scan()
+            self.assertIn('error', self.bridge.mail_save_rule({'sender': 'x@banka.test'}))
+            result = self.bridge.mail_save_rule({'sender': 'x@banka.test', 'subject': 'Hesap Özeti',
+                                                 'folder': str(target)}, '123456')
+            self.wait_scan()
+            rule = result['rules'][0]
+            self.assertEqual((rule['title'], rule['has_password'], result['account']),
+                             ('Hesap Özeti', True, False))
+            saved = library.load_collection(state['slug'])
+            self.assertIn(str(target), saved['folders'])
+            self.assertNotIn('123456', json.dumps(saved))
+            self.assertIn('error', self.bridge.mail_fetch())  # hesap yok: Turkce hata
+            self.assertEqual(self.bridge.mail_delete_rule(rule['id'])['rules'], [])
+
     def test_exclude_and_delete_keep_files_on_disk(self):
         folder = self.root / 'Seri'
         folder.mkdir()

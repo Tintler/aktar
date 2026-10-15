@@ -167,7 +167,7 @@ def rename_collection(slug, title):
 def delete_collection(slug):
     """Koleksiyon kaydini (ve sohbet/ozet kayitlarini) siler; kaynak dosyalara dokunulmaz."""
     for path in (_path(slug), library_dir() / (slug + '.lock'), chat_path(slug),
-                 overview_path(slug)):
+                 overview_path(slug), library_dir() / (slug + '.mail.json')):
         try:
             path.unlink()
         except FileNotFoundError:

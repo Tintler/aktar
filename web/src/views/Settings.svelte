@@ -41,6 +41,20 @@
     call('check_cuda_dir', path).then((r) => (cuda = r ?? { message: '' }));
   });
 
+  // F89: Gmail uygulama sifresi config.json'a degil isletim sistemi deposuna yazilir.
+  let mail = $state({ address: '', has_password: false });
+  let mailPassword = $state('');
+  let mailStatus = $state(null);
+  call('mail_account').then((r) => r && (mail = r));
+  async function saveMailPassword(value) {
+    const r = await act('mail_set_password', value);
+    if (r) { mail = r; mailPassword = ''; mailStatus = null; toast(value ? 'Uygulama şifresi kaydedildi.' : 'Uygulama şifresi silindi.', 'ok'); }
+  }
+  async function testMail() {
+    mailStatus = { busy: true, message: 'Bağlanıyor…' };
+    mailStatus = (await call('mail_test')) ?? null;
+  }
+
   async function save() {
     saving = true;
     const result = await act('save_settings', $state.snapshot(cfg));
@@ -49,6 +63,7 @@
       cfg = result.config;
       saved = JSON.stringify(cfg);
       toast('Ayarlar kaydedildi.', 'ok');
+      call('mail_account').then((r) => r && (mail = r));
     }
   }
 
@@ -198,6 +213,29 @@
               <input class="field w2" bind:value={cfg.whisper_cuda_dir} placeholder="Boş: otomatik" />
               <button class="btn sm" onclick={() => browse('whisper_cuda_dir', true)}>Gözat…</button>
             </div>
+          </div>
+        </section>
+
+        <section>
+          <h2>E-posta (Gmail)</h2>
+          <div class="fr">
+            <div class="l">Gmail adresi<small>Koleksiyonlardaki "E-postadan al" kuralları bu hesaptaki postalara bakar. Değiştirdikten sonra Kaydet'e basın.</small></div>
+            <input class="field w" type="email" bind:value={cfg.mail_address} placeholder="ad@gmail.com" />
+          </div>
+          <div class="fr">
+            <div class="l">Uygulama şifresi
+              <small>Normal Google şifreniz değil: Google hesabı → Güvenlik → 2 adımlı doğrulama → Uygulama şifreleri'nden alınan 16 harflik şifre. Windows Kimlik Bilgileri'nde saklanır, config.json'a yazılmaz.</small>
+              {#if mail.has_password}<small class="okc">Kayıtlı ({mail.address})</small>{/if}</div>
+            <div class="pick">
+              <input class="field w2" type="password" bind:value={mailPassword} placeholder={mail.has_password ? '•••• •••• •••• ••••' : 'abcd efgh ijkl mnop'} autocomplete="off"
+                disabled={!mail.address || dirty} />
+              <button class="btn sm" disabled={!mailPassword.trim()} onclick={() => saveMailPassword(mailPassword.trim())}>Kaydet</button>
+              {#if mail.has_password}<button class="btn sm ghost" onclick={() => saveMailPassword('')} title="Şifreyi sil">Sil</button>{/if}
+            </div>
+          </div>
+          <div class="fr">
+            <div class="l">Bağlantı<small class:okc={mailStatus?.ok} class:errc={mailStatus?.ok === false}>{mailStatus?.message ?? (mail.address && !mail.has_password ? 'Uygulama şifresini kaydedin.' : "Gmail'e giriş yapıp tüm postalar kutusunu bulur.")}</small></div>
+            <button class="btn sm" disabled={!mail.has_password || mailStatus?.busy || dirty} onclick={testMail}><Icon name="mail" size={14} />Bağlantıyı dene</button>
           </div>
         </section>
 

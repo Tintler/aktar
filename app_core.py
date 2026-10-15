@@ -73,6 +73,8 @@ DEFAULT_CONFIG = {
     'ocr_engine': 'auto',     # auto: Tesseract > OCR modeli > gorsel model (F77)
     'ocr_model': '',          # taranmis sayfalar icin OCR'a ozel LM Studio modeli (orn. glm-ocr)
     'ocr_model_prompt': 'Text Recognition:',  # OCR modelleri kisa, kendi komutlarini bekler
+    # E-postadan iceri aktarma (F89): Gmail adresi; uygulama sifresi secret_store'da durur.
+    'mail_address': '',
     'tesseract_path': '',     # bos: PATH / Program Files / bin/tesseract icinde aranir
     'tesseract_lang': 'tur+eng',
     # Reasoning/thinking ureten modellerde dusunmeyi kapatma denemesi
@@ -229,6 +231,10 @@ def validate_config(cfg):
         raise ValueError('tesseract_lang dil kodları olmalı (örn. tur+eng).')
     if not isinstance(cfg.get('qa_model', ''), str):
         raise ValueError('qa_model model adı (metin) olmalı.')
+    address = cfg.get('mail_address', '')
+    if not isinstance(address, str) or (address.strip() and not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+',
+                                                                              address.strip())):
+        raise ValueError('E-posta adresi geçersiz (örn. ad@gmail.com).')
     if not isinstance(cfg.get('vision_model', ''), str):
         raise ValueError('vision_model model adı (metin) olmalı.')
     if not isinstance(cfg.get('embedding_model', ''), str):

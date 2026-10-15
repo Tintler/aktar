@@ -210,9 +210,23 @@ Videolarınızı ve belgelerinizi **koleksiyonlarda** toplar (ör. "Makine Öğr
   - Atfa tıklayınca o video oynatıcıda açılır ve o ana gider; **‹** düğmesiyle sohbete dönersiniz, sohbet kaybolmaz.
   - **Kapsam:** **Tüm koleksiyon** ya da **Seçili dosyalar** (tabloda seçtiğiniz satırlar). Henüz hazır olmayan dosyalar cevaba dahil edilmez; panelin altındaki not kaç dosyanın beklediğini söyler.
   - Önceki sorular hatırlanır; "peki neden?" gibi devam soruları çalışır. Her koleksiyonun sohbeti ayrıdır ve `library\` klasörüne kaydedilir (son 50 soru); uygulama yeniden açılınca kaldığı yerden devam eder. Panelin sağ üstündeki çöp kutusu sohbeti ve kaydını siler; koleksiyon silinince sohbeti de silinir.
+  - **Belge tarihi:** Ekstre, fon bülteni gibi aynı adla her ay gelen belgelerde tarih dosya adında olmadığı için Aktar belgenin kendi tarihini (ekstre kesim tarihi, rapor dönemi, fatura tarihi) özet adımında içerikten çıkarır. Tablodaki **Tarih** sütununda görünür; başlığa tıklayınca tarihe göre sıralanır. Yanlışsa sağ tık → **Tarihi düzenle…** (`15.09.2026`, `09.2026` ya da `2026`; boş bırakılırsa içerikten çıkarılana döner). Tarihler soru-cevapta modele verilir ("geçen ayki ekstrede…" gibi sorular) ve atıflarda dosya adının yanında yazar.
   - Soru-cevap için Ayarlar'daki **Soru-cevap modeli** (boşsa analiz modeli), arama için embedding modeli kullanılır; ikisi de LM Studio'da aynı adresten çalışır. Koleksiyon özeti çıkarıldıysa sohbetin başında bir kartta görünür (genel özet, konular ve tıklanınca sorulan önerilen sorular); bu özet ve video özetleri her soruda modele de verilir, böylece "bu derslerde neler anlatılıyor?" gibi genel sorular da bütün koleksiyona göre cevaplanır. Özet yoksa genel sorular yalnızca soruya en yakın parçalarla cevaplanır.
 
 Koleksiyonlar uygulama dizinindeki `library\` klasöründe tutulur.
+
+#### E-postadan al (Gmail)
+Kredi kartı ekstreleri, fon bültenleri gibi e-postayla gelen belgeler kurallarla koleksiyona indirilir.
+
+1. **Ayarlar → E-posta (Gmail):** Gmail adresini yazıp **Kaydet**'e basın. Sonra **uygulama şifresini** girin: normal Google şifreniz değil, Google hesabı → Güvenlik → 2 adımlı doğrulama → **Uygulama şifreleri**'nden alınan 16 harflik şifre. Şifre `config.json`'a yazılmaz, Windows Kimlik Bilgileri Yöneticisi'nde (Linux'ta sistemin anahtar zincirinde, `secret-tool` gerekir) saklanır. **Bağlantıyı dene** girişi sınar.
+2. **Koleksiyon → E-postadan al → Kural ekle:** **Gönderen içerir** (ör. `@worldcard.com.tr`) ve/veya **Konu içerir** (ör. `Hesap Özeti`; büyük/küçük harf ve Türkçe harf farkı yok sayılır), **Ne alınsın** (PDF ekleri, e-posta gövdesi ya da ikisi), **Şu tarihten beri** (boş: son 1 yıl), **İndirilecek klasör** ve gerekiyorsa **PDF şifresi**. Klasör koleksiyona eklenir. **Önizle** hiçbir şey indirmeden eşleşen postaları gösterir.
+3. **Şimdi indir** ya da koleksiyonu açmak (en sık 10 dakikada bir) yeni postaların eklerini indirir; yeni dosyalar tabloda **yeni** görünür, hazırlığı **Hepsini hazırla** ile siz başlatırsınız.
+
+- Postalar Gmail'in **Tüm Postalar** kutusunda aranır (arşivlenenler dahil) ve okunmuş işaretlenmez.
+- Dosya adı postanın geliş günüyle başlar: `2026-10-03 World Gold Hesap Ozeti.pdf`. Aynı gün aynı adla farklı içerik gelirse sonuna içeriğin kısa özeti eklenir.
+- Aynı posta iki kez indirilmez (dosyayı silseniz bile); aynı ek başka bir postayla tekrar gelirse de atlanır. Kayıt: `library\<koleksiyon>.mail.json`.
+- Şifreli PDF'ler kuraldaki PDF şifresiyle açılıp **şifresiz kopya** olarak kaydedilir; şifre yoksa ya da yanlışsa dosya şifreli hâliyle kaydedilir ve Konsol'da uyarı yazılır.
+- Belgenin içeriğinden tarih henüz çıkarılmadıysa Tarih sütununda (soluk) postanın geliş tarihi görünür.
 
 ```
 Video (sürükle-bırak veya Video Seç)

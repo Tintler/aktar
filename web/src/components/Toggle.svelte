@@ -1,9 +1,9 @@
 <script>
-  let { checked = $bindable(false), disabled = false, label = '' } = $props();
+  let { checked = $bindable(false), disabled = false, label = '', onchange = null } = $props();
 </script>
 
 <button type="button" class="toggle" class:on={checked} {disabled} role="switch" aria-checked={checked}
-  onclick={() => (checked = !checked)}>
+  onclick={() => { checked = !checked; onchange?.(checked); }}>
   <span class="sw"></span>{#if label}<span>{label}</span>{/if}
 </button>
 

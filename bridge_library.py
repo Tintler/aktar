@@ -67,12 +67,16 @@ def where(entry):
     return parent.name
 
 
-def row_of(entry, info, dates=None):
+def row_of(entry, info, dates=None, fallback=None):
     """Tablo satiri (JSON): transkript satirlari arayuze gonderilmez.
 
-    `dates`: elle girilen belge tarihleri (library.manual_dates); icerikten cikarilani ezer."""
-    manual = (dates or {}).get(library._key(entry['path']), '')
-    date = collection_qa.normalize_date(manual or info.get('date', ''))
+    `dates`: elle girilen belge tarihleri (library.manual_dates); icerikten cikarilani ezer.
+    `fallback`: {anahtar: tarih} postanin gelis tarihi (F89); yalnizca baska tarih yoksa."""
+    key = library._key(entry['path'])
+    manual = (dates or {}).get(key, '')
+    content = info.get('date', '')
+    mail = '' if manual or content else (fallback or {}).get(key, '')
+    date = collection_qa.normalize_date(manual or content or mail)
     if entry['kind'] == 'image':
         length = '—' if entry['missing'] else format_size(entry['path'])
     elif info['duration'] and entry['kind'] == 'document':
@@ -86,7 +90,8 @@ def row_of(entry, info, dates=None):
             'length': length, 'measured': bool(info['duration']), 'source': info['source'],
             'status': info['status'], 'status_text': STATUS_TEXT[info['status']],
             'new': bool(entry['new']), 'missing': bool(entry['missing']),
-            'date': date, 'date_text': collection_qa.format_date(date), 'date_manual': bool(manual)}
+            'date': date, 'date_text': collection_qa.format_date(date), 'date_manual': bool(manual),
+            'date_mail': bool(mail)}
 
 
 def chat_entries(entries):
@@ -170,7 +175,8 @@ class LibraryMixin:
     def library_state(self):
         data = self._lib_data
         dates = library.manual_dates(data) if data else {}
-        rows = [row_of(entry, info, dates) for entry, info in zip(self._lib_entries, self._lib_infos)]
+        fallback = self._mail_fallback()
+        rows = [row_of(entry, info, dates, fallback) for entry, info in zip(self._lib_entries, self._lib_infos)]
         for row in rows:
             if row['key'] in self._row_status:
                 row['busy_text'], row['busy_tone'] = self._row_status[row['key']]
@@ -178,6 +184,9 @@ class LibraryMixin:
                 'title': data['title'] if data else '', 'folders': self._folders() if data else [],
                 'rows': rows, 'meta': self._meta() if data else '', 'scanning': self._lib_scanning,
                 'queue': self._queue, 'kinds': KIND_LABELS}
+
+    def _mail_fallback(self):
+        return {library._key(path): value for path, value in getattr(self, '_mail_dates', {}).items()}
 
     def _push_library(self):
         self._emit('library', self.library_state())
@@ -198,6 +207,8 @@ class LibraryMixin:
             self._lib_entries, self._lib_infos = [], []
         self._lib_slug, self._lib_data = slug, data
         self._rescan()
+        if hasattr(self, '_mail_auto'):
+            self._mail_auto()  # F89: yeni postalar arka planda indirilir
         return self.library_state()
 
     def _rescan(self):
@@ -464,7 +475,8 @@ class LibraryMixin:
                 keys.append(library._key(entry['path']))
         manual = library.manual_dates(self._lib_data or {})
         dates = {library._key(entry['path']): collection_qa.format_date(
-                     manual.get(library._key(entry['path'])) or info.get('date', ''))
+                     manual.get(library._key(entry['path'])) or info.get('date', '')
+                or self._mail_fallback().get(library._key(entry['path']), ''))
                  for entry, info in zip(self._lib_entries, self._lib_infos)}
         return {'query': query, 'keys': keys, 'files': len(matched), 'limited': len(hits) >= HIT_LIMIT,
                 'searched': len(query) >= MIN_SEARCH_CHARS,
@@ -757,7 +769,8 @@ class LibraryMixin:
             if library._key(entry['path']) == key:
                 self._lib_infos[row] = library.describe(entry)
                 self._emit('row', {'row': row_of(entry, self._lib_infos[row],
-                                                 library.manual_dates(self._lib_data or {})),
+                                                 library.manual_dates(self._lib_data or {}),
+                                                 self._mail_fallback()),
                                    'meta': self._meta()})
                 self._push_chat()
                 return
@@ -850,7 +863,8 @@ class LibraryMixin:
             # Kapsam degisti: etiketler yeni listeye gore; konusma gecmisi korunur.
             fresh = collection_qa.CollectionQA(videos, self._lib_data['title'], log=self._log,
                                                overview=self._overview(slug),
-                                               dates=self._lib_data.get('dates'))
+                                               dates=self._lib_data.get('dates'),
+                                               fallback_dates=getattr(self, '_mail_dates', {}))
             fresh.history = session.history if session is not None else list(chat['history'])
             session = chat['session'] = fresh
         chat['entries'] += [('user', question), ('pending', 'Dosyalarda aranıyor…')]
