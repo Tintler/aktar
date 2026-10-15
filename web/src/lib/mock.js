@@ -40,7 +40,13 @@ export function createMock(emit) {
   const row = (name, kind, where, length, source, status, extra = {}) => ({
     key: name, path: 'D:/Dersler/' + name, name, kind, where, folder: 'D:/Dersler/' + where, length, measured: length !== '—',
     source, status, status_text: { ready: 'Hazır', transcript: 'Metin hazır', pending: 'Bekliyor', no_subtitle: 'Altyazı yok · Whisper bekliyor', missing: 'Bulunamadı' }[status],
-    new: false, missing: status === 'missing', ...extra });
+    new: false, missing: status === 'missing', length_sort: lengthSort(length, kind), ...extra });
+  function lengthSort(length, kind) {
+    if (length === '—') return null;
+    if (length.includes(':')) return [0, length.split(':').reduce((a, b) => a * 60 + Number(b), 0)];
+    if (length.endsWith('sayfa')) return [1, parseInt(length)];
+    return [2, parseFloat(length) * (length.endsWith('MB') ? 1e6 : 1e3)];
+  }
   const library = {
     collections: [{ slug: 'ml', title: 'Makine Öğrenmesi', folders: 2, files: 0 }, { slug: 'kilavuz', title: 'Kullanım Kılavuzları', folders: 1, files: 3 }],
     slug: 'ml', title: 'Makine Öğrenmesi', scanning: false, kinds: {},

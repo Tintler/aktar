@@ -90,8 +90,22 @@ def row_of(entry, info, dates=None, fallback=None):
             'length': length, 'measured': bool(info['duration']), 'source': info['source'],
             'status': info['status'], 'status_text': STATUS_TEXT[info['status']],
             'new': bool(entry['new']), 'missing': bool(entry['missing']),
+            'length_sort': _length_sort(entry, info),
             'date': date, 'date_text': collection_qa.format_date(date), 'date_manual': bool(manual),
             'date_mail': bool(mail)}
+
+
+def _length_sort(entry, info):
+    """Uzunluk sutununu siralamak icin (F93): once tur (video sure, belge sayfa, digerleri boyut),
+    sonra sayi. Bulunamayan dosya None (sonda)."""
+    if entry['missing']:
+        return None
+    if info.get('duration') and entry['kind'] != 'image':
+        return [0 if entry['kind'] == 'video' else 1, float(info['duration'])]
+    try:
+        return [2, Path(entry['path']).stat().st_size]
+    except OSError:
+        return None
 
 
 def chat_entries(entries):

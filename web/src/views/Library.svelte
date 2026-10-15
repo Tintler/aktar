@@ -61,14 +61,56 @@
   const visible = $derived.by(() => {
     const keys = view.search ? new Set(view.search.keys) : null;
     const rows = lib.rows.filter((r) => (!view.kind || r.kind === view.kind) && (!keys || keys.has(r.key)));
-    if (!view.sort) return rows;
-    // F88: tarihe gore (yeniden eskiye / eskiden yeniye); tarihsizler sonda, kendi sirasinda
-    const dir = view.sort === 'date-asc' ? 1 : -1;
-    return rows.map((r, i) => [r, i]).sort(([a, i], [b, j]) =>
-      (!a.date - !b.date) || (a.date && b.date && a.date !== b.date ? (a.date < b.date ? -dir : dir) : i - j)).map(([r]) => r);
+    const [column, direction] = (view.sort || '').split('-');
+    const spec = COLUMNS[column];
+    if (!spec) return rows;
+    // F93: bos degerler her iki yonde de sonda; esitlerde koleksiyon sirasi korunur
+    const dir = direction === 'asc' ? 1 : -1;
+    return rows.map((r, i) => [r, spec.value(r), i]).sort(([, a, i], [, b, j]) => {
+      const empty = (a === '' || a === null) - (b === '' || b === null);
+      if (empty) return empty;
+      if (a === '' || a === null) return i - j;
+      // Uzunluk [tur, sayi]: tur grubu (video, belge, diger) her yonde ayni sirada kalir
+      const group = Array.isArray(a) ? a[0] - b[0] : 0;
+      if (group) return group;
+      const order = Array.isArray(a) ? compare(a.slice(1), b.slice(1)) : compare(a, b);
+      return order ? order * dir : i - j;
+    }).map(([r]) => r);
   });
-  const SORTS = { '': 'date-desc', 'date-desc': 'date-asc', 'date-asc': '' };
-  const SORT_TITLE = { '': 'Tarihe göre sırala (yeniden eskiye)', 'date-desc': 'Eskiden yeniye', 'date-asc': 'Koleksiyon sırasına dön' };
+  const collator = new Intl.Collator('tr', { numeric: true, sensitivity: 'base' });
+  function compare(a, b) {
+    if (Array.isArray(a)) {
+      for (let k = 0; k < a.length; k++) { const c = compare(a[k], b[k]); if (c) return c; }
+      return 0;
+    }
+    return typeof a === 'number' ? a - b : collator.compare(String(a), String(b));
+  }
+  const STATUS_ORDER = { ready: 0, transcript: 1, pending: 2, no_subtitle: 3, no_text: 4, missing: 5 };
+  // Ilk tiklama: tarihte yeniden eskiye, digerlerinde A'dan Z'ye / kucukten buyuge; ikinci tersi; ucuncu kapatir.
+  const COLUMNS = {
+    name: { label: 'Dosya', first: 'asc', value: (r) => r.name },
+    where: { label: 'Klasör', first: 'asc', value: (r) => r.where || '' },
+    date: { label: 'Tarih', first: 'desc', value: (r) => r.date || '' },
+    length: { label: 'Uzunluk', first: 'desc', value: (r) => r.length_sort ?? '' },
+    source: { label: 'Metin kaynağı', first: 'asc', value: (r) => r.source || '' },
+    status: { label: 'Durum', first: 'asc', value: (r) => STATUS_ORDER[r.status] ?? 9 },
+  };
+  const WORDS = { name: ['A → Z', 'Z → A'], where: ['A → Z', 'Z → A'], date: ['eskiden yeniye', 'yeniden eskiye'],
+    length: ['kısadan uzuna', 'uzundan kısaya'], source: ['A → Z', 'Z → A'], status: ['hazırdan bekleyene', 'bekleyenden hazıra'] };
+  function sortBy(column) {
+    const [current, direction] = (view.sort || '').split('-');
+    const first = COLUMNS[column].first;
+    const other = first === 'asc' ? 'desc' : 'asc';
+    view.sort = current !== column ? `${column}-${first}` : direction === first ? `${column}-${other}` : '';
+  }
+  function sortTitle(column) {
+    const [current, direction] = (view.sort || '').split('-');
+    const next = current !== column ? COLUMNS[column].first : direction === COLUMNS[column].first
+      ? (direction === 'asc' ? 'desc' : 'asc') : '';
+    return next ? `${COLUMNS[column].label}: ${WORDS[column][next === 'asc' ? 0 : 1]} sırala` : 'Koleksiyon sırasına dön';
+  }
+  const sortColumn = $derived((view.sort || '').split('-')[0]);
+  const sortDirection = $derived((view.sort || '').split('-')[1]);
   const selected = $derived(new Set(view.selected));
 
   let anchor = null;   // shift ile aralik secimi icin son tiklanan satir
@@ -309,9 +351,11 @@
       {/if}
 
       <table class="table files">
-        <thead><tr><th class="ic"></th><th>Dosya</th><th>Klasör</th>
-          <th class="date"><button class="sort" class:on={view.sort} title={SORT_TITLE[view.sort]} onclick={() => (view.sort = SORTS[view.sort])}>Tarih{#if view.sort}<Icon name={view.sort === 'date-asc' ? 'up' : 'down'} size={14} />{/if}</button></th>
-          <th>Uzunluk</th><th>Metin kaynağı</th><th>Durum</th></tr></thead>
+        <thead><tr><th class="ic"></th>
+          {#each Object.entries(COLUMNS) as [column, spec]}
+            <th class={column === 'date' ? 'date' : ''}><button class="sort" class:on={sortColumn === column} title={sortTitle(column)} onclick={() => sortBy(column)}>
+              {spec.label}{#if sortColumn === column}<Icon name={sortDirection === 'asc' ? 'up' : 'down'} size={14} />{/if}</button></th>
+          {/each}</tr></thead>
         <tbody>
           {#each visible as row (row.key)}
             <tr class:on={selected.has(row.key)} class:missing={row.missing} onclick={(e) => click(e, row)} ondblclick={() => openFile(row)}
