@@ -3,7 +3,9 @@
   // video sohbeti ortak kullanir. oncite({path, start, document}) atfa tiklaninca.
   // F98: cevap blok Markdown olarak cizilir (tablo, baslik, liste); atiflar yer tutucuyla
   // Markdown'u bolmeden dugmeye donusur (genel sohbetteki answerHtml ile ayni yol).
+  // F103: ```chart bloklari grafik olarak cizilir (use:charts).
   import { richHtml, escapeHtml } from '../lib/markdown.js';
+  import { charts } from '../lib/chart.js';
   import Thought from './Thought.svelte';
 
   let { entries = [], oncite, single = false } = $props();
@@ -42,7 +44,7 @@
   {:else if entry.kind === 'assistant'}
     <Thought text={entry.thinking} think={entry.think} />
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-    <div class="answer md selectable" onclick={clickAnswer}>{@html rendered[index]}</div>
+    <div class="answer md selectable" onclick={clickAnswer} use:charts>{@html rendered[index]}</div>
     {#if entry.sources?.length && !single}
       <div class="sources">
         <span>Kaynaklar</span>

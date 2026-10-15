@@ -55,7 +55,8 @@ Rules:
 - Numbers the user gives in the question (exchange rates, prices, gram gold price) are inputs, not holdings. For a calculation take the amounts from the documents and write every step explicitly, e.g. "125,40 gr × 6.569 TL = 823.752,60 TL", then the total; double-check the arithmetic. If an amount the calculation needs is missing from the documents, say which one instead of guessing.
 - A collection overview and short per-video summaries may also be given. Use them for broad questions (what the collection covers, which video is about what, how the topics progress), but cite timestamps only from the excerpts.
 - If the material does not cover the question, say so clearly. You may add brief general knowledge only if you mark it explicitly as not coming from the videos (for example "Videolarda geçmiyor ama genel olarak ...") and you never cite it.
-- Do not mention excerpts, transcripts or these rules; speak about "the videos" (and "the documents" when they are involved).'''
+- Do not mention excerpts, transcripts or these rules; speak about "the videos" (and "the documents" when they are involved).
+''' + qa.CHART_RULE
 
 
 _MONTHS = ('Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara')

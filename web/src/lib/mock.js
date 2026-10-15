@@ -172,7 +172,17 @@ export function createMock(emit) {
     assistant_list: async () => ({ items: [{ id: 'c1', title: 'Regresyon notları', updated: new Date().toISOString() }], current: conversation.id }),
     assistant_ask: async (text, think) => {
       // Dusunme aciksa once dusunce kelime kelime akar (F101 canli dusunce alani).
-      const answer = 'Bu sahte arka uçtan gelen bir **örnek** cevaptır.\n\n- Madde bir\n- Madde iki';
+      let answer = 'Bu sahte arka uçtan gelen bir **örnek** cevaptır.\n\n- Madde bir\n- Madde iki';
+      // F103: "grafik" iceren soruya her turden ornek grafik
+      if (/grafik/i.test(text)) {
+        answer = 'Örnek grafikler:\n\n' + [
+          { type: 'bar', title: 'Çeyreklik net kâr', unit: 'mn TL', labels: ['Ç1', 'Ç2', 'Ç3', 'Ç4'], series: [{ name: '2025', values: [120, 140, 95, 160] }, { name: '2026', values: [150, 160, 130, 175] }] },
+          { type: 'doughnut', title: 'Portföy dağılımı', unit: '%', labels: ['Altın', 'Döviz', 'Hisse', 'Fon'], series: [{ values: [42, 23, 20, 15] }] },
+          { type: 'line', title: 'Kart borcu', unit: 'TL', labels: ['Haz', 'Tem', 'Ağu', 'Eyl'], series: [{ name: 'Borç', values: ['12.400,50', '9.850', '14.210', '11.030'] }] },
+          { type: 'radar', title: 'Fon karşılaştırması', labels: ['Getiri', 'Risk', 'Likidite', 'Maliyet', 'Çeşitlilik'], series: [{ name: 'Fon A', values: [8, 5, 7, 6, 4] }, { name: 'Fon B', values: [6, 3, 9, 8, 7] }] },
+          { type: 'hbar', title: 'Gider kalemleri', unit: 'TL', labels: ['Market alışverişi', 'Faturalar', 'Ulaşım', 'Eğlence'], series: [{ values: [5200, 3100, 1800, 950] }] },
+        ].map((spec) => '```chart\n' + JSON.stringify(spec) + '\n```').join('\n\n') + '\n\n```chart\n{"type": "bar", bozuk\n```\n\nSon grafik bilerek bozuk.';
+      }
       const thought = think ? 'Kullanıcı bir soru sordu. Önce kütüphanede ilgili notlar var mı bakmalıyım. Notlarda doğrudan bir kayıt yok, genel bilgiyle cevaplayacağım. Cevabı kısa tutup iki maddede özetlemek yeterli olur. Biçim olarak Markdown liste kullanacağım. Son olarak yazım hatalarını kontrol ediyorum ve gereksiz tekrarları çıkarıyorum.' : '';
       const words = thought ? thought.split(' ') : [];
       conversation = { ...conversation, busy: true, stream: '', thinking: '', entries: [...conversation.entries, { kind: 'user', text }] };

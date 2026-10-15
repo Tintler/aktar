@@ -8,6 +8,7 @@
   import { prompt, confirm } from '../lib/confirm.svelte.js';
   import { openMenu } from '../lib/menu.svelte.js';
   import { richHtml, escapeHtml } from '../lib/markdown.js';
+  import { charts } from '../lib/chart.js';
 
   const SUGGESTIONS = [
     'Kütüphanemde neler var?',
@@ -213,7 +214,7 @@
               <div class="turn">
                 <Thought text={entry.thinking} think={entry.think} />
                 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-                <div class="md selectable" onclick={clickAnswer}>{@html rendered[index]}</div>
+                <div class="md selectable" onclick={clickAnswer} use:charts>{@html rendered[index]}</div>
                 {#if entry.sources?.length}
                   <div class="sources">
                     {#each entry.sources as source}
@@ -233,7 +234,7 @@
             <div class="turn">
               {#if chat.thinking}<Thought text={chat.thinking} live={!chat.stream} />{/if}
               {#if chat.stream}
-                <div class="md selectable streaming">{@html richHtml(chat.stream)}</div>
+                <div class="md selectable streaming" use:charts>{@html richHtml(chat.stream)}</div>
               {:else if !chat.thinking}
                 <div class="thinking"><span class="spark"><Icon name="sparkles" size={16} /></span><span class="dots"><i></i><i></i><i></i></span></div>
               {/if}

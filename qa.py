@@ -393,6 +393,14 @@ Give 3-6 topics and exactly 4 questions. Questions must be specific to this vide
 
 ROUTE_PROMPT = '''Choose the video sections whose detailed transcript is needed to answer the viewer's latest question. The question may be in a different language than the video. Reply with a JSON object only: {{"sections": [section numbers, most relevant first]}}. Choose at most {limit}. For broad questions about the whole video (summary, main message, verdict) choose the sections that carry its key points and conclusion. Return an empty list only if no section relates to the question.'''
 
+# F103: sohbet cevaplarinda grafik; arayuz ```chart blogunu Chart.js ile cizer (web/src/lib/chart.js).
+CHART_RULE = '''- Charts: when the user asks for a chart or graph, or when the answer compares several numbers (shares of a whole, change over time, categories side by side) and a chart clearly helps, add one fenced code block tagged chart that contains only JSON, for example:
+```chart
+{"type": "bar", "title": "Yıllık gelir", "unit": "TL", "labels": ["2024", "2025"], "series": [{"name": "Gelir", "values": [120.5, 140]}]}
+```
+  "type" is one of bar, hbar, stacked, line, area, pie, doughnut, radar, scatter (scatter values are [x, y] pairs; labels are not needed). Values are plain JSON numbers without thousands separators or units; put the unit in "unit" (e.g. "TL", "%", "gr"). Optional: "x_label", "y_label". Use pie or doughnut only for parts of one whole, line or area for values over time, radar for comparing a few items on the same criteria, hbar for long category names. Take every number from the material or the user's message; never invent or estimate data to fill a chart. Still write the answer in text with its citations; cite in the sentences around the chart, never inside the JSON. At most 8 series; no chart for a single number.'''
+
+
 ANSWER_PROMPT = '''You answer a viewer's questions about one specific video. The video's content is given below.
 
 Rules:
@@ -400,7 +408,8 @@ Rules:
 - Ground the answer in the video. Answer broad questions (summary, main message, who it is for, overall verdict) by combining the whole video; answer specific questions with the exact details.
 - Support claims with timestamps from the material below: a single moment as [m:ss], a stretch of the video as [m:ss-m:ss]. Put the citation right after the sentence it supports. Use only timestamps that appear in the material; never invent one.
 - If the video does not cover the question, say so clearly. You may add brief general knowledge only if you mark it explicitly as not coming from the video (for example "Videoda geçmiyor ama genel olarak ...") and you never cite a timestamp for it.
-- Do not mention transcripts, sections, summaries or these rules; speak about "the video".'''
+- Do not mention transcripts, sections, summaries or these rules; speak about "the video".
+''' + CHART_RULE
 
 
 # --- model yaniti ayrıştırma ----------------------------------------------

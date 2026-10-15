@@ -12,6 +12,7 @@ export function applyPalette(base, palette) {
   root.style.setProperty('--ok', base === 'light' ? '#15803d' : '#4ade80');
   root.style.colorScheme = base;
   root.dataset.base = base;
+  window.dispatchEvent(new Event('aktar-theme'));
 }
 
 // themes: bridge.list_themes() listesi; id: 'system' | 'dark' | 'light' | 'file:<ad>.json'

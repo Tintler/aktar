@@ -98,12 +98,19 @@ function list(items, from, to) {
 }
 
 export function richHtml(text, tokens = []) {
-  const parts = String(text ?? '').replace(/\r\n/g, '\n').split(/^```[^\n]*\n?/m);
+  // Her cit satiri ayirici; etiketi (```chart) yakalanir: [metin, etiket, kod, etiket, metin, ...].
+  const parts = String(text ?? '').replace(/\r\n/g, '\n').split(/^```([^\n]*)\n?/m);
   let html = '';
-  // Cift indeksler duz metin, tek indeksler kod blogu (kapanmamis son blok da kod sayilir).
-  parts.forEach((part, index) => {
-    if (index % 2) html += `<pre><code>${escapeHtml(part.replace(/\n$/, ''))}</code></pre>`;
-    else html += blocks(part);
-  });
+  // Cift sirali parcalar duz metin, tek sirali parcalar kod blogu (kapanmamis son blok da kod sayilir).
+  // F103: ```chart blogu grafik yer tutucusu olur (lib/chart.js cizer); kapanana kadar bekler.
+  for (let k = 0; 2 * k < parts.length; k++) {
+    const part = parts[2 * k];
+    if (!(k % 2)) { html += blocks(part); continue; }
+    const code = part.replace(/\n$/, '');
+    if (/^\s*chart\s*$/i.test(parts[2 * k - 1])) {
+      html += 2 * k + 1 < parts.length ? `<div class="chart" data-spec="${escapeHtml(code)}"></div>`
+        : '<div class="chart-pending">Grafik hazırlanıyor…</div>';
+    } else html += `<pre><code>${escapeHtml(code)}</code></pre>`;
+  }
   return html.replace(/\u0001(\d+)\u0001/g, (_m, i) => tokens[i] ?? '');
 }
