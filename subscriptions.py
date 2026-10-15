@@ -1,13 +1,16 @@
 """Abonelik ve odeme takibi (F106): Netflix, elektrik faturasi, tek seferlik odemeler.
 
-Kayitlar kutuphane klasorunde `subscriptions.data.json` dosyasinda durur (adindaki nokta
-yuzunden library.list_collections onu koleksiyon saymaz). Saklanan `renewal_date` yinelenen
+Kayitlar kutuphane klasorunde `subscriptions.data.json` dosyasinda, logolar (F107)
+`subscriptions.logos/<kimlik>.png` olarak durur (adlarindaki nokta yuzunden
+library.list_collections bunlari koleksiyon saymaz). Saklanan `renewal_date` yinelenen
 kayitlarda donemin capasidir; gecmiste kaldiysa bir sonraki odeme tarihi (`next_due`) her
 okumada capadan donem eklenerek hesaplanir, dosya kendiliginden degismez.
 """
 from __future__ import annotations
 
+import base64
 import calendar
+import io
 import json
 import re
 import secrets
@@ -27,10 +30,74 @@ STATUSES = ('active', 'trial', 'paused', 'cancelled')
 METHODS = ('credit', 'debit', 'transfer', 'cash', 'other')
 CATEGORIES = ['Dijital yayın', 'Müzik', 'Yazılım', 'Bulut', 'Fatura', 'İletişim', 'Sigorta', 'Spor', 'Eğitim', 'Diğer']
 UPCOMING_DAYS = 30
+LOGO_SIZE = 128
+LOGO_SOURCE_LIMIT = 15 * 1024 * 1024
+LOGO_TYPES = ('*.png', '*.jpg', '*.jpeg', '*.webp', '*.gif', '*.bmp', '*.ico')
 
 
 def path():
     return library.library_dir() / 'subscriptions.data.json'
+
+
+def logo_path(ident):
+    return library.library_dir() / 'subscriptions.logos' / f'{ident}.png'
+
+
+def make_logo(data):
+    """Gorsel baytlarini en fazla LOGO_SIZE piksellik, saydamligi korunan PNG'ye cevirir."""
+    from PIL import Image, ImageOps, UnidentifiedImageError
+    if len(data) > LOGO_SOURCE_LIMIT:
+        raise ValueError('Görsel çok büyük (en fazla 15 MB).')
+    try:
+        with Image.open(io.BytesIO(data)) as source:
+            image = ImageOps.exif_transpose(source).convert('RGBA')
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as error:
+        raise ValueError('Görsel okunamadı; PNG, JPG, WebP, GIF, BMP ya da ICO seçin.') from error
+    box = image.getbbox()  # ikonlarin cevresindeki saydam bosluk kirpilir
+    if box:
+        image = image.crop(box)
+    image.thumbnail((LOGO_SIZE, LOGO_SIZE), Image.LANCZOS)
+    output = io.BytesIO()
+    image.save(output, 'PNG', optimize=True)
+    return output.getvalue()
+
+
+def data_url(png):
+    return 'data:image/png;base64,' + base64.b64encode(png).decode('ascii')
+
+
+def logo_from_file(path):
+    with open(path, 'rb') as stream:
+        return data_url(make_logo(stream.read(LOGO_SOURCE_LIMIT + 1)))
+
+
+def logo_from_data_url(value):
+    match = re.fullmatch(r'data:image/[\w.+-]+;base64,([A-Za-z0-9+/=\s]+)', str(value or ''))
+    if not match:
+        raise ValueError('Logo verisi geçersiz.')
+    return make_logo(base64.b64decode(match.group(1)))
+
+
+def _set_logo(ident, logo):
+    """logo: None dokunma, '' sil, data URL kaydet."""
+    if logo is None:
+        return
+    target = logo_path(ident)
+    if not logo:
+        target.unlink(missing_ok=True)
+        return
+    png = logo_from_data_url(logo)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temp = target.with_suffix('.tmp')
+    temp.write_bytes(png)
+    temp.replace(target)
+
+
+def _read_logo(ident):
+    try:
+        return data_url(logo_path(ident).read_bytes())
+    except OSError:
+        return ''
 
 
 def _date(value):
@@ -101,10 +168,15 @@ def _write(items):
 
 
 def upsert(item):
-    """Kaydi ekler ya da ayni kimliklisini degistirir; temizlenmis kaydi dondurur."""
+    """Kaydi ekler ya da ayni kimliklisini degistirir; temizlenmis kaydi dondurur.
+
+    `logo` alani: yoksa/None logoya dokunulmaz, '' logoyu siler, data URL yeni logodur.
+    """
+    logo = item.get('logo') if isinstance(item, dict) else None
     item = clean(item)
     if not item:
         raise ValueError('Ad ve geçerli bir tutar gerekli.')
+    _set_logo(item['id'], logo)
     items = load()
     index = next((i for i, old in enumerate(items) if old['id'] == item['id']), None)
     if index is None:
@@ -121,6 +193,7 @@ def remove(ident):
     if len(kept) == len(items):
         return False
     _write(kept)
+    logo_path(ident).unlink(missing_ok=True)
     return True
 
 
@@ -171,7 +244,7 @@ def view(today=None):
     for item in load():
         due = next_due(item, today)
         cost = monthly_cost(item)
-        row = dict(item, next_due=due.isoformat() if due else '',
+        row = dict(item, logo=_read_logo(item['id']), next_due=due.isoformat() if due else '',
                    days_left=(due - today).days if due else None, monthly=round(cost, 2))
         rows.append(row)
         currency = item['currency']

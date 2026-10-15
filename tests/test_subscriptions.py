@@ -48,6 +48,31 @@ class SubscriptionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             subscriptions.upsert({'name': ' '})
 
+    def test_logo_resized_kept_and_removed(self):
+        import base64
+        import io
+        from PIL import Image
+        source = Image.new('RGBA', (600, 400), (0, 0, 0, 0))
+        source.paste((229, 9, 20, 255), (100, 50, 500, 350))  # saydam kenar kirpilir
+        buffer = io.BytesIO()
+        source.save(buffer, 'PNG')
+        url = 'data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode()
+        saved = subscriptions.upsert({'name': 'Netflix', 'amount': 1, 'logo': url})
+        with Image.open(subscriptions.logo_path(saved['id'])) as logo:
+            self.assertEqual(logo.size, (128, 96))
+        self.assertNotIn('logo', subscriptions.load()[0])
+        subscriptions.upsert(dict(saved, amount=2))  # logo alani yok: dokunulmaz
+        self.assertTrue(subscriptions.view()['items'][0]['logo'].startswith('data:image/png;base64,'))
+        subscriptions.upsert(dict(saved, logo=''))
+        self.assertEqual(subscriptions.view()['items'][0]['logo'], '')
+        subscriptions.upsert(dict(saved, logo=url))
+        subscriptions.remove(saved['id'])
+        self.assertFalse(subscriptions.logo_path(saved['id']).exists())
+        with self.assertRaises(ValueError):
+            subscriptions.upsert({'name': 'A', 'amount': 1, 'logo': 'data:image/png;base64,AAAA'})
+        with self.assertRaises(ValueError):
+            subscriptions.upsert({'name': 'A', 'amount': 1, 'logo': 'http://example.com/a.png'})
+
     def test_next_due_rolls_from_anchor_without_drift(self):
         item = subscriptions.clean({'name': 'A', 'amount': 1, 'renewal_date': '2026-01-31'})
         self.assertEqual(subscriptions.next_due(item, date(2026, 2, 10)), date(2026, 2, 28))

@@ -2,9 +2,9 @@
   // Abonelikler (F106): tekrarlayan ve tek seferlik odemeler; tutar, banka/kart, durum, yenileme.
   import Icon from '../lib/Icon.svelte';
   import SubscriptionModal from '../components/SubscriptionModal.svelte';
-  import { act, toast } from '../lib/state.svelte.js';
+  import { act, toast, onDrop } from '../lib/state.svelte.js';
   import { confirm } from '../lib/confirm.svelte.js';
-  import { CYCLES, STATUSES, METHODS, money, shortDate, daysText } from '../lib/subscriptions.js';
+  import { CYCLES, STATUSES, METHODS, money, shortDate, daysText, logoDrop } from '../lib/subscriptions.js';
 
   let data = $state(null);
   let query = $state('');
@@ -18,6 +18,12 @@
     if (result) data = result;
   }
   load();
+
+  // Birakilan gorsel acik kaydin logosu olur (F107).
+  onDrop('subscriptions', (paths) => {
+    if (logoDrop.handler) logoDrop.handler(paths);
+    else toast('Logo eklemek için bir kaydı açın ya da yeni kayıt ekleyin, sonra görseli bırakın.', 'info');
+  });
 
   const items = $derived(data?.items ?? []);
   const summary = $derived(data?.summary);
@@ -126,7 +132,7 @@
                 {#each rows as item (item.id)}
                   <tr class:off={item.status === 'cancelled' || item.status === 'paused'} onclick={() => (editing = item)}>
                     <td>
-                      <div class="name"><span class="mark">{item.name.slice(0, 1).toLocaleUpperCase('tr')}</span>
+                      <div class="name">{#if item.logo}<span class="mark img"><img src={item.logo} alt="" /></span>{:else}<span class="mark">{item.name.slice(0, 1).toLocaleUpperCase('tr')}</span>{/if}
                         <div class="ellipsis"><b>{item.name}</b><small class="dim">{[item.category, item.kind === 'once' ? 'Tek seferlik' : CYCLES[item.cycle]].filter(Boolean).join(' · ')}</small></div></div>
                     </td>
                     <td class="num">
@@ -214,6 +220,8 @@
   .name { display: flex; align-items: center; gap: 12px; min-width: 0; max-width: 300px; }
   .mark { width: 34px; height: 34px; border-radius: 10px; flex: none; display: grid; place-items: center; font-weight: 700; font-size: 15px;
     background: color-mix(in srgb, var(--accent) 16%, var(--surface)); color: var(--accent); }
+  .mark.img { background: #fff; padding: 4px; box-sizing: border-box; }
+  .mark img { width: 100%; height: 100%; object-fit: contain; }
   .pay { display: flex; align-items: center; gap: 10px; color: var(--secondary); min-width: 0; max-width: 260px; }
   .pay span { color: var(--text); }
   .pay .last4 { color: var(--dim); margin-left: 6px; font-size: 12px; }

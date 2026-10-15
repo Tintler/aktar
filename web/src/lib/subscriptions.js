@@ -41,3 +41,6 @@ export function daysText(days) {
   if (days === 1) return 'Yarın';
   return `${days} gün sonra`;
 }
+
+// Pencereye birakilan gorsel: duzenleme penceresi aciksa logosu olur (handler'i pencere atar).
+export const logoDrop = { handler: null };

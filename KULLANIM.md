@@ -345,6 +345,8 @@ Sol menüdeki **Abonelikler**, düzenli ve tek seferlik ödemelerinizi (Netflix,
 
 Yenileme tarihi geçmişte kaldıysa bir sonraki ödeme tarihi dönem eklenerek kendiliğinden hesaplanır (31'inde yenilenen aylık kayıt kısa aylarda ayın son gününe düşer). Sayfanın üstünde aylık ve yıllık toplam (para birimine göre ayrı), önümüzdeki 30 günde ödenecek tutar ve aktif kayıt sayısı; sağda banka ve ödeme yöntemine göre aylık yük görünür. Durduruldu/iptal edilmiş ve tek seferlik kayıtlar aylık toplama girmez. Bir satıra tıklayınca kayıt düzenlenir ya da silinir. Kayıtlar kütüphane klasöründeki `subscriptions.data.json` dosyasında durur.
 
+Her kayda bir **logo** eklenebilir: düzenleme penceresinde logo kutusuna ya da **Logo seç**'e tıklayıp görsel seçin (PNG, JPG, WebP, GIF, BMP, ICO), panodaki görseli **Ctrl+V** ile yapıştırın (tarayıcıda logoya sağ tık → *Resmi kopyala*) ya da görsel dosyasını pencereye sürükleyip bırakın. Görselin çevresindeki saydam boşluk kırpılır, en fazla 128 piksele küçültülüp `subscriptions.logos` klasörüne PNG olarak kaydedilir. **Kaldır** logoyu siler; logosu olmayan kayıtta adın baş harfi görünür.
+
 ---
 
 ## 4. Terim sözlüğü (glossary)

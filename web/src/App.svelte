@@ -78,7 +78,8 @@
     dragging = true;
   }
   const dropHint = $derived(app.view === 'translate' ? 'Videoyu açmak için bırakın'
-    : app.view === 'files' ? 'İncelemek için bırakın' : 'Koleksiyona eklemek için bırakın');
+    : app.view === 'files' ? 'İncelemek için bırakın'
+    : app.view === 'subscriptions' ? 'Logo olarak eklemek için bırakın' : 'Koleksiyona eklemek için bırakın');
 
   async function submitReview(values) {
     app.review = null;

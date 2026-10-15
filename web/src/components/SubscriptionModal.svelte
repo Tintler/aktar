@@ -3,7 +3,8 @@
   import Icon from '../lib/Icon.svelte';
   import Modal from './Modal.svelte';
   import Toggle from './Toggle.svelte';
-  import { CYCLES, STATUSES, METHODS, CURRENCIES } from '../lib/subscriptions.js';
+  import { act, toast } from '../lib/state.svelte.js';
+  import { CYCLES, STATUSES, METHODS, CURRENCIES, logoDrop } from '../lib/subscriptions.js';
 
   let { item = null, categories = [], banks = [], onsave, ondelete, onclose } = $props();
 
@@ -11,7 +12,7 @@
   // Pencere her acilista yeniden kurulur; kaydin o anki kopyasi duzenlenir.
   const blank = () => ({
     id: '', name: '', category: '', amount: '', currency: 'TRY', kind: 'recurring', cycle: 'monthly', status: 'active',
-    start_date: today, renewal_date: '', end_date: '', auto_renew: true, method: 'credit', bank: '', card: '', card_last4: '', notes: '',
+    start_date: today, renewal_date: '', end_date: '', auto_renew: true, method: 'credit', bank: '', card: '', card_last4: '', notes: '', logo: '',
     ...(item ? Object.fromEntries(Object.entries(item).filter(([key]) => !['next_due', 'days_left', 'monthly'].includes(key))) : {}),
   });
   let form = $state(blank());
@@ -20,19 +21,67 @@
   const once = $derived(form.kind === 'once');
   const card = $derived(form.method === 'credit' || form.method === 'debit');
   let saving = $state(false);
+  // Logo (F107): degismediyse arka uca gonderilmez; '' kaldirir, data URL yenisidir.
+  let logoChanged = $state(false);
+  const initial = $derived(form.name.trim().slice(0, 1).toLocaleUpperCase('tr'));
+
+  function setLogo(value) {
+    form.logo = value;
+    logoChanged = true;
+  }
+
+  async function pickLogo(path = null) {
+    const result = await act('subs_logo', path);
+    if (result?.logo) setLogo(result.logo);
+  }
+
+  // Panodan yapistirilan gorsel (tarayicida logoya sag tik > Resmi kopyala, sonra Ctrl+V).
+  function paste(event) {
+    const file = [...(event.clipboardData?.items ?? [])].find((entry) => entry.type.startsWith('image/'))?.getAsFile();
+    if (!file) return;
+    // Metin kutusuna metin yapistiriliyorsa (panoda metin de varsa) ona dokunulmaz.
+    const typing = event.target?.matches?.('input, textarea');
+    if (typing && event.clipboardData.types.includes('text/plain')) return;
+    event.preventDefault();
+    if (file.size > 15 * 1024 * 1024) return toast('Görsel çok büyük (en fazla 15 MB).', 'error');
+    const reader = new FileReader();
+    reader.onload = () => setLogo(String(reader.result));
+    reader.readAsDataURL(file);
+  }
+
+  $effect(() => {
+    logoDrop.handler = (paths) => pickLogo(paths[0]);
+    return () => { logoDrop.handler = null; };
+  });
 
   async function save() {
     if (!valid || saving) return;
     saving = true;
-    await onsave({ ...$state.snapshot(form), amount });
+    const values = { ...$state.snapshot(form), amount };
+    if (!logoChanged) delete values.logo;
+    await onsave(values);
     saving = false;
   }
 </script>
 
+<svelte:window onpaste={paste} />
+
 <Modal title={item ? 'Kaydı düzenle' : 'Yeni abonelik / ödeme'} width={660} {onclose}>
-  <div class="seg" role="radiogroup" aria-label="Tür">
-    <button class:on={!once} role="radio" aria-checked={!once} onclick={() => (form.kind = 'recurring')}><Icon name="repeat" size={15} />Tekrarlayan</button>
-    <button class:on={once} role="radio" aria-checked={once} onclick={() => (form.kind = 'once')}><Icon name="calendar" size={15} />Tek seferlik</button>
+  <div class="head">
+    <button class="logo" class:has={form.logo} title="Logo seç" onclick={() => pickLogo()}>
+      {#if form.logo}<img src={form.logo} alt="" />{:else if initial}<span>{initial}</span>{:else}<Icon name="image" size={22} />{/if}
+      <i><Icon name="pencil" size={13} /></i>
+    </button>
+    <div class="head-side">
+      <div class="seg" role="radiogroup" aria-label="Tür">
+        <button class:on={!once} role="radio" aria-checked={!once} onclick={() => (form.kind = 'recurring')}><Icon name="repeat" size={15} />Tekrarlayan</button>
+        <button class:on={once} role="radio" aria-checked={once} onclick={() => (form.kind = 'once')}><Icon name="calendar" size={15} />Tek seferlik</button>
+      </div>
+      <div class="logo-hint">
+        <button class="link" onclick={() => pickLogo()}>Logo seç</button>{#if form.logo}<span>·</span><button class="link" onclick={() => setLogo('')}>Kaldır</button>{/if}
+        <span class="dim">ya da görseli yapıştırın (Ctrl+V) veya pencereye sürükleyin</span>
+      </div>
+    </div>
   </div>
   <div class="grid">
     <label class="wide2">Ad<input class="field" bind:value={form.name} maxlength="80" placeholder="Netflix, Elektrik, Amazon Prime…" /></label>
@@ -82,6 +131,19 @@
 </Modal>
 
 <style>
+  .head { display: flex; align-items: center; gap: 16px; }
+  .head-side { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
+  .logo { position: relative; width: 64px; height: 64px; flex: none; border-radius: 16px; display: grid; place-items: center;
+    background: color-mix(in srgb, var(--accent) 16%, var(--surface)); color: var(--accent); font-size: 26px; font-weight: 700;
+    border: 1px dashed var(--outline); box-sizing: border-box; }
+  .logo.has { background: #fff; border: 1px solid var(--outline); padding: 6px; }
+  .logo img { width: 100%; height: 100%; object-fit: contain; }
+  .logo i { position: absolute; right: -6px; bottom: -6px; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--overlay); color: var(--secondary); border: 1px solid var(--outline); opacity: 0; transition: opacity .15s; }
+  .logo:hover i, .logo:focus-visible i { opacity: 1; }
+  .logo-hint { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
+  .link { color: var(--accent); font-weight: 600; font-size: 12px; }
+  .link:hover { text-decoration: underline; }
   .seg { display: inline-flex; align-self: flex-start; padding: 3px; border-radius: 999px; background: var(--surface); gap: 2px; }
   .seg button { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 14px; border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--secondary); }
   .seg button.on { background: var(--text); color: var(--window); }
