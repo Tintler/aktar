@@ -205,5 +205,58 @@ class StatementMatchTests(unittest.TestCase):
         self.assertEqual(subscriptions.settings()['ignored'], [])
 
 
+class AlertTests(unittest.TestCase):
+    """F114: zam ve yuksek fatura uyarilari."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        patcher = mock.patch.dict(os.environ, {'AKTAR_LIBRARY_DIR': str(Path(self.temp.name) / 'store')})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self.temp.cleanup)
+        self.today = date(2026, 10, 15)
+
+    @staticmethod
+    def pays(*values):
+        return [{'date': day, 'amount': amount} for day, amount in values]
+
+    def test_price_change_and_apply(self):
+        netflix = subscriptions.upsert({'name': 'Netflix', 'amount': 229.99, 'payments': self.pays(
+            ('2026-08-08', 229.99), ('2026-09-08', 229.99), ('2026-10-08', 279.99))})
+        found = subscriptions.alerts(today=self.today)
+        self.assertEqual([(a['kind'], a['reference'], a['amount'], a['ratio']) for a in found],
+                         [('price_up', 229.99, 279.99, 0.2174)])
+        self.assertIn('229,99 TL → 279,99 TL (+%22)', subscriptions.alert_text(found[0]))
+        subscriptions.apply_price(netflix['id'])
+        self.assertEqual(subscriptions.load()[0]['amount'], 279.99)
+        self.assertEqual(subscriptions.alerts(today=self.today), [])  # tutar guncellenince uyari kalkar
+
+    def test_high_variable_bill_dismiss_and_old_payments(self):
+        gas = subscriptions.upsert({'name': 'Doğalgaz', 'amount': 0, 'variable': True, 'payments': self.pays(
+            ('2026-07-14', 400), ('2026-08-14', 420), ('2026-09-14', 440), ('2026-10-14', 600))})
+        subscriptions.upsert({'name': 'Su', 'amount': 0, 'variable': True, 'payments': self.pays(
+            ('2026-08-10', 100), ('2026-09-10', 110), ('2026-10-10', 125))})  # %19: uyarilmaz
+        subscriptions.upsert({'name': 'Eski', 'amount': 10, 'payments': self.pays(('2026-01-01', 10), ('2026-02-01', 20))})
+        subscriptions.upsert({'name': 'Durdu', 'amount': 10, 'status': 'paused', 'payments': self.pays(
+            ('2026-09-01', 10), ('2026-10-01', 20))})
+        found = subscriptions.alerts(today=self.today)
+        self.assertEqual([(a['id'], a['kind'], a['reference']) for a in found], [(gas['id'], 'high', 420.0)])
+        self.assertIn('ortalamanın %43 üstünde', subscriptions.alert_text(found[0]))
+        subscriptions.dismiss(found[0]['key'])
+        self.assertEqual(subscriptions.alerts(today=self.today), [])
+        self.assertEqual(subscriptions.view(self.today)['alerts'], [])
+        # Yeni bir yuksek odeme gelince uyari yeniden cikar.
+        items = subscriptions.load()
+        gas = next(item for item in items if item['name'] == 'Doğalgaz')
+        subscriptions.upsert(dict(gas, payments=gas['payments'] + [{'date': '2026-10-15', 'amount': 700}]))
+        self.assertEqual(len(subscriptions.alerts(today=self.today)), 1)
+
+    def test_auto_setting_defaults_on_and_persists(self):
+        self.assertTrue(subscriptions.settings()['auto'])
+        subscriptions.save_settings(auto=False)
+        subscriptions.upsert({'name': 'X', 'amount': 1})
+        self.assertFalse(subscriptions.settings()['auto'])
+
+
 if __name__ == '__main__':
     unittest.main()

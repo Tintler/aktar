@@ -39,6 +39,16 @@
 
   const scan = $derived(data?.scan);
   const suggestions = $derived(data?.suggestions ?? []);
+  const ignoredItems = $derived(data?.ignored ?? []);
+  const alerts = $derived(data?.alerts ?? []);
+
+  // F114: zam / yuksek fatura uyarilari
+  function alertTitle(a) {
+    const pct = a.ratio === null ? '' : ` (${a.ratio > 0 ? '+' : '−'}%${Math.abs(a.ratio * 100).toFixed(0)})`;
+    if (a.kind === 'high') return `Son ödeme ortalamanın %${(a.ratio * 100).toFixed(0)} üstünde`;
+    return `Tutar ${a.kind === 'price_up' ? 'arttı' : 'azaldı'}: ${money(a.reference, a.currency)} → ${money(a.amount, a.currency)}${pct}`;
+  }
+  let showIgnored = $state(false);
 
   async function startScan(slugs, force) {
     scanOpen = false;
@@ -173,12 +183,34 @@
       </div>
     {/if}
 
-    {#if suggestions.length}
+    {#if alerts.length}
+      <div class="card alerts">
+        {#each alerts as a (a.key)}
+          <div class="alert-row">
+            <Icon name="alert" size={16} />
+            <div class="info">
+              <span class="title"><b class="ellipsis">{a.name}</b><span class="dim">{alertTitle(a)}</span></span>
+              <small class="dim">{a.kind === 'high' ? `Son ödeme ${money(a.amount, a.currency)} · önceki ortalama ${money(a.reference, a.currency)} · ` : ''}{shortDate(a.date)}</small>
+            </div>
+            <div class="sug-actions">
+              {#if a.kind !== 'high' && Math.abs(a.stored - a.amount) > 0.005}
+                <button class="btn sm" onclick={() => suggestionAct('subs_apply_price', a.id)}>Tutarı {money(a.amount, a.currency)} yap</button>
+              {/if}
+              <button class="btn sm ghost" onclick={() => (editing = items.find((i) => i.id === a.id))}>Kaydı aç</button>
+              <button class="icon-btn sm" title="Tamam, gizle" onclick={() => suggestionAct('subs_dismiss_alert', a.key)}><Icon name="x" size={15} /></button>
+            </div>
+          </div>
+        {/each}
+      </div>
+    {/if}
+
+    {#if suggestions.length || ignoredItems.length}
       <div class="card suggest">
         <div class="side-title"><Icon name="sparkles" size={16} />Ekstrelerden öneriler<span class="badge accent">{suggestions.length}</span>
           <span class="grow"></span>
-          {#if scan?.ignored}<button class="link" onclick={() => suggestionAct('subs_unignore_all')}>{scan.ignored} yoksayılanı geri getir</button>{/if}
+          {#if ignoredItems.length}<button class="link" onclick={() => (showIgnored = !showIgnored)}>{showIgnored ? 'Yoksayılanları gizle' : `Yoksayılanlar (${ignoredItems.length})`}</button>{/if}
         </div>
+        {#if !suggestions.length}<p class="dim none-left">Yeni öneri yok.</p>{/if}
         {#each showAll ? suggestions : suggestions.slice(0, SUGGEST_LIMIT) as s (s.key)}
           <div class="sug">
             <span class="mark">{s.name.slice(0, 1).toLocaleUpperCase('tr')}</span>
@@ -201,6 +233,20 @@
         {/each}
         {#if suggestions.length > SUGGEST_LIMIT}
           <button class="link more" onclick={() => (showAll = !showAll)}>{showAll ? 'Daha az göster' : `${suggestions.length - SUGGEST_LIMIT} öneri daha`}</button>
+        {/if}
+        {#if showIgnored && ignoredItems.length}
+          <div class="ignored">
+            <div class="ignored-head"><span class="dim">Yoksayılan öneriler</span>
+              {#if ignoredItems.length > 1}<button class="link" onclick={() => suggestionAct('subs_unignore_all')}>Hepsini geri getir</button>{/if}</div>
+            {#each ignoredItems as s (s.key)}
+              <div class="sug off">
+                <span class="mark">{s.name.slice(0, 1).toLocaleUpperCase('tr')}</span>
+                <div class="info"><b class="ellipsis">{s.name}</b><small class="dim">{s.count} ödeme · son {shortDate(s.last_date)}</small></div>
+                <div class="num"><b>{money(s.average)}</b></div>
+                <button class="btn sm" onclick={() => suggestionAct('subs_ignore', s.key, true)}><Icon name="restore" size={14} />Geri getir</button>
+              </div>
+            {/each}
+          </div>
         {/if}
       </div>
     {/if}
@@ -300,7 +346,7 @@
 </section>
 
 {#if scanOpen}
-  <StatementScanModal {scan} onstart={startScan} onclose={() => (scanOpen = false)} />
+  <StatementScanModal {scan} onstart={startScan} onauto={(on) => suggestionAct('subs_set_auto', on)} onclose={() => (scanOpen = false)} />
 {/if}
 
 {#if editing}
@@ -331,6 +377,18 @@
   .link { color: var(--accent); font-weight: 600; font-size: 12px; }
   .link:hover { text-decoration: underline; }
   .more { align-self: flex-start; padding: 8px 0 6px; }
+  .alerts { padding: 4px 16px; margin-bottom: 16px; border-color: color-mix(in srgb, var(--warning) 40%, var(--outline)); }
+  .alert-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; min-width: 0; }
+  .alert-row + .alert-row { border-top: 1px solid var(--outline); }
+  .alert-row > :global(svg) { color: var(--warning); flex: none; }
+  .alert-row .info { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .alert-row .title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+  .alert-row .title .dim { font-size: 12.5px; white-space: nowrap; }
+  .alert-row small { font-size: 11.5px; margin-top: 2px; }
+  .none-left { font-size: 12.5px; margin: 4px 0 8px; }
+  .ignored { margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--outline); }
+  .ignored-head { display: flex; justify-content: space-between; align-items: center; font-size: 12px; padding-bottom: 4px; }
+  .sug.off .mark, .sug.off .info, .sug.off .num { opacity: .6; }
   .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
   .stat { display: flex; flex-direction: column; gap: 4px; padding: 16px 18px; }
   .stat b { font-size: 22px; font-weight: 700; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }

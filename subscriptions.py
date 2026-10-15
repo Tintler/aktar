@@ -43,6 +43,10 @@ ESTIMATE_COUNT = 6          # degisken tutarin tahmini: son bu kadar odemenin or
 # Abonelik sayilmayan satirlar: kart borcu odemesi, kendi hesaplari arasi transfer.
 SKIP_TYPES = ('card_payment', 'transfer')
 SKIP_WORDS = ('kredi karti odemesi', 'kart borcu', 'cep subesi')
+# F114: zam / yuksek fatura uyarilari
+ALERT_DAYS = 45             # son odemesi bundan eski kayit uyarilmaz
+RISE = 0.30                 # degisken fatura: onceki odemelerin ortalamasinin bu kadar ustu
+DISMISS_LIMIT = 200
 
 
 def path():
@@ -196,13 +200,17 @@ def load():
 
 
 def settings():
-    """Ekstre taramasi ayarlari: taranan koleksiyonlar, yoksayilan oneriler, son tarama."""
+    """Ekstre taramasi ayarlari: taranan koleksiyonlar, yoksayilan oneriler, son tarama,
+    yeni ekstrelerin kendiliginden taranmasi (F114) ve kapatilan uyarilar."""
     value = _read_file()
     sources = value.get('sources')
     ignored = value.get('ignored')
+    dismissed = value.get('dismissed')
     scan = value.get('scan') if isinstance(value.get('scan'), dict) else {}
     return {'sources': [str(slug) for slug in sources] if isinstance(sources, list) else [],
             'ignored': [str(key) for key in ignored] if isinstance(ignored, list) else [],
+            'auto': bool(value.get('auto', True)),
+            'dismissed': [str(key) for key in dismissed][-DISMISS_LIMIT:] if isinstance(dismissed, list) else [],
             'scan': {'date': str(scan.get('date') or ''),
                      'files': [str(item) for item in scan.get('files') or [] if isinstance(item, str)]}}
 
@@ -355,7 +363,78 @@ def view(today=None):
         },
         'categories': CATEGORIES,
         'today': today.isoformat(),
+        'alerts': alerts(today=today),
     }
+
+
+def alerts(items=None, today=None, dismissed=None):
+    """Son odemesi yeni olan aktif kayitlarda: sabit tutarli kaydin tutari degistiyse (zam ya da
+    indirim) ya da degisken faturanin son odemesi onceki ortalamanin RISE kadar ustundeyse uyari.
+    Kimlik kayit + son odemedir; kapatilan uyari yeni odeme gelince yeniden cikabilir."""
+    today = today or date.today()
+    items = load() if items is None else items
+    dismissed = set(settings()['dismissed'] if dismissed is None else dismissed)
+    result = []
+    for item in items:
+        payments = item['payments']
+        if len(payments) < 2 or item['status'] not in ('active', 'trial') or item['kind'] != 'recurring':
+            continue
+        last = payments[-1]
+        if (today - date.fromisoformat(last['date'])).days > ALERT_DAYS:
+            continue
+        key = f'{item["id"]}|{last["date"]}|{last["amount"]}'
+        if key in dismissed:
+            continue
+        if item['variable']:
+            before = [payment['amount'] for payment in payments[-1 - ESTIMATE_COUNT:-1]]
+            reference = round(sum(before) / len(before), 2)
+            if last['amount'] < reference * (1 + RISE):
+                continue
+            kind = 'high'
+        else:
+            reference = payments[-2]['amount']
+            tolerance = max(0.01 * reference, 0.5)
+            # Tutar kayitta zaten yeni fiyata cekildiyse (Tutari guncelle) uyari kalkar.
+            if abs(last['amount'] - reference) <= tolerance or abs(item['amount'] - last['amount']) <= tolerance:
+                continue
+            kind = 'price_up' if last['amount'] > reference else 'price_down'
+        result.append({'key': key, 'id': item['id'], 'name': item['name'], 'kind': kind, 'date': last['date'],
+                       'amount': last['amount'], 'reference': reference, 'currency': item['currency'],
+                       'ratio': round((last['amount'] - reference) / reference, 4) if reference else None,
+                       'stored': item['amount']})
+    result.sort(key=lambda alert: alert['date'], reverse=True)
+    return result
+
+
+def _money(value, currency):
+    text = f'{value:,.2f}'.replace(',', ' ').replace('.', ',').replace(' ', '.')
+    return f'{text} {"TL" if currency == "TRY" else currency}'
+
+
+def alert_text(alert):
+    """Bildirim metni: 'Netflix tutarı 229,99 TL → 279,99 TL (+%21,7)'."""
+    ratio = f'{abs(alert["ratio"]) * 100:.0f}'.replace('.', ',') if alert['ratio'] is not None else '?'
+    amount, reference = _money(alert['amount'], alert['currency']), _money(alert['reference'], alert['currency'])
+    if alert['kind'] == 'high':
+        return f'{alert["name"]}: son ödeme {amount}, önceki ortalamanın %{ratio} üstünde ({reference}).'
+    sign = '+' if alert['kind'] == 'price_up' else '-'
+    return f'{alert["name"]} tutarı değişti: {reference} → {amount} ({sign}%{ratio}).'
+
+
+def dismiss(key):
+    dismissed = [value for value in settings()['dismissed'] if value != key] + [str(key)]
+    return save_settings(dismissed=dismissed[-DISMISS_LIMIT:])
+
+
+def apply_price(ident):
+    """Zam uyarisinda kaydin tutarini son odemeye esitler."""
+    items = load()
+    item = next((item for item in items if item['id'] == ident), None)
+    if item is None or not item['payments']:
+        raise ValueError('Kayıt bulunamadı.')
+    item['amount'] = item['payments'][-1]['amount']
+    _write(items)
+    return item
 
 
 # ---------------------------------------------------------------- ekstre eslestirme (F110)

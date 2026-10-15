@@ -55,7 +55,7 @@ let toastId = 0;
 export function toast(message, kind = 'info') {
   const id = ++toastId;
   toasts.push({ id, message, kind });
-  setTimeout(() => dismissToast(id), kind === 'error' ? 8000 : 4500);
+  setTimeout(() => dismissToast(id), kind === 'error' || kind === 'warning' ? 8000 : 4500);
 }
 
 // Svelte vekilleri yuzunden indexOf calismaz; kimlikle bulunur.

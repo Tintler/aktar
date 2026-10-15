@@ -232,7 +232,7 @@ class LibraryMixin:
         return {'collections': self.library_collections(), 'slug': self._lib_slug,
                 'title': data['title'] if data else '', 'folders': self._folders() if data else [],
                 'rows': rows, 'meta': self._meta() if data else '', 'scanning': self._lib_scanning,
-                'queue': self._queue, 'kinds': KIND_LABELS}
+                'queue': self._queue, 'kinds': KIND_LABELS, 'watch': bool((data or {}).get('watch'))}
 
     def _mail_fallback(self):
         return {library._key(path): value for path, value in getattr(self, '_mail_dates', {}).items()}
@@ -661,6 +661,11 @@ class LibraryMixin:
             return self.library_state()
         videos = [entry['path'] for entry in self._lib_entries if not entry['missing']]
         collection = (self._lib_slug, self._lib_data['title'], videos) if self._lib_data else None
+        self._start_queue(entries, whisper, summaries, collection, vision, ocr_engine)
+        return self.library_state()
+
+    def _start_queue(self, entries, whisper, summaries, collection, vision=True, ocr_engine=''):
+        """Kuyrugu baslatir; acik olmayan koleksiyonun dosyalari da olabilir (F114 klasor izleme)."""
         self._queue_cancel = threading.Event()
         self._queue_resume = threading.Event()
         self._queue_resume.set()
@@ -672,7 +677,6 @@ class LibraryMixin:
             target=self._run_queue, args=(entries, whisper, bool(summaries), collection, bool(vision), ocr_engine),
             name='aktar-library-queue', daemon=True)
         self._queue_worker.start()
-        return self.library_state()
 
     def _queue_running(self):
         return self._queue_worker is not None and self._queue_worker.is_alive()
@@ -812,6 +816,8 @@ class LibraryMixin:
         self._row_status = {}
         self._emit('queue', {'queue': None, 'message': message, 'failed': failed})
         self._rescan()
+        if collection and hasattr(self, '_subs_auto_scan'):
+            self._subs_auto_scan(collection[0])  # F114: hazirlanan ekstreler (OCR'li) okunur
 
     def _refresh_entry(self, path):
         key = library._key(path)

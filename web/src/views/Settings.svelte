@@ -116,7 +116,7 @@
             <input class="field w" bind:value={cfg.base_url} disabled={locked('base_url')} placeholder="http://127.0.0.1:1234/v1" />
           </div>
           <div class="fr">
-            <div class="l">Analiz modeli<small>Çeviri, dosya özetleri ve analiz için kullanılan model.</small></div>
+            <div class="l">Analiz modeli<small>Çeviri, dosya özetleri, ekstre okuma ve analiz için kullanılan model.</small></div>
             <div class="pick">
               <select class="field w" bind:value={cfg.model} disabled={locked('model')}>
                 {#each withCurrent(chatNames, cfg.model) as m}<option value={m}>{m}</option>{/each}

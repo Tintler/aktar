@@ -270,7 +270,11 @@ def extract(path, client, cfg, log=print, base=None, force=False):
     pages = statement_text(path, base)
     text = '\n'.join(pages)
     record = {'version': VERSION, 'path': str(path), 'name': path.name, 'model': ''}
-    if not text.strip() or not looks_like_statement(text):
+    if not text.strip():
+        # Metni henuz yok (taranmis PDF hazirlanmadi): onbellege yazilmaz, OCR sonrasi yeniden denenir.
+        record.update(merge([]), status='none', problem='')
+        return record
+    if not looks_like_statement(text):
         record.update(merge([]), status='none', problem='')
     else:
         budget = max(4000, int(cfg.get('qa_context_chars', 24000)) - 2000)

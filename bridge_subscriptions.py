@@ -13,7 +13,7 @@ import expenses
 import library
 import statements
 import subscriptions
-from app_core import Client, load_config, qa_config
+from app_core import Client, load_config
 
 
 class SubscriptionsMixin:
@@ -45,9 +45,15 @@ class SubscriptionsMixin:
             'statements': [{'name': record['name'], 'path': record['path'], 'account': record['account'],
                             'status': record['status'], 'problem': record.get('problem', ''),
                             'count': len(record['transactions'])} for record in records],
-            'ignored': len(options['ignored']),
+            'ignored': len(options['ignored']), 'auto': options['auto'],
         }
-        view['suggestions'] = subscriptions.suggestions(rows, ignored=options['ignored'])
+        everything = subscriptions.suggestions(rows)
+        ignored = set(options['ignored'])
+        view['suggestions'] = [item for item in everything if item['key'] not in ignored]
+        # Yoksayilanlar tek tek geri getirilebilsin diye adlariyla (artik oneri olmayanlar listede yok).
+        view['ignored'] = [{'key': item['key'], 'name': item['name'], 'count': item['count'],
+                            'last_date': item['last_date'], 'average': item['average']}
+                           for item in everything if item['key'] in ignored]
         return view
 
     def _subs_suggestion(self, key):
@@ -135,8 +141,10 @@ class SubscriptionsMixin:
         return self._subs_view()
 
     # ------------------------------------------------------------------ tarama
-    def subs_scan(self, slugs=None, force=False):
-        """Secilen koleksiyonlardaki ekstreleri arka planda okur. `slugs` None: kayitli secim."""
+    def subs_scan(self, slugs=None, force=False, auto=False):
+        """Secilen koleksiyonlardaki ekstreleri arka planda okur. `slugs` None: kayitli secim.
+        `auto` (F114): yeni dosya/e-posta sonrasi kendiliginden tarama; yalniz yeni ekstre
+        okunduysa bildirim cikar."""
         if self._subs_busy:
             return {'error': 'Tarama zaten sürüyor.'}
         collections = library.list_collections()
@@ -158,11 +166,12 @@ class SubscriptionsMixin:
         if not paths:
             return {'error': 'Seçilen koleksiyonlarda belge yok.'}
         try:
-            client = Client(qa_config(load_config()), log=self._log)  # F72: soru-cevap modeli
+            client = Client(load_config(), log=self._log)  # analiz modeli (ozetler ve belge tarihi gibi)
         except (ValueError, RuntimeError) as error:
             return {'error': str(error)}
         self._subs_busy = {'done': 0, 'total': len(paths), 'name': ''}
         self._subs_stop = False
+        alerted = {alert['key'] for alert in subscriptions.alerts()}
 
         def work():
             cfg, failed, read = client.cfg, [], 0
@@ -198,8 +207,18 @@ class SubscriptionsMixin:
                        + (f' · {read} ekstre yeni okundu' if read else '')
                        + (f' · {len(failed)} dosya okunamadı' if failed else '')
                        + (' · durduruldu' if stopped else ''))
+            fresh_alerts = [alert for alert in state['alerts'] if alert['key'] not in alerted]
+            if auto and not read and not failed:
+                self._emit('subs_scan', {'busy': None, 'state': state})  # yeni ekstre yok: sessiz
+                return
             self._log('Ekstre taraması: ' + message)
-            self._emit('subs_scan', {'busy': None, 'state': state, 'message': message})
+            if auto:
+                self._emit('subs_scan', {'busy': None, 'state': state})
+                self._emit('toast', {'message': 'Yeni ekstreler okundu: ' + message, 'kind': 'ok'})
+            else:
+                self._emit('subs_scan', {'busy': None, 'state': state, 'message': message})
+            for alert in fresh_alerts[:3]:
+                self._emit('toast', {'message': subscriptions.alert_text(alert), 'kind': 'warning'})
 
         threading.Thread(target=work, name='aktar-statement-scan', daemon=True).start()
         return self._subs_view()
@@ -207,3 +226,42 @@ class SubscriptionsMixin:
     def subs_scan_stop(self):
         self._subs_stop = True
         return {'ok': True}
+
+    def _subs_auto_scan(self, slug=None):
+        """F114: e-postadan ya da izlenen klasorden yeni dosya gelince, hazirlik bitince.
+        Yalniz ekstre taramasi yapilmis (kaynak secilmis) ve otomatik tarama acikken calisir;
+        okunmus ekstreler onbellekten gelir, yalniz yeniler modele gider."""
+        options = subscriptions.settings()
+        if not options['auto'] or not options['sources'] or self._subs_busy:
+            return
+        if slug and slug not in options['sources']:
+            return
+        try:
+            result = self.subs_scan(None, auto=True)
+        except Exception as error:  # cagiran is (kuyruk, e-posta) bundan etkilenmesin
+            result = {'error': str(error)}
+        if isinstance(result, dict) and 'error' in result:
+            self._log('Ekstreler kendiliğinden taranamadı: ' + result['error'])
+
+    def subs_set_auto(self, on):
+        try:
+            subscriptions.save_settings(auto=bool(on))
+        except OSError as error:
+            return {'error': str(error)}
+        return self._subs_view()
+
+    # ------------------------------------------------------------------ uyarilar (F114)
+    def subs_dismiss_alert(self, key):
+        try:
+            subscriptions.dismiss(str(key or ''))
+        except OSError as error:
+            return {'error': str(error)}
+        return self._subs_view()
+
+    def subs_apply_price(self, ident):
+        try:
+            item = subscriptions.apply_price(str(ident or ''))
+        except (ValueError, OSError) as error:
+            return {'error': str(error)}
+        self._log(f'Tutar güncellendi: {item["name"]} → {item["amount"]:.2f}')
+        return self._subs_view()

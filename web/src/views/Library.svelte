@@ -296,6 +296,9 @@
           <button class="btn" onclick={() => add('library_choose_folder')}><Icon name="folderPlus" size={16} />Klasör ekle</button>
           <button class="btn" onclick={() => add('library_choose_files')}><Icon name="filePlus" size={16} />Dosya ekle</button>
           <button class="btn" onclick={() => (mailOpen = true)} title="Gmail'deki ekstre ve raporları kurallara göre bu koleksiyona indirir"><Icon name="mail" size={16} />E-postadan al</button>
+          <button class="btn" class:watching={lib.watch} onclick={async () => setLibrary(await act('library_set_watch', !lib.watch))}
+            title={lib.watch ? 'Klasörler izleniyor: yeni dosyalar (ve e-posta kurallarıyla gelenler) uygulama açıkken kendiliğinden hazırlanır. Kapatmak için tıklayın.' : 'Klasörlere yeni dosya düşünce uygulama açıkken kendiliğinden hazırlansın'}>
+            <Icon name="eye" size={16} />{lib.watch ? 'İzleniyor' : 'Klasörü izle'}</button>
           <button class="btn primary lg" disabled={!!queue || !lib.rows.some((r) => !r.missing)} onclick={() => (view.preparing = true)}
             title="Transkriptleri çıkarır, indeksler ve özetler"><Icon name="sparkles" size={16} />Hepsini hazırla</button>
           <button class="btn" disabled={!!queue || !lib.rows.length} onclick={resetCollection}
@@ -417,6 +420,7 @@
   .meta { color: var(--secondary); font-size: 13px; display: flex; align-items: center; gap: 6px; }
   .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
   .actions .grow { flex: 1; }
+  .btn.watching { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
   .folder { display: inline-flex; align-items: center; gap: 6px; height: 30px; font-size: 12.5px; }
   .folder :global(svg) { color: var(--secondary); }
 

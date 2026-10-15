@@ -117,6 +117,13 @@ class StatementTests(unittest.TestCase):
         record = statements.extract(other, FakeClient(), self.cfg)
         self.assertEqual((record['account'], record['status'], record['transactions']), ('none', 'none', []))
 
+    def test_file_without_text_is_not_cached(self):
+        empty = Path(self.temp.name) / 'taranmis.txt'
+        empty.write_text('   ', encoding='utf-8')
+        record = statements.extract(empty, FakeClient(), self.cfg)
+        self.assertEqual(record['status'], 'none')
+        self.assertIsNone(statements.cached(empty))  # OCR'dan sonra yeniden denenir
+
     def test_transactions_deduplicate_overlapping_statements(self):
         first = statements.merge([GOOD])
         records = [dict(first, name='a.pdf'), dict(first, name='b.pdf')]

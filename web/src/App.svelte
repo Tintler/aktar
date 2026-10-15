@@ -112,13 +112,12 @@
     </nav>
     <div class="rule"></div>
     <div class="side-body" inert={app.sideCollapsed}><Collections /></div>
-    <div class="lm" title={app.sideCollapsed ? [models.model, models.message].filter(Boolean).join('\n') : models.message || ''}>
+    <div class="lm" title={models.message || ''}>
       <div class="row">
         <span class="dot {models.state === 'probing' ? 'wait' : models.state === 'failed' ? 'bad' : modelListed ? '' : 'wait'}"></span>
         <span class="st">{models.state === 'probing' ? 'LM Studio sorgulanıyor…' : models.state === 'failed' ? 'LM Studio bağlı değil' : modelListed ? 'LM Studio bağlı' : 'Model listede yok'}</span>
         <button class="icon-btn sm" title="Yeniden sorgula" onclick={() => call('refresh_models')}><Icon name="refresh" size={14} /></button>
       </div>
-      <div class="m selectable ellipsis">{models.model}</div>
     </div>
   </aside>
 
@@ -155,7 +154,7 @@
 <div class="toasts">
   {#each toasts as t (t.id)}
     <div class="toast {t.kind}">
-      <Icon name={t.kind === 'error' ? 'alert' : t.kind === 'ok' ? 'check' : 'info'} size={16} /><span class="selectable">{t.message}</span>
+      <Icon name={t.kind === 'error' || t.kind === 'warning' ? 'alert' : t.kind === 'ok' ? 'check' : 'info'} size={16} /><span class="selectable">{t.message}</span>
       <button class="close" title="Kapat" onclick={() => dismissToast(t.id)}><Icon name="x" size={14} /></button>
     </div>
   {/each}
@@ -175,7 +174,7 @@
   .logo :global(svg) { flex: none; transition: transform .32s cubic-bezier(.22, .8, .24, 1); }
   .logo:active :global(svg) { transform: scale(.92); }
   .logo i { color: var(--accent); font-style: normal; }
-  .word, .label-text, .side-body, .lm .st, .lm .m, .lm .icon-btn, .rule { transition: opacity .2s ease; }
+  .word, .label-text, .side-body, .lm .st, .lm .icon-btn, .rule { transition: opacity .2s ease; }
   nav { display: flex; flex-direction: column; gap: 2px; }
   .nav { display: flex; align-items: center; gap: 16px; padding: 10px 14px; border-radius: 8px; color: var(--secondary); font-weight: 700; font-size: 16px; width: 100%; text-align: left; }
   .nav:hover { color: var(--text); }
@@ -185,7 +184,7 @@
   .badge-dot { position: absolute; top: -2px; right: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 2px var(--panel); }
   .rule { height: 1px; background: var(--outline); margin: 14px 6px; }
   .side-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  .mini .word, .mini .label-text, .mini .side-body, .mini .lm .st, .mini .lm .m, .mini .lm .icon-btn { opacity: 0; pointer-events: none; }
+  .mini .word, .mini .label-text, .mini .side-body, .mini .lm .st, .mini .lm .icon-btn { opacity: 0; pointer-events: none; }
   .mini .rule { opacity: .6; }
   .mini .lm { background: transparent; padding-left: 22px; }
   .lm { margin-top: 8px; padding: 10px 12px; border-radius: 10px; background: var(--surface); font-size: 12px; }
@@ -195,7 +194,6 @@
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); flex: none; }
   .dot.wait { background: var(--warning); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 25%, transparent); }
   .dot.bad { background: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 25%, transparent); }
-  .lm .m { color: var(--secondary); margin-top: 4px; }
 
   main { flex: 1; min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; }
   /* Pencere dugmeleri sag ustte sabit: panel kapaliyken ust cubuk onlara yer birakir. */
@@ -217,4 +215,6 @@
   .toast.info > :global(svg) { color: var(--accent); }
   .toast.error { border-color: color-mix(in srgb, var(--danger) 50%, var(--outline)); }
   .toast.error > :global(svg) { color: var(--danger); }
+  .toast.warning { border-color: color-mix(in srgb, var(--warning) 50%, var(--outline)); }
+  .toast.warning > :global(svg) { color: var(--warning); }
 </style>

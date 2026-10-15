@@ -5,7 +5,7 @@
   import Toggle from './Toggle.svelte';
   import { shortDate } from '../lib/subscriptions.js';
 
-  let { scan, onstart, onclose } = $props();
+  let { scan, onstart, onclose, onauto } = $props();
 
   let selected = $state([...(scan?.sources ?? [])]);
   let force = $state(false);
@@ -21,7 +21,7 @@
 </script>
 
 <Modal title="Ekstrelerden tara" width={560} {onclose}>
-  <p class="dim intro">Seçilen koleksiyonlardaki banka hesap özetleri ve kredi kartı ekstreleri yerel modelle okunur. Ödemeler, arama metni uyan kayıtlara bağlanır; hiçbir kayda uymayan faturalar ve düzenli ödemeler öneri olarak listelenir. Okunan ekstreler saklanır, aynı dosya bir daha okunmaz.</p>
+  <p class="dim intro">Seçilen koleksiyonlardaki banka hesap özetleri ve kredi kartı ekstreleri Ayarlar'daki analiz modeliyle okunur. Ödemeler, arama metni uyan kayıtlara bağlanır; hiçbir kayda uymayan faturalar ve düzenli ödemeler öneri olarak listelenir. Okunan ekstreler saklanır, aynı dosya bir daha okunmaz.</p>
 
   <div class="label">Koleksiyonlar</div>
   <div class="list">
@@ -33,6 +33,8 @@
   </div>
   <div class="toggle-row"><Toggle bind:checked={force} label="Okunmuş ekstreleri yeniden oku" />
     <span class="dim">Model değiştiyse ya da bir ekstrenin toplamı tutmadıysa.</span></div>
+  <div class="toggle-row"><Toggle checked={scan?.auto ?? true} onchange={(on) => onauto?.(on)} label="Yeni ekstreleri kendiliğinden tara" />
+    <span class="dim">E-postadan ya da izlenen klasörden yeni dosya gelince seçili koleksiyonlar arka planda taranır; zam ve yüksek fatura uyarı verir.</span></div>
 
   {#if scan?.statements?.length}
     <div class="label">Okunan ekstreler{#if scan.date}<span class="dim"> · son tarama {shortDate(scan.date.slice(0, 10))} {scan.date.slice(11, 16)}</span>{/if}</div>
@@ -67,4 +69,5 @@
   .statements :global(svg) { color: var(--secondary); flex: none; }
   .list > p { padding: 10px 12px; margin: 0; font-size: 12.5px; }
   .toggle-row { display: flex; align-items: center; gap: 14px; font-size: 12px; margin-top: 12px; }
+  .toggle-row > :global(:first-child) { flex: none; white-space: nowrap; }
 </style>

@@ -108,7 +108,12 @@ export function createMock(emit) {
     { key: 'm:deezer', name: 'Deezer', match: 'Deezer', category: '', count: 2, months: 2, average: 99.99, last: 99.99, last_date: '2026-09-07', first_date: '2026-08-07',
       day: 7, variable: false, method: 'credit', subscriber_no: '', description: 'DEEZER SA DEEZER', payments: [] },
   ];
-  let ignored = 0;
+  let ignoredList = [];
+  let autoScan = true;
+  let alerts = [
+    { key: 's3|2026-09-02|504', id: 's3', name: 'Elektrik', kind: 'high', date: '2026-10-02', amount: 812.4, reference: 572.37, currency: 'TRY', ratio: 0.4194, stored: 840 },
+    { key: 's1|2026-10-08|279.99', id: 's1', name: 'Netflix', kind: 'price_up', date: '2026-10-08', amount: 279.99, reference: 229.99, currency: 'TRY', ratio: 0.2174, stored: 229.99 },
+  ];
   const scanInfo = { date: '2026-10-15T09:30:00', busy: null, sources: ['finans'], collections: [{ slug: 'finans', title: 'Finans' }, { slug: 'ml', title: 'Makine öğrenmesi' }],
     statements: [{ name: 'Enpara Kredi Kartı ekstreniz.pdf', path: 'a', account: 'credit_card', status: 'ok', problem: '', count: 7 },
       { name: '2026 Eylül ayı hesap özetiniz.pdf', path: 'b', account: 'bank_account', status: 'mismatch', problem: 'fark var', count: 6 }] };
@@ -141,7 +146,7 @@ export function createMock(emit) {
       upcoming: sum(items.filter((s) => s.days_left !== null && s.days_left <= 30), (s) => s.amount), upcoming_days: 30,
       active: items.filter((s) => ['active', 'trial'].includes(s.status)).length,
       by_payment: Object.values(groups).sort((a, b) => b.monthly - a.monthly) },
-      scan: { ...scanInfo, ignored }, suggestions };
+      scan: { ...scanInfo, ignored: ignoredList.length, auto: autoScan }, suggestions, ignored: ignoredList, alerts };
   };
   const api = {
     library_open: async () => library,
@@ -163,9 +168,22 @@ export function createMock(emit) {
       return subsView();
     },
     subs_link: async (key) => { suggestions = suggestions.filter((x) => x.key !== key); return subsView(); },
-    subs_ignore: async (key) => { suggestions = suggestions.filter((x) => x.key !== key); ignored++; return subsView(); },
-    subs_unignore_all: async () => { ignored = 0; return subsView(); },
+    subs_ignore: async (key, undo) => {
+      if (undo) { suggestions = [...suggestions, ...ignoredList.filter((x) => x.key === key)]; ignoredList = ignoredList.filter((x) => x.key !== key); }
+      else { ignoredList = [...ignoredList, ...suggestions.filter((x) => x.key === key)]; suggestions = suggestions.filter((x) => x.key !== key); }
+      return subsView();
+    },
+    subs_unignore_all: async () => { suggestions = [...suggestions, ...ignoredList]; ignoredList = []; return subsView(); },
     subs_scan_stop: async () => ({ ok: true }),
+    subs_set_auto: async (on) => { autoScan = !!on; return subsView(); },
+    subs_dismiss_alert: async (key) => { alerts = alerts.filter((a) => a.key !== key); return subsView(); },
+    subs_apply_price: async (id) => {
+      const a = alerts.find((x) => x.id === id);
+      subs = subs.map((x) => (x.id === id ? { ...x, amount: a.amount } : x));
+      alerts = alerts.filter((x) => x.id !== id);
+      return subsView();
+    },
+    library_set_watch: async (on) => ({ ...library, watch: !!on }),
     // F111: harcama panosu (sabit ornek; gercek hesap expenses.py'de)
     subs_spending: async (month) => {
       const totals = [['2026-03', 8120.4, true], ['2026-04', 14250.9], ['2026-05', 12980.35], ['2026-06', 16840], ['2026-07', 13110.6],
@@ -197,7 +215,7 @@ export function createMock(emit) {
         if (done < 3) emit('subs_scan', { busy: { done: done++, total: 3, name: `Ekstre ${done}.pdf` } });
         else { clearInterval(timer); scanInfo.busy = null; emit('subs_scan', { busy: null, state: subsView(), message: '2 ekstre, 3 öneri' }); }
       }, 700);
-      return { ...subsView(), scan: { ...scanInfo, ignored, busy: { done: 0, total: 3, name: '' } } };
+      return { ...subsView(), scan: { ...scanInfo, ignored: ignoredList.length, busy: { done: 0, total: 3, name: '' } } };
     },
     // F104: sohbet sablonlari
     templates_list: async () => templates.map((t) => ({ ...t })),

@@ -200,6 +200,8 @@ class MailMixin:
             self._mail_dates = mail_import.file_dates(state)
             if files:
                 self._rescan()
+        if files and hasattr(self, '_subs_auto_scan'):
+            self._subs_auto_scan(slug)  # F114: inen ekstreler hemen okunur
         return {'message': message, 'files': files}
 
     def _mail_auto(self):
