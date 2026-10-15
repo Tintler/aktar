@@ -162,6 +162,14 @@ class AssistantTests(StoreTestCase):
         self.assertEqual(turn['parts'], [('text', 'Merhaba! Size nasıl yardımcı olabilirim?')])
         self.assertEqual(turn['sources'], [])
 
+    def test_template_instructions_follow_fixed_rules(self):
+        client = FakeClient('Kısa cevap.')
+        turn = self.bot().ask('merhaba', client=client, instructions='USER INSTRUCTIONS\nKısa yaz.', template='Kısa')
+        system = client.messages[0]['content']
+        self.assertGreater(system.index('USER INSTRUCTIONS'), system.index('- Charts:'))
+        self.assertLess(system.index('USER INSTRUCTIONS'), system.index('LIBRARY OVERVIEW (collections)'))
+        self.assertEqual(turn['template'], 'Kısa')
+
     def test_history_is_sent_without_citations(self):
         client = FakeClient('Tamam.')
         bot = self.bot([{'question': 'regresyon?', 'answer': 'Anlatılıyor [V1 0:40].'}])

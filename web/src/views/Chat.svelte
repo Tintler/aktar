@@ -3,6 +3,8 @@
   import Icon from '../lib/Icon.svelte';
   import Logo from '../components/Logo.svelte';
   import ThinkToggle from '../components/ThinkToggle.svelte';
+  import TemplatePicker from '../components/TemplatePicker.svelte';
+  import { templateFor } from '../lib/templates.svelte.js';
   import Thought from '../components/Thought.svelte';
   import { app, act, loadAssistant, refreshConversations, openFile, toast } from '../lib/state.svelte.js';
   import { prompt, confirm } from '../lib/confirm.svelte.js';
@@ -56,7 +58,7 @@
     text = '';
     queueMicrotask(grow);
     stick = true;
-    const state = await act('assistant_ask', message, app.think);
+    const state = await act('assistant_ask', message, app.think, templateFor('assistant'));
     if (state) app.assistant = state;
     refreshConversations();
   }
@@ -165,6 +167,7 @@
       placeholder={chat?.locked ? 'Başka bir sohbette cevap hazırlanıyor…' : big ? 'Bir şey sorun ya da konuşmaya başlayın…' : 'Yanıtlayın…'}></textarea>
     <div class="row">
       <ThinkToggle label />
+      <TemplatePicker kind="assistant" label />
       <span class="grow"></span>
       {#if chat?.busy}
         <button class="send stop" type="button" title="Durdur" onclick={() => act('assistant_stop')}><Icon name="stop" size={14} /></button>
@@ -224,6 +227,7 @@
                     {/each}
                   </div>
                 {/if}
+                {#if entry.template}<div class="tpl-tag" title="Bu cevap bu sohbet şablonuyla üretildi"><Icon name="scroll" size={12} />{entry.template}</div>{/if}
                 <div class="tools"><button class="icon-btn sm" title="Kopyala" onclick={() => copy(entry)}><Icon name="copy" size={14} /></button></div>
               </div>
             {:else if entry.kind === 'error'}

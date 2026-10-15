@@ -245,7 +245,8 @@ class Assistant:
             + context.replace('VIDEOS IN THE EXCERPTS:', 'FILES IN THE NOTES:', 1)
         return text, videos, session
 
-    def ask(self, question, on_delta=None, cancelled=None, client=None, think=None, on_reasoning=None):
+    def ask(self, question, on_delta=None, cancelled=None, client=None, think=None, on_reasoning=None,
+            instructions='', template=''):
         """Cevaplar. Donen: {'question', 'answer', 'parts', 'sources', 'stopped'}."""
         question = ' '.join(str(question).split()) if '\n' not in str(question) else str(question).strip()
         if not question:
@@ -254,7 +255,7 @@ class Assistant:
         client = client or Client(cfg, log=self.log)
         notes, videos, session = self.notes(question, cfg, client)
         records = self.backlog(self._query(question), cfg, log=self.log)
-        system = SYSTEM_PROMPT + ''.join('\n\n' + part for part in (notes, records) if part)
+        system = SYSTEM_PROMPT + qa.extra_instructions(instructions) + ''.join('\n\n' + part for part in (notes, records) if part)
         messages = [{'role': 'system', 'content': system}]
         for turn in self.history[-HISTORY_TURNS:]:
             messages.append({'role': 'user', 'content': turn['question']})
@@ -273,7 +274,7 @@ class Assistant:
         parts = session.split_citations(answer, videos) if session is not None else [('text', answer)]
         turn = {'question': question, 'answer': answer, 'parts': parts,
                 'sources': collection_qa.CollectionQA._sources(parts), 'stopped': stopped,
-                'thinking': getattr(client, 'last_reasoning', ''), 'think': think}
+                'thinking': getattr(client, 'last_reasoning', ''), 'think': think, 'template': template}
         if answer:
             self.history.append({'question': question, 'answer': answer})
         return turn

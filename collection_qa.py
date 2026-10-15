@@ -355,7 +355,7 @@ class CollectionQA:
         return (bool(date), date, self._order(video))
 
     # soru
-    def ask(self, question, client=None, think=None, on_reasoning=None, cancelled=None):
+    def ask(self, question, client=None, think=None, on_reasoning=None, cancelled=None, instructions='', template=''):
         """Soruyu cevaplar. Donen: {'question','answer','parts','sources'}.
 
         on_reasoning(simdiye kadarki dusunce) verildiyse cevap akisli istenir (F102)."""
@@ -380,7 +380,8 @@ class CollectionQA:
             context += ('\n\nMOST RECENT DOCUMENT OF EACH SERIES (use for current values): '
                         + ', '.join(recent))
         messages = [{'role': 'system',
-                     'content': ANSWER_PROMPT + f'\n\nTODAY: {today()}\n\n' + context}]
+                     'content': ANSWER_PROMPT + qa.extra_instructions(instructions)
+                     + f'\n\nTODAY: {today()}\n\n' + context}]
         for turn in self.history[-HISTORY_TURNS:]:
             messages.append({'role': 'user', 'content': turn['question']})
             messages.append({'role': 'assistant', 'content': turn['answer']})
@@ -388,7 +389,8 @@ class CollectionQA:
         answer = self._chat(client, cfg, messages, on_reasoning, cancelled)
         parts = self.split_citations(answer, videos)
         turn = {'question': question, 'answer': answer, 'parts': parts,
-                'sources': self._sources(parts), 'thinking': getattr(client, 'last_reasoning', ''), 'think': think}
+                'sources': self._sources(parts), 'thinking': getattr(client, 'last_reasoning', ''), 'think': think,
+                'template': template}
         self.history.append(turn)
         return turn
 

@@ -66,7 +66,9 @@ export function createMock(emit) {
       row('Hesap Özeti (1).pdf', 'document', 'Ekstreler', '3 sayfa', 'PDF metni', 'ready', { key: 'e2', date: '2026-08', date_text: 'Ağu 2026', date_manual: true }),
     ],
   };
+  let templates = [{ id: 'finans', name: 'Finans analisti', text: 'Tutarları tabloyla ver.' }, { id: 'kisa', name: 'Kısa ve öz', text: 'Kısa yaz.' }];
   const chat = {
+    template: '', template_note: '',
     slug: 'ml', busy: false, enabled: true, note: '5 hazır dosya · 3 dosya henüz hazır değil',
     overview: { summary: 'Bu koleksiyon denetimli öğrenmenin temellerini doğrusal regresyondan karar ağaçlarına kadar adım adım anlatıyor.', topics: ['Regresyon', 'Gradyan inişi', 'Aşırı öğrenme', 'Düzenlileştirme yöntemleri (L1/L2) ve model karmaşıklığının doğrulama hatasına etkisi'], questions: ['Gradyan inişi nasıl çalışır?', 'Aşırı öğrenme nasıl önlenir?'], videos: 5 },
     entries: [
@@ -100,6 +102,14 @@ export function createMock(emit) {
     library_state: async () => library,
     library_overview: async () => library.collections.map((c) => ({ ...c, count: c.files, summary: chat.overview.summary, topics: chat.overview.topics })),
     chat_state: async () => ({ ...chat, entries: chat.entries.map((e) => ({ ...e })) }),
+    // F104: sohbet sablonlari
+    templates_list: async () => templates.map((t) => ({ ...t })),
+    templates_save: async (items) => (templates = items.filter((t) => t.name.trim() && t.text.trim()).map((t, i) => ({ ...t, id: t.id || 'm' + Date.now() + i }))),
+    chat_set_template: async (template, note) => {
+      if (template != null) chat.template = template;
+      if (note != null) chat.template_note = note.trim();
+      return { ...chat, entries: chat.entries.map((e) => ({ ...e })) };
+    },
     chat_ask: async (text, _selected, think) => {
       // F102: dusunme aciksa bekleyen kayitta dusunce canli akar, sonra cevaba donusur.
       const thought = think ? 'Soru öğrenme oranıyla ilgili. V3 videosunda salınım anlatılıyor, V1 yakınsama hızından bahsediyor. Ders notlarında da tipik değer aralığı var. Önce etkisini, sonra önerilen aralığı yazıp atıfları ekleyeceğim.' : '';
@@ -170,7 +180,7 @@ export function createMock(emit) {
     assistant_state: async () => conversation,
     assistant_new: async () => (conversation = { ...conversation, id: 'yeni', title: '', entries: [] }),
     assistant_list: async () => ({ items: [{ id: 'c1', title: 'Regresyon notları', updated: new Date().toISOString() }], current: conversation.id }),
-    assistant_ask: async (text, think) => {
+    assistant_ask: async (text, think, template) => {
       // Dusunme aciksa once dusunce kelime kelime akar (F101 canli dusunce alani).
       let answer = 'Bu sahte arka uçtan gelen bir **örnek** cevaptır.\n\n- Madde bir\n- Madde iki';
       // F103: "grafik" iceren soruya her turden ornek grafik
@@ -193,7 +203,7 @@ export function createMock(emit) {
         else {
           clearInterval(timer);
           conversation = { ...conversation, busy: false, stream: null, thinking: null, entries: [...conversation.entries,
-            { kind: 'assistant', think, thinking: thought, parts: [{ type: 'text', text: answer }], sources: [] }] };
+            { kind: 'assistant', think, thinking: thought, parts: [{ type: 'text', text: answer }], sources: [], template: templates.find((t) => t.id === template)?.name ?? '' }] };
           emit('assistant', { id: conversation.id });
         }
       }, 150);

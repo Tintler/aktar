@@ -401,6 +401,12 @@ CHART_RULE = '''- Charts: when the user asks for a chart or graph, or when the a
   "type" is one of bar, hbar, stacked, line, area, pie, doughnut, radar, scatter (scatter values are [x, y] pairs; labels are not needed). Values are plain JSON numbers without thousands separators or units; put the unit in "unit" (e.g. "TL", "%", "gr"). Optional: "x_label", "y_label". Use pie or doughnut only for parts of one whole, line or area for values over time, radar for comparing a few items on the same criteria, hbar for long category names. Take every number from the material or the user's message; never invent or estimate data to fill a chart. Still write the answer in text with its citations; cite in the sentences around the chart, never inside the JSON. At most 8 series; no chart for a single number.'''
 
 
+def extra_instructions(instructions):
+    """Sohbet sablonunun talimati (F104) sabit kurallarin hemen ardina eklenir."""
+    instructions = str(instructions or '').strip()
+    return '\n\n' + instructions if instructions else ''
+
+
 ANSWER_PROMPT = '''You answer a viewer's questions about one specific video. The video's content is given below.
 
 Rules:
@@ -734,10 +740,11 @@ class VideoQA:
         return text + '\n\n'.join(parts), sorted(chosen)
 
     # soru
-    def ask(self, question, cancelled=None, think=None, on_reasoning=None):
+    def ask(self, question, cancelled=None, think=None, on_reasoning=None, instructions='', template=''):
         """Soruyu cevaplar. Donen: {'question','answer','parts','sections'}.
 
-        on_reasoning(simdiye kadarki dusunce) verildiyse cevap akisli istenir (F102)."""
+        on_reasoning(simdiye kadarki dusunce) verildiyse cevap akisli istenir (F102).
+        instructions: sohbet sablonunun talimati (F104); template: kayda yazilan sablon adi."""
         question = ' '.join(str(question).split())
         if not question:
             raise ValueError('Soru boş olamaz.')
@@ -748,7 +755,7 @@ class VideoQA:
             ranked = self._route(client, cfg, question)
             self._check(cancelled)
         context, used = self.build_context(cfg, ranked)
-        messages = [{'role': 'system', 'content': ANSWER_PROMPT + '\n\n' + context}]
+        messages = [{'role': 'system', 'content': ANSWER_PROMPT + extra_instructions(instructions) + '\n\n' + context}]
         for turn in self.history[-HISTORY_TURNS:]:
             messages.append({'role': 'user', 'content': turn['question']})
             messages.append({'role': 'assistant', 'content': turn['answer']})
@@ -763,7 +770,7 @@ class VideoQA:
         answer = self._call(client, cfg, messages, parse, on_reasoning, cancelled)
         turn = {'question': question, 'answer': answer, 'sections': used,
                 'parts': split_citations(answer, self.lines, self.data.get('duration', 0)),
-                'thinking': getattr(client, 'last_reasoning', ''), 'think': think}
+                'thinking': getattr(client, 'last_reasoning', ''), 'think': think, 'template': template}
         self.history.append(turn)
         return turn
 

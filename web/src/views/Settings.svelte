@@ -1,6 +1,7 @@
 <script>
   import Icon from '../lib/Icon.svelte';
   import Toggle from '../components/Toggle.svelte';
+  import TemplateEditor from '../components/TemplateEditor.svelte';
   import { app, act, setTheme, reloadThemes, toast } from '../lib/state.svelte.js';
   import { resolveTheme } from '../lib/theme.js';
   import { call } from '../lib/api.js';
@@ -257,6 +258,8 @@
             <button class="btn sm" disabled={!cfg.backlog_url?.trim() || backlogStatus?.busy} onclick={testBacklog}>Bağlantıyı dene</button>
           </div>
         </section>
+
+        <TemplateEditor />
 
         <section>
           <h2>Gelişmiş</h2>

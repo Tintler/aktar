@@ -10,6 +10,7 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
+import chat_templates
 import library
 import media_server
 import qa
@@ -112,7 +113,8 @@ class PlayerMixin:
             if kind == 'assistant':
                 turn = value if isinstance(value, dict) else {'parts': value}  # F100 oncesi: yalniz parcalar
                 entries.append({'kind': 'assistant', 'parts': video_parts(turn['parts'], video.path), 'sources': [],
-                                'thinking': str(turn.get('thinking') or ''), 'think': turn.get('think')})
+                                'thinking': str(turn.get('thinking') or ''), 'think': turn.get('think'),
+                                'template': str(turn.get('template') or '')})
             elif kind == 'pending':
                 entries.append(pending_entry(value))
             else:
@@ -402,7 +404,7 @@ class PlayerMixin:
         return self._player_state()
 
     # ------------------------------------------------------------------ soru-cevap
-    def player_ask(self, question, think=None):
+    def player_ask(self, question, think=None, template=None):
         video = self._player_video
         text = ' '.join(str(question or '').split())
         if video is None or not text or video.session is None or not video.ready or video.asking:
@@ -410,11 +412,13 @@ class PlayerMixin:
         video.asking = True
         video.chips = None
         video.entries += [('user', text), ('pending', 'Yanıt hazırlanıyor…')]
+        instructions, name = chat_templates.instruction(template)
 
         def work():
             try:
                 turn = video.session.ask(text, think=think, on_reasoning=reasoning_feed(
-                    lambda: video.entries, lambda: self._push_player(video)))
+                    lambda: video.entries, lambda: self._push_player(video)),
+                    instructions=instructions, template=name)
             except (GracefulStop, RuntimeError, ValueError, OSError) as error:
                 self._log('[Soru] ' + str(error))
                 video.entries = [item for item in video.entries if item[0] != 'pending']
@@ -422,7 +426,7 @@ class PlayerMixin:
             else:
                 video.entries = [item for item in video.entries if item[0] != 'pending']
                 video.entries.append(('assistant', {'parts': turn['parts'], 'thinking': turn.get('thinking', ''),
-                                                    'think': turn.get('think')}))
+                                                    'think': turn.get('think'), 'template': name}))
             video.history = video.session.history
             library.save_chat(video.key, video.entries, video.history)
             video.asking = False

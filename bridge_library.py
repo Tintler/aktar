@@ -13,6 +13,7 @@ import threading
 import time
 from pathlib import Path
 
+import chat_templates
 import collection_qa
 import documents
 import library
@@ -157,7 +158,8 @@ def chat_entries(entries):
             sources = [{'path': str(item['video']), 'start': item['start'], 'label': item['label'],
                         'title': item['title'], 'count': item['count']} for item in value.get('sources', [])]
             result.append({'kind': 'assistant', 'parts': parts, 'sources': sources,
-                           'thinking': str(value.get('thinking') or ''), 'think': value.get('think')})
+                           'thinking': str(value.get('thinking') or ''), 'think': value.get('think'),
+                           'template': str(value.get('template') or '')})
         else:
             result.append({'kind': kind, 'text': str(value)})
     return result
@@ -886,7 +888,33 @@ class LibraryMixin:
                              'questions': overview.get('questions') or [],
                              'videos': len(overview.get('videos') or [])} if overview else None,
                 'note': 'Cevap hazırlanıyor…' if self._ask_busy else note,
+                'template': str(self._lib_data.get('template') or ''),
+                'template_note': str(self._lib_data.get('template_note') or ''),
                 'enabled': bool(videos) and bool(model) and not self._ask_busy}
+
+    # ------------------------------------------------------------------ sohbet sablonlari (F104)
+    def templates_list(self):
+        return chat_templates.load()
+
+    def templates_save(self, items):
+        try:
+            return chat_templates.save(items)
+        except OSError as error:
+            return {'error': 'Şablonlar kaydedilemedi: ' + str(error)}
+
+    def chat_set_template(self, template=None, note=None):
+        """Koleksiyonun sohbet sablonu ve notu; None verilen alan degismez."""
+        if self._lib_data is None:
+            return None
+        if template is not None:
+            self._lib_data['template'] = str(template or '')
+        if note is not None:
+            self._lib_data['template_note'] = str(note or '').strip()[:chat_templates.NOTE_LIMIT]
+        try:
+            library.save_collection(self._lib_data, self._lib_slug)
+        except RuntimeError as error:
+            return {'error': str(error)}
+        return self.chat_state()
 
     def _push_chat(self):
         self._emit('chat', {'slug': self._lib_slug})
@@ -917,12 +945,15 @@ class LibraryMixin:
             session = chat['session'] = fresh
         chat['entries'] += [('user', question), ('pending', 'Dosyalarda aranıyor…')]
         self._ask_busy = True
+        instructions, name = chat_templates.instruction(self._lib_data.get('template'),
+                                                        self._lib_data.get('template_note'))
 
         def work():
             turn, error = None, ''
             try:
                 turn = session.ask(question, think=think, on_reasoning=reasoning_feed(
-                    lambda: chat['entries'], lambda: self._emit('chat', {'slug': slug})))
+                    lambda: chat['entries'], lambda: self._emit('chat', {'slug': slug})),
+                    instructions=instructions, template=name)
             except Exception as failure:  # baglanti/model hatasi sohbete yazilir
                 error = str(failure)
             chat['entries'] = [item for item in chat['entries'] if item[0] != 'pending']

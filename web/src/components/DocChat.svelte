@@ -3,6 +3,8 @@
   import Icon from '../lib/Icon.svelte';
   import ChatMessages from './ChatMessages.svelte';
   import ThinkToggle from './ThinkToggle.svelte';
+  import TemplatePicker from './TemplatePicker.svelte';
+  import { templateFor } from '../lib/templates.svelte.js';
   import { app, act } from '../lib/state.svelte.js';
   import { confirm } from '../lib/confirm.svelte.js';
   import { dragArea } from '../lib/frame.svelte.js';
@@ -20,7 +22,7 @@
     const value = question.trim();
     if (!value || !chat?.enabled) return;
     question = '';
-    const state = await act('doc_ask', value, app.think);
+    const state = await act('doc_ask', value, app.think, templateFor('doc'));
     if (state && app.document) app.document.chat = state;
   }
 
@@ -45,6 +47,7 @@
     {#if chat.note}<div class="note">{#if !chat.ready && !chat.note.startsWith('Bu belge')}<Icon name="loader" size={13} spin />{/if}{chat.note}</div>{/if}
     <form class="ask" onsubmit={(e) => { e.preventDefault(); ask(); }}>
       <input bind:value={question} disabled={!chat.enabled} placeholder="Belgeye sor…" />
+      <TemplatePicker kind="doc" />
       <ThinkToggle />
       <button class="send" type="submit" title="Gönder" disabled={!chat.enabled || !question.trim()}><Icon name="send" size={16} /></button>
     </form>

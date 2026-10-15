@@ -13,6 +13,7 @@ import subprocess
 import threading
 from pathlib import Path
 
+import chat_templates
 import collection_qa
 import documents
 import library
@@ -137,19 +138,21 @@ class DocumentMixin:
 
         threading.Thread(target=work, name='aktar-doc-prepare', daemon=True).start()
 
-    def doc_ask(self, question, think=None):
+    def doc_ask(self, question, think=None, template=None):
         doc = self._doc
         text = ' '.join(str(question or '').split())
         if doc is None or not text or not doc.ready or doc.asking or doc.session is None:
             return self._doc_chat(doc) if doc else None
         doc.asking = True
         doc.entries += [('user', text), ('pending', 'Cevap hazırlanıyor…')]
+        instructions, name = chat_templates.instruction(template)
 
         def work():
             turn, error = None, ''
             try:
                 turn = doc.session.ask(text, think=think, on_reasoning=reasoning_feed(
-                    lambda: doc.entries, lambda: self._push_doc(doc)))
+                    lambda: doc.entries, lambda: self._push_doc(doc)),
+                    instructions=instructions, template=name)
             except Exception as failure:  # baglanti/model hatasi sohbete yazilir
                 error = str(failure)
             doc.entries = [item for item in doc.entries if item[0] != 'pending']

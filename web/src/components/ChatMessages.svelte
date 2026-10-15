@@ -7,6 +7,7 @@
   import { richHtml, escapeHtml } from '../lib/markdown.js';
   import { charts } from '../lib/chart.js';
   import Thought from './Thought.svelte';
+  import Icon from '../lib/Icon.svelte';
 
   let { entries = [], oncite, single = false } = $props();
   const label = (item) => (single ? item.label.split(' ').slice(1).join(' ') || item.label : item.label);
@@ -45,6 +46,7 @@
     <Thought text={entry.thinking} think={entry.think} />
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
     <div class="answer md selectable" onclick={clickAnswer} use:charts>{@html rendered[index]}</div>
+    {#if entry.template}<div class="tpl-tag" title="Bu cevap bu sohbet şablonuyla üretildi"><Icon name="scroll" size={12} />{entry.template}</div>{/if}
     {#if entry.sources?.length && !single}
       <div class="sources">
         <span>Kaynaklar</span>

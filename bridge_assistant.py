@@ -13,6 +13,7 @@ from pathlib import Path
 
 import assistant
 import backlog
+import chat_templates
 import library
 from bridge_library import KIND_LABELS, STREAM_INTERVAL, chat_entries
 
@@ -79,7 +80,7 @@ class AssistantMixin:
         self._conv_cancel.set()
         return True
 
-    def assistant_ask(self, text, think=None):
+    def assistant_ask(self, text, think=None, template=None):
         text = str(text or '').strip()
         data = self._conv
         if not text or self._conv_busy:
@@ -91,6 +92,7 @@ class AssistantMixin:
         self._conv_stream = ''
         self._conv_thinking = ''
         self._conv_cancel.clear()
+        instructions, name = chat_templates.instruction(template)
         last = [0.0]
 
         def delta(value):
@@ -112,7 +114,7 @@ class AssistantMixin:
             try:
                 turn = assistant.Assistant(data['history'], log=log).ask(
                     text, on_delta=delta, cancelled=self._conv_cancel.is_set, think=think,
-                    on_reasoning=reasoning)
+                    on_reasoning=reasoning, instructions=instructions, template=name)
             except Exception as failure:  # baglanti/model hatasi sohbete yazilir
                 log('Cevap alınamadı: ' + str(failure))
                 data['entries'].append(('error', 'Cevap alınamadı: ' + str(failure)))

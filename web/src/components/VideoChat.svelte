@@ -3,6 +3,8 @@
   import Icon from '../lib/Icon.svelte';
   import ChatMessages from './ChatMessages.svelte';
   import ThinkToggle from './ThinkToggle.svelte';
+  import TemplatePicker from './TemplatePicker.svelte';
+  import { templateFor } from '../lib/templates.svelte.js';
   import { app, act, seekPlayer } from '../lib/state.svelte.js';
   import { confirm } from '../lib/confirm.svelte.js';
   import { dragArea } from '../lib/frame.svelte.js';
@@ -22,7 +24,7 @@
     const value = text.trim();
     if (!value || !q?.ready || q.asking) return;
     question = '';
-    const state = await act('player_ask', value, app.think);
+    const state = await act('player_ask', value, app.think, templateFor('video'));
     if (state) app.player = state;
   }
 
@@ -96,6 +98,7 @@
     <form class="ask" onsubmit={(e) => { e.preventDefault(); ask(); }}>
       <input bind:value={question} disabled={!q.ready || q.asking}
         placeholder={q.asking ? 'Yanıt hazırlanıyor…' : q.ready ? 'Soru sorun…' : 'Video hazırlanıyor…'} />
+      <TemplatePicker kind="video" />
       <ThinkToggle />
       <button class="send" type="submit" title="Sor" disabled={!q.ready || q.asking || !question.trim()}><Icon name="send" size={16} /></button>
     </form>
