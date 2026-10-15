@@ -3,6 +3,7 @@
   import Icon from '../lib/Icon.svelte';
   import Logo from '../components/Logo.svelte';
   import ThinkToggle from '../components/ThinkToggle.svelte';
+  import Thought from '../components/Thought.svelte';
   import { app, act, loadAssistant, refreshConversations, openFile, toast } from '../lib/state.svelte.js';
   import { prompt, confirm } from '../lib/confirm.svelte.js';
   import { openMenu } from '../lib/menu.svelte.js';
@@ -209,6 +210,7 @@
               <div class="user selectable">{entry.text}</div>
             {:else if entry.kind === 'assistant'}
               <div class="turn">
+                <Thought text={entry.thinking} think={entry.think} />
                 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
                 <div class="md selectable" onclick={clickAnswer}>{@html rendered[index]}</div>
                 {#if entry.sources?.length}
@@ -228,6 +230,7 @@
           {/each}
           {#if chat?.busy}
             <div class="turn">
+              {#if chat.thinking}<Thought text={chat.thinking} live={!chat.stream} />{/if}
               {#if chat.stream}
                 <div class="md selectable streaming">{@html richHtml(chat.stream)}</div>
               {:else}

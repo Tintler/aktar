@@ -244,7 +244,7 @@ class Assistant:
             + context.replace('VIDEOS IN THE EXCERPTS:', 'FILES IN THE NOTES:', 1)
         return text, videos, session
 
-    def ask(self, question, on_delta=None, cancelled=None, client=None, think=None):
+    def ask(self, question, on_delta=None, cancelled=None, client=None, think=None, on_reasoning=None):
         """Cevaplar. Donen: {'question', 'answer', 'parts', 'sources', 'stopped'}."""
         question = ' '.join(str(question).split()) if '\n' not in str(question) else str(question).strip()
         if not question:
@@ -261,7 +261,7 @@ class Assistant:
         messages.append({'role': 'user', 'content': question})
         text, finish = client.chat_stream(
             messages, on_delta=(lambda value: on_delta(visible_text(value))) if on_delta else None,
-            temperature=TEMPERATURE, cancelled=cancelled)
+            temperature=TEMPERATURE, cancelled=cancelled, on_reasoning=on_reasoning)
         answer = qa.strip_thinking(text)
         stopped = finish == 'cancelled'
         if not answer and not stopped:
@@ -271,7 +271,8 @@ class Assistant:
             answer += '\n\n*(Yanıt token sınırında kesildi.)*'
         parts = session.split_citations(answer, videos) if session is not None else [('text', answer)]
         turn = {'question': question, 'answer': answer, 'parts': parts,
-                'sources': collection_qa.CollectionQA._sources(parts), 'stopped': stopped}
+                'sources': collection_qa.CollectionQA._sources(parts), 'stopped': stopped,
+                'thinking': getattr(client, 'last_reasoning', ''), 'think': think}
         if answer:
             self.history.append({'question': question, 'answer': answer})
         return turn

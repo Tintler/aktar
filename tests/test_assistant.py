@@ -32,7 +32,8 @@ class FakeClient:
         vectors = [[float(text.lower().count(word)) + 0.01 for word in TOPICS] for text in texts]
         return [vector + [1.0 if max(vector) < 1 else 0.01] for vector in vectors]
 
-    def chat_stream(self, messages, on_delta=None, temperature=None, max_tokens=None, cancelled=None):
+    def chat_stream(self, messages, on_delta=None, temperature=None, max_tokens=None, cancelled=None,
+                    on_reasoning=None):
         self.messages = messages
         if on_delta:
             on_delta('<think>plan')

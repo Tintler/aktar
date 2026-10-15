@@ -385,7 +385,7 @@ class CollectionQA:
         answer = self._chat(client, cfg, messages)
         parts = self.split_citations(answer, videos)
         turn = {'question': question, 'answer': answer, 'parts': parts,
-                'sources': self._sources(parts)}
+                'sources': self._sources(parts), 'thinking': getattr(client, 'last_reasoning', ''), 'think': think}
         self.history.append(turn)
         return turn
 

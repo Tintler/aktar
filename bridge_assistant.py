@@ -24,6 +24,7 @@ class AssistantMixin:
         self._conv = assistant.new_conversation()
         self._conv_busy = None            # cevap uretilen sohbetin kimligi
         self._conv_stream = ''
+        self._conv_thinking = ''
         self._conv_cancel = threading.Event()
 
     def _assistant_state(self, data=None):
@@ -31,6 +32,7 @@ class AssistantMixin:
         busy = self._conv_busy == data['id']
         return {'id': data['id'], 'title': data.get('title', ''), 'entries': chat_entries(data['entries']),
                 'busy': busy, 'stream': self._conv_stream if busy else None,
+                'thinking': self._conv_thinking if busy else None,
                 'locked': bool(self._conv_busy) and not busy, 'saved': bool(data['entries'])}
 
     def assistant_list(self):
@@ -88,6 +90,7 @@ class AssistantMixin:
         data['entries'].append(('user', text))
         self._conv_busy = data['id']
         self._conv_stream = ''
+        self._conv_thinking = ''
         self._conv_cancel.clear()
         last = [0.0]
 
@@ -96,13 +99,21 @@ class AssistantMixin:
             now = time.monotonic()
             if now - last[0] >= STREAM_INTERVAL:
                 last[0] = now
-                self._emit('assistant_stream', {'id': data['id'], 'text': value})
+                self._emit('assistant_stream', {'id': data['id'], 'text': value, 'thinking': self._conv_thinking})
+
+        def reasoning(value):
+            self._conv_thinking = value
+            now = time.monotonic()
+            if now - last[0] >= STREAM_INTERVAL:
+                last[0] = now
+                self._emit('assistant_stream', {'id': data['id'], 'text': self._conv_stream, 'thinking': value})
 
         def work():
             log = lambda message: self._log('[Sohbet] ' + str(message))  # noqa: E731
             try:
                 turn = assistant.Assistant(data['history'], log=log).ask(
-                    text, on_delta=delta, cancelled=self._conv_cancel.is_set, think=think)
+                    text, on_delta=delta, cancelled=self._conv_cancel.is_set, think=think,
+                    on_reasoning=reasoning)
             except Exception as failure:  # baglanti/model hatasi sohbete yazilir
                 log('Cevap alınamadı: ' + str(failure))
                 data['entries'].append(('error', 'Cevap alınamadı: ' + str(failure)))

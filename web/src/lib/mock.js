@@ -71,7 +71,7 @@ export function createMock(emit) {
     overview: { summary: 'Bu koleksiyon denetimli öğrenmenin temellerini doğrusal regresyondan karar ağaçlarına kadar adım adım anlatıyor.', topics: ['Regresyon', 'Gradyan inişi', 'Aşırı öğrenme', 'Düzenlileştirme yöntemleri (L1/L2) ve model karmaşıklığının doğrulama hatasına etkisi'], questions: ['Gradyan inişi nasıl çalışır?', 'Aşırı öğrenme nasıl önlenir?'], videos: 5 },
     entries: [
       { kind: 'user', text: 'Öğrenme oranı çok büyük seçilirse ne olur?' },
-      { kind: 'assistant', parts: [
+      { kind: 'assistant', think: true, thinking: 'Kullanıcı öğrenme oranının büyük seçilmesinin etkisini soruyor. V3 videosunda 12:34 civarında salınım anlatılıyor; V1 ve ders notları küçük değerlerin yavaş yakınsamasını ekliyor.', parts: [
         { type: 'text', text: 'Öğrenme oranı çok büyükse gradyan inişi minimumun etrafında **salınır** ve hatta ıraksayabilir ' },
         { type: 'cite', items: [{ path: 'x', start: 754, label: 'V3 12:34', title: '03 Gradyan İnişi' }] },
         { type: 'text', text: '. Küçük değerlerde ise yakınsama yavaşlar ' },

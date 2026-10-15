@@ -109,7 +109,9 @@ class PlayerMixin:
         entries = []
         for kind, value in video.entries:
             if kind == 'assistant':
-                entries.append({'kind': 'assistant', 'parts': video_parts(value, video.path), 'sources': []})
+                turn = value if isinstance(value, dict) else {'parts': value}  # F100 oncesi: yalniz parcalar
+                entries.append({'kind': 'assistant', 'parts': video_parts(turn['parts'], video.path), 'sources': [],
+                                'thinking': str(turn.get('thinking') or ''), 'think': turn.get('think')})
             else:
                 entries.append({'kind': kind, 'text': str(value)})
         return {'path': str(video.path), 'name': video.path.name, 'duration': info.get('duration') or 0.0,
@@ -415,7 +417,8 @@ class PlayerMixin:
                 video.entries.append(('error', 'Yanıt alınamadı: ' + str(error)))
             else:
                 video.entries = [item for item in video.entries if item[0] != 'pending']
-                video.entries.append(('assistant', turn['parts']))
+                video.entries.append(('assistant', {'parts': turn['parts'], 'thinking': turn.get('thinking', ''),
+                                                    'think': turn.get('think')}))
             video.history = video.session.history
             library.save_chat(video.key, video.entries, video.history)
             video.asking = False

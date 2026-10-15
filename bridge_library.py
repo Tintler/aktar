@@ -124,7 +124,8 @@ def chat_entries(entries):
                     parts.append({'type': 'text', 'text': str(part)})
             sources = [{'path': str(item['video']), 'start': item['start'], 'label': item['label'],
                         'title': item['title'], 'count': item['count']} for item in value.get('sources', [])]
-            result.append({'kind': 'assistant', 'parts': parts, 'sources': sources})
+            result.append({'kind': 'assistant', 'parts': parts, 'sources': sources,
+                           'thinking': str(value.get('thinking') or ''), 'think': value.get('think')})
         else:
             result.append({'kind': kind, 'text': str(value)})
     return result

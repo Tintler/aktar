@@ -4,6 +4,7 @@
   // F98: cevap blok Markdown olarak cizilir (tablo, baslik, liste); atiflar yer tutucuyla
   // Markdown'u bolmeden dugmeye donusur (genel sohbetteki answerHtml ile ayni yol).
   import { richHtml, escapeHtml } from '../lib/markdown.js';
+  import Thought from './Thought.svelte';
 
   let { entries = [], oncite, single = false } = $props();
   const label = (item) => (single ? item.label.split(' ').slice(1).join(' ') || item.label : item.label);
@@ -39,6 +40,7 @@
   {#if entry.kind === 'user'}
     <div class="user selectable">{entry.text}</div>
   {:else if entry.kind === 'assistant'}
+    <Thought text={entry.thinking} think={entry.think} />
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
     <div class="answer md selectable" onclick={clickAnswer}>{@html rendered[index]}</div>
     {#if entry.sources?.length && !single}

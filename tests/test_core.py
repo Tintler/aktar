@@ -803,6 +803,25 @@ class EngineTests(unittest.TestCase):
         self.assertNotIn('chat_template_kwargs', captured['payload'])
         self.assertNotIn('reasoning_effort', captured['payload'])
 
+    def test_think_on_requests_reasoning_and_keeps_it(self):
+        cfg = app_core.qa_config(dict(app_core.DEFAULT_CONFIG, disable_thinking=True), think=True)
+        client = app_core.Client(cfg, log=lambda _m: None)
+        captured = {}
+
+        def fake_request(route, payload=None):
+            captured['payload'] = payload
+            return {'choices': [{'message': {'content': 'x', 'reasoning_content': 'plan'}, 'finish_reason': 'stop'}]}
+
+        client.request = fake_request
+        client.generate('sys', 'user')
+        self.assertEqual(captured['payload'].get('reasoning_effort'), 'medium')
+        self.assertEqual(client.last_reasoning, 'plan')
+
+    def test_reasoning_text_falls_back_to_think_tags(self):
+        self.assertEqual(app_core.reasoning_text({}, '<think>gizli</think>cevap'), 'gizli')
+        self.assertEqual(app_core.reasoning_text({'reasoning_content': ' a '}, '<think>b</think>'), 'a')
+        self.assertEqual(app_core.reasoning_text({}, 'cevap'), '')
+
     def test_qa_config_think_overrides_setting(self):
         cfg = dict(app_core.DEFAULT_CONFIG, disable_thinking=True)
         self.assertTrue(app_core.qa_config(cfg)['disable_thinking'])

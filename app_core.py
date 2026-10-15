@@ -47,8 +47,8 @@ DEFAULT_CONFIG = {
     'auto_retry_count': 2,
     'glossary_strict': False,
     'analysis_chunk_chars': 12000,
-    # Videoya Soru Sor: modele tek istekte gidecek en fazla transkript karakteri.
-    # Asilirsa video haritasi + soruyla ilgili bolumler gider (qa.VideoQA.build_context).
+    # Tum soru-cevaplar (genel sohbet, koleksiyon, belge, video): modele tek istekte
+    # gidecek en fazla baglam karakteri. Asilirsa yalnizca soruyla ilgili parcalar gider.
     'qa_context_chars': 24000,
     # Konusmadan metin (F48, istege bagli faster-whisper). Model ilk kullanimda
     # APP_DIR/models/whisper altina iner; dil bos ise otomatik algilanir.
@@ -263,6 +263,7 @@ def qa_config(cfg, think=None):
     model = str(cfg.get('qa_model', '')).strip()
     value = dict(cfg, model=model) if model else dict(cfg)
     if think is not None:
+        value['thinking'] = bool(think)
         value['disable_thinking'] = not think
     return value
 
@@ -558,6 +559,7 @@ class Client:
         self.cfg = cfg
         self.log = log
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+        self.last_reasoning = ''  # son sohbet isteginin dusunce metni (F100: arayuzde gosterilir)
 
     def _url(self, route):
         from urllib.parse import urlsplit
@@ -591,8 +593,14 @@ class Client:
 
     def _thinking(self, payload):
         """disable_thinking: LM Studio reasoning_effort='none' ile dusunmeyi kapatir
-        (chat_template_kwargs LM Studio'da yok sayiliyor; vLLM/llama.cpp icin kalir)."""
-        if self.cfg.get('disable_thinking'):
+        (chat_template_kwargs LM Studio'da yok sayiliyor; vLLM/llama.cpp icin kalir).
+
+        thinking=True (sohbet dugmesi, F100): dusunme acikca istenir; Gemma 4 API'de
+        parametresiz istekte hic dusunmuyor (LM Studio'nun kendi sohbetinde aciktir)."""
+        if self.cfg.get('thinking') is True:
+            payload['reasoning_effort'] = 'medium'
+            payload['chat_template_kwargs'] = {'enable_thinking': True}
+        elif self.cfg.get('disable_thinking'):
             payload['reasoning_effort'] = 'none'
             payload['chat_template_kwargs'] = {'enable_thinking': False}
 
@@ -655,6 +663,7 @@ class Client:
         except (KeyError, IndexError, TypeError):
             raise ValueError('Beklenmeyen API çıktısı biçimi.') from None
         text = message.get('content') or ''
+        self.last_reasoning = reasoning_text(message, text)
         if not str(text).strip():
             # Teshis: model neden metin dondurmedi? finish_reason=length + yuksek
             # reasoning_tokens ise model dusunmeye tum token butcesini harcadi.
@@ -676,10 +685,12 @@ class Client:
             raise ValueError('Yanıt tamamlanmadı: ' + str(choice.get('finish_reason')))
         return text
 
-    def chat_stream(self, messages, on_delta=None, temperature=None, max_tokens=None, cancelled=None):
+    def chat_stream(self, messages, on_delta=None, temperature=None, max_tokens=None, cancelled=None,
+                    on_reasoning=None):
         """Akisli sohbet (genel sohbet): her parcada on_delta(simdiye kadarki metin) cagrilir.
 
-        Donen: (metin, finish_reason). Durdurulursa o ana kadarki metin 'cancelled' ile doner;
+        Dusunce parcalari (reasoning_content) on_reasoning(simdiye kadarki dusunce) ile gelir ve
+        self.last_reasoning'de kalir. Donen: (metin, finish_reason). Durdurulursa o ana kadarki metin 'cancelled' ile doner;
         token sinirinda kesilen yanit hata sayilmaz ('length')."""
         payload = {
             'model': self.cfg['model'],
@@ -695,7 +706,8 @@ class Client:
             headers['Authorization'] = 'Bearer ' + token
         request = urllib.request.Request(self._url('/chat/completions'),
                                          data=json.dumps(payload).encode('utf-8'), headers=headers)
-        text, finish = '', None
+        text, finish, reasoning = '', None, ''
+        self.last_reasoning = ''
         try:
             with self.opener.open(request, timeout=self.cfg['timeout_seconds']) as response:
                 for raw in response:
@@ -711,7 +723,14 @@ class Client:
                         choice = json.loads(data)['choices'][0]
                     except (ValueError, KeyError, IndexError, TypeError):
                         continue
-                    piece = (choice.get('delta') or {}).get('content') or ''
+                    delta = choice.get('delta') or {}
+                    thought = delta.get('reasoning_content') or delta.get('reasoning') or ''
+                    if thought:
+                        reasoning += thought
+                        self.last_reasoning = reasoning
+                        if on_reasoning:
+                            on_reasoning(reasoning)
+                    piece = delta.get('content') or ''
                     if piece:
                         text += piece
                         if on_delta:
@@ -725,7 +744,19 @@ class Client:
             raise RuntimeError('LM Studio baglantisi kurulamadi: ' + str(self.cfg['base_url'])) from None
         except TimeoutError:
             raise RuntimeError('LM Studio istegi zaman asimina ugradi.') from None
+        self.last_reasoning = reasoning_text({'reasoning_content': reasoning}, text)
         return text, finish
+
+
+_THINK_BLOCK = re.compile(r'(?is)<think>(.*?)(?:</think>|$)')
+
+
+def reasoning_text(message, content=''):
+    """Modelin dusunce metni: ayri alan (reasoning_content) ya da yanittaki <think> blogu."""
+    value = message.get('reasoning_content') or message.get('reasoning') or ''
+    if not str(value).strip():
+        value = '\n'.join(match.group(1) for match in _THINK_BLOCK.finditer(str(content or '')))
+    return str(value).strip()
 
 
 def prompt_path():

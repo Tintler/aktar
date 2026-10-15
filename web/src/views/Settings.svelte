@@ -92,7 +92,7 @@
     ['max_tokens', 'Çıktı token payı', 'Bir model yanıtı için ayrılan en fazla token.', 1, 262144, 1],
     ['timeout_seconds', 'Zaman aşımı (sn)', 'Tek bir LM Studio isteği için beklenecek en uzun süre.', 1, 86400, 1],
     ['temperature', 'Temperature', 'Düşük değer daha tutarlı çeviri verir.', 0, 2, 0.05],
-    ['qa_context_chars', 'Soru-cevap bağlam karakteri', 'Video sohbetinde modele tek istekte giden en fazla transkript; aşılırsa video haritası kullanılır.', 1000, 1000000, 1000],
+    ['qa_context_chars', 'Soru-cevap bağlam karakteri', 'Genel sohbet, koleksiyon, belge ve video sorularında modele tek istekte giden en fazla metin (karakter, token değil; Türkçede ~3 karakter = 1 token). Aşılırsa yalnızca ilgili parçalar gider. LM Studio bağlam uzunluğunu aşmayın: 122k token için ~300000.', 1000, 1000000, 1000],
   ];
 </script>
 

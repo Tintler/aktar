@@ -730,7 +730,8 @@ class VideoQA:
 
         answer = self._call(client, cfg, messages, parse)
         turn = {'question': question, 'answer': answer, 'sections': used,
-                'parts': split_citations(answer, self.lines, self.data.get('duration', 0))}
+                'parts': split_citations(answer, self.lines, self.data.get('duration', 0)),
+                'thinking': getattr(client, 'last_reasoning', ''), 'think': think}
         self.history.append(turn)
         return turn
 

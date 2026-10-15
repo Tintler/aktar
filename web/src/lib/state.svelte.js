@@ -172,8 +172,8 @@ export async function init() {
     const handler = dropHandlers[app.view] ?? dropHandlers.library;
     handler?.(paths);
   });
-  on('assistant_stream', ({ id, text }) => {
-    if (app.assistant?.id === id) app.assistant.stream = text;
+  on('assistant_stream', ({ id, text, thinking }) => {
+    if (app.assistant?.id === id) { app.assistant.stream = text; app.assistant.thinking = thinking; }
   });
   on('assistant', async ({ id }) => {
     if (app.assistant?.id === id) app.assistant = await call('assistant_state');
