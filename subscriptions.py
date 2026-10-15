@@ -230,6 +230,18 @@ def next_due(item, today=None):
     return due
 
 
+def last_date(item):
+    """Yaklasan odemesi olmayan kaydin tarihi: bitis/iptal, yoksa son odeme ya da baslangic."""
+    if item.get('kind') == 'once':
+        return item.get('renewal_date') or item.get('start_date') or ''
+    return item.get('end_date') or item.get('renewal_date') or item.get('start_date') or ''
+
+
+def _negate(iso):
+    """Tarihi azalan siralamak icin: 2026-10-15 -> sirasi tersine donen sayi."""
+    return -date.fromisoformat(iso).toordinal()
+
+
 def monthly_cost(item):
     """Aylik esdeger tutar; tek seferlik ve iptal/durdurulmus kayitlarda 0."""
     if item.get('kind') == 'once' or item.get('status') in ('paused', 'cancelled'):
@@ -245,6 +257,7 @@ def view(today=None):
         due = next_due(item, today)
         cost = monthly_cost(item)
         row = dict(item, logo=_read_logo(item['id']), next_due=due.isoformat() if due else '',
+                   last_date='' if due else last_date(item),
                    days_left=(due - today).days if due else None, monthly=round(cost, 2))
         rows.append(row)
         currency = item['currency']
@@ -257,7 +270,11 @@ def view(today=None):
             group['count'] += 1
         if due and (due - today).days <= UPCOMING_DAYS:
             upcoming[currency] = upcoming.get(currency, 0) + item['amount']
-    rows.sort(key=lambda row: (row['next_due'] == '', row['next_due'], row['name'].lower()))
+    # Once odemesi yaklasanlar (en yakin basta), sonra odemesi olmayanlar (durdurulmus, iptal,
+    # odenmis tek seferlik) kendi tarihlerine gore en yenisi basta, en sonda tarihsizler.
+    rows.sort(key=lambda row: (0, row['next_due'], row['name'].lower()) if row['next_due']
+              else (1, _negate(row['last_date']), row['name'].lower()) if row['last_date']
+              else (2, '', row['name'].lower()))
     rounded = lambda totals: {key: round(value, 2) for key, value in sorted(totals.items())}
     payments = sorted(by_payment.values(), key=lambda group: -group['monthly'])
     for group in payments:

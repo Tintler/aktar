@@ -100,9 +100,22 @@ class SubscriptionTests(unittest.TestCase):
         self.assertEqual(summary['upcoming'], {'TRY': 1730.0})
         self.assertEqual(summary['active'], 3)
         self.assertEqual([row['name'] for row in result['items']], ['Netflix', 'Kurs', 'iCloud', 'Elektrik'])
+        self.assertEqual(result['items'][3]['last_date'], '2026-10-18')
         self.assertEqual(result['items'][0]['days_left'], 5)
         self.assertEqual([(g['bank'], g['method']) for g in summary['by_payment']],
                          [('Garanti', 'credit'), ('Akbank', 'debit')])
+
+    def test_inactive_rows_sorted_by_their_date_newest_first(self):
+        subscriptions.upsert({'name': 'Tarihsiz', 'amount': 1, 'status': 'paused'})
+        subscriptions.upsert({'name': 'Claude Ağustos', 'amount': 1, 'kind': 'once', 'renewal_date': '2026-08-14'})
+        subscriptions.upsert({'name': 'Claude Eylül', 'amount': 1, 'kind': 'once', 'renewal_date': '2026-09-14'})
+        subscriptions.upsert({'name': 'VPN', 'amount': 1, 'status': 'cancelled', 'renewal_date': '2026-05-01',
+                              'end_date': '2026-09-01'})
+        subscriptions.upsert({'name': 'Netflix', 'amount': 1, 'renewal_date': '2026-10-20'})
+        result = subscriptions.view(date(2026, 10, 15))
+        self.assertEqual([row['name'] for row in result['items']],
+                         ['Netflix', 'Claude Eylül', 'VPN', 'Claude Ağustos', 'Tarihsiz'])
+        self.assertEqual(result['items'][2]['last_date'], '2026-09-01')
 
 
 if __name__ == '__main__':

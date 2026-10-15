@@ -57,6 +57,14 @@
     if (result) data = result;
   }
 
+  // Yaklasan odemesi olmayan kaydin tarihinin anlami (subscriptions.last_date).
+  function pastLabel(item) {
+    if (item.kind === 'once') return item.last_date < (data?.today ?? '') ? 'ödendi' : 'ödeme tarihi';
+    if (item.status === 'paused') return 'durduruldu';
+    if (item.status === 'cancelled' && !item.end_date) return 'iptal edildi';
+    return 'bitti';
+  }
+
   function payment(item) {
     const parts = [item.bank, item.card].filter(Boolean);
     return parts.join(' · ');
@@ -150,8 +158,9 @@
                       {#if item.next_due}
                         <span>{shortDate(item.next_due)}</span>
                         <small class:soon={item.days_left <= 3} class="dim">{daysText(item.days_left)}</small>
-                      {:else if item.status === 'cancelled' && item.end_date}
-                        <small class="dim">{shortDate(item.end_date)} tarihinde bitti</small>
+                      {:else if item.last_date}
+                        <span class="dim">{shortDate(item.last_date)}</span>
+                        <small class="dim">{pastLabel(item)}</small>
                       {:else}
                         <small class="dim">—</small>
                       {/if}
