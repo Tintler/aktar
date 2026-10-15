@@ -359,6 +359,43 @@ class OfficeAndEbookTests(unittest.TestCase):
         csv_path.write_text('Ad;Şehir\nAyşe;İzmir\n', encoding='utf-8')
         self.assertIn('Satır 2: Ad: Ayşe; Şehir: İzmir', documents.pages_of(csv_path)[0])
 
+    def test_xlsx_dates_and_category_totals(self):
+        """F96: tarih bicimli hucreler tarihe cevrilir; envanterde kategori toplamlari yazilir."""
+        path = self.root / 'envanter.xlsx'
+        text, styled = ' t="s"', ' s="1"'
+        cell = '<c r="{}"{}><v>{}</v></c>'.format
+        rows = [('Altın', '10', '45877'), ('Altın', '6,42', '45877'), ('Dolar', '100', '45909'),
+                ('Altın', '5', '45691')]
+        strings = ['Cins', 'Miktar', 'Tarih', 'Altın', 'Dolar', '6,42']
+        xml = ['<row r="1">' + cell('A1', text, 0) + cell('B1', text, 1) + cell('C1', text, 2)
+               + '</row>']
+        for number, (kind, amount, serial) in enumerate(rows, 2):
+            amount_cell = (cell(f'B{number}', text, strings.index(amount)) if ',' in amount
+                           else cell(f'B{number}', '', amount))
+            xml.append(f'<row r="{number}">' + cell(f'A{number}', text, strings.index(kind))
+                       + amount_cell + cell(f'C{number}', styled, serial) + '</row>')
+        write_zip(path, {
+            'xl/workbook.xml': f'<workbook {S_NS} {R_NS}><sheets><sheet name="Envanter" r:id="rId1"/>'
+                               '</sheets></workbook>',
+            'xl/_rels/workbook.xml.rels': (
+                '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                '<Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>'),
+            'xl/styles.xml': (f'<styleSheet {S_NS}><numFmts count="1"><numFmt numFmtId="165" '
+                              'formatCode="yyyy\\-mm\\-dd;@"/></numFmts><cellXfs count="2">'
+                              '<xf numFmtId="0"/><xf numFmtId="165"/></cellXfs></styleSheet>'),
+            'xl/sharedStrings.xml': f'<sst {S_NS}>' + ''.join(f'<si><t>{text}</t></si>'
+                                                              for text in strings) + '</sst>',
+            'xl/worksheets/sheet1.xml': f'<worksheet {S_NS}><sheetData>' + ''.join(xml)
+                                        + '</sheetData></worksheet>'})
+        page = documents.pages_of(path)[0]
+        self.assertIn('Satır 2: Cins: Altın; Miktar: 10; Tarih: 2025-08-08', page)
+        self.assertIn('Toplamlar (tüm satırlardan hesaplandı): Cins = Altın (3 satır): Miktar '
+                      'toplamı 21,42; Cins = Dolar (1 satır): Miktar toplamı 100', page)
+        self.assertEqual(qa.source_key({'kind': 'sheet'}), 'document:sheet:2')
+        # tarih serisi gibi kategori sutunu olmayan tablolarda toplam yazilmaz
+        self.assertEqual(documents._group_totals(['Değer', 'Tarih'],
+                                                 [['1.5', '2025-01-01'], ['2', '2025-02-01']]), '')
+
     def test_pptx_and_opendocument_formats(self):
         """F73: PowerPoint slaytlari, ODT/ODS/ODP ve HTML."""
         a_ns = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'

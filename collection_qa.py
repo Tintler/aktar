@@ -36,8 +36,8 @@ _PAGE = re.compile(r'(?:[sS]\.\s?)?(\d+)')
 # F95: "guncel / su an / son durum" sorularinda her serinin en son belgesi aramadan bagimsiz eklenir
 RECENT_WORDS = re.compile(r'güncel|şu ?an|şimdi|bugün|\bson\b|mevcut|kalan|elimde|elimdeki'
                           r'|\blatest\b|\bcurrent\b|\bnow\b')
-LATEST_SERIES = 8   # en fazla bu kadar serinin son belgesi
-LATEST_SHARE = 0.4  # baglam butcesinin son belgelere ayrilan payi
+LATEST_SERIES = 12  # en fazla bu kadar serinin son belgesi
+LATEST_SHARE = 0.5  # baglam butcesinin son belgelere ayrilan payi
 _MONTH_WORDS = re.compile(r'\b(?:ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim'
                           r'|kasım|aralık|january|february|march|april|may|june|july|august'
                           r'|september|october|november|december)\w*')
@@ -114,6 +114,16 @@ def video_labels(videos):
 
 def _key(path):
     return str(Path(path)).casefold()
+
+
+_FIGURE = re.compile(r'\d[\d.]*,\d{2}\b|\d+\.\d{2,}\b')
+_FIGURE_WORDS = re.compile(r'bakiye|toplam|tutar|kapanış|adet|miktar|borç|limit|varlık|portföy')
+
+
+def _figure_score(lines):
+    """Sayfadaki tutar/bakiye yogunlugu: '37.149,57' gibi sayilar + bakiye/toplam sozcukleri."""
+    text = ' '.join(line['text'] for line in lines)
+    return len(_FIGURE.findall(text)) + 2 * len(_FIGURE_WORDS.findall(text.casefold()))
 
 
 def series_key(path):
@@ -231,20 +241,34 @@ class CollectionQA:
         return sorted(latest.values(), key=lambda item: item[0], reverse=True)[:LATEST_SERIES]
 
     def latest_hits(self, latest, cfg):
-        """Son belgelerin basindan, butcenin LATEST_SHARE payini esit bolusen parcalar."""
-        if not latest:
-            return []
-        share = int(int(cfg.get('qa_context_chars', 24000)) * LATEST_SHARE) // len(latest)
-        hits = []
+        """Son belgelerin sayfalari (F96): once tutar/bakiye yogun sayfalar, belgeler sirayla.
+
+        Ekstrelerin ilk sayfasi cogu zaman yasal uyari metnidir, bakiye tablosu sonda kalir;
+        embedding bu sayfalari ayirt edemiyor (benzerlikler hep ~0,70). Her belgenin en iyi
+        sayfasi once girer (adil paydan buyukse basi), butce (LATEST_SHARE) kalirsa ikinci
+        sayfalar vb."""
+        budget = int(int(cfg.get('qa_context_chars', 24000)) * LATEST_SHARE)
+        ranked = []
         for _date, video in latest:
-            lines = self._video_lines(video)[1]
-            used, end = 0, lines[0]['end']
-            for line in lines:
-                used += len(line['text']) + 12
-                if used > share and line is not lines[0]:
-                    break
-                end = line['end']
-            hits.append({'video': str(video), 'start': lines[0]['start'], 'end': end})
+            pages = {}
+            for line in self._video_lines(video)[1]:
+                pages.setdefault(line['start'], []).append(line)
+            ranked.append(sorted(pages.items(), key=lambda item: -_figure_score(item[1])))
+        fair = budget // max(1, len(latest))
+        hits, used = [], 0
+        for rank in range(max((len(pages) for pages in ranked), default=0)):
+            for (_date, video), pages in zip(latest, ranked):
+                if rank >= len(pages):
+                    continue
+                page, lines = pages[rank]
+                hit = {'video': str(video), 'start': page, 'end': page}
+                cost = sum(len(line['text']) + 12 for line in lines)
+                if rank == 0 and cost > fair:  # her belgenin en iyi sayfasi en az basiyla girer
+                    hit['chars'], cost = fair, fair
+                if used + cost > budget:
+                    continue
+                used += cost
+                hits.append(hit)
         return hits
 
     def build_context(self, hits, cfg):
@@ -260,6 +284,14 @@ class CollectionQA:
             lines = data[1]
             indexes = [index for index, line in enumerate(lines)
                        if line['end'] >= hit['start'] and line['start'] <= hit['end']]
+            if hit.get('chars'):  # F96: buyuk sayfanin yalnizca basi (tablo basligi + toplamlar)
+                kept, size = [], 0
+                for index in indexes:
+                    size += len(lines[index]['text']) + 12
+                    if kept and size > hit['chars']:
+                        break
+                    kept.append(index)
+                indexes = kept
             if not indexes:
                 continue
             entry = chosen.setdefault(_key(hit['video']), {'video': Path(hit['video']),

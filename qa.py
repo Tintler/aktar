@@ -305,6 +305,8 @@ def build_data(video, segments, source, info=None):
 def source_key(source):
     """Oturum kaynagindan onbellek anahtari: 'subtitle:2' / 'whisper:<model>:<dil>[:a<iz>]' /
     'document:pdf'."""
+    if source.get('kind') == 'sheet':
+        return 'document:sheet:2'  # F96: tarih + toplam satirli yeni metin; eski onbellek gecersiz
     if source.get('kind') in DOCUMENT_KINDS:
         return f'document:{source["kind"]}'
     if source.get('kind') == 'subtitle':

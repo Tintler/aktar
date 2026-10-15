@@ -193,6 +193,24 @@ class CollectionQATests(unittest.TestCase):
         chat.ask('regresyon', client)
         self.assertNotIn('MOST RECENT', client.messages[0]['content'])
 
+    def test_latest_statement_puts_balance_page_before_disclaimer_page(self):
+        """F96: ekstrenin 1. sayfasi uyari metni, bakiye 2. sayfada; dar butcede bakiye girer."""
+        path = self.root / 'E' / '2026-10-02 Sermaye Piyasasi Ekstresi.pdf'
+        path.parent.mkdir(exist_ok=True)
+        path.write_bytes(b'x')
+        source = {'kind': 'pdf'}
+        segments = [{'start': 1.0, 'end': 1.0, 'text': 'Ekstre gönderim tercihinizi şubeden '
+                     'değiştirebilirsiniz. ' * 12},
+                    {'start': 2.0, 'end': 2.0, 'text': 'DÖNEM SONU KAPANIŞ BAKİYENİZ Fon USD '
+                     '32.498 adet 1,143134 +37.149,57'}]
+        save_json(qa.cache_path(path, qa.source_key(source), self.work),
+                  qa.build_data(path, segments, source))
+        chat = collection_qa.CollectionQA([path] + self.videos, 'Finans',
+                                          lambda: dict(self.cfg, qa_context_chars=1000), log=QUIET,
+                                          base=self.work, dates={str(path): '2026-10-02'})
+        hits = chat.latest_hits(chat.latest_documents('güncel fon bakiyem'), chat.config_provider())
+        self.assertEqual([hit['start'] for hit in hits], [2.0])
+
     def test_empty_index_raises_helpful_error(self):
         chat = collection_qa.CollectionQA([self.root / 'yok.mkv'], 'ML', lambda: dict(self.cfg),
                                           log=QUIET, base=self.work)

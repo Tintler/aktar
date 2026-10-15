@@ -207,6 +207,93 @@ def _column(reference):
     return value - 1
 
 
+_NUMBER = re.compile(r'-?\d+(?:[.,]\d+)?')
+_GROUPED_NUMBER = re.compile(r'-?\d{1,3}(?:\.\d{3})+,\d+')  # 1.234,56
+GROUP_LIMIT = 20  # kategori sutunu en fazla bu kadar farkli deger alir
+
+
+def _number(value):
+    """Hucre degeri sayiysa float ('6,42', '1.234,56', '35999.17'); degilse None."""
+    text = str(value).strip()
+    if _GROUPED_NUMBER.fullmatch(text):
+        return float(text.replace('.', '').replace(',', '.'))
+    if _NUMBER.fullmatch(text):
+        return float(text.replace(',', '.'))
+    return None
+
+
+def _format_number(value):
+    text = f'{value:.4f}'.rstrip('0').rstrip('.')
+    return text.replace('.', ',')
+
+
+def _group_totals(header, rows):
+    """Envanter gibi tablolarda (F96) ilk kategori sutununa gore sayi sutunlarinin toplamlari.
+
+    80 satirlik gram toplamini modele biraktirmamak icin; kategori sutunu yoksa (ornegin
+    tarihli bir deger serisi) toplam yazilmaz, cunku orada toplam anlamsizdir."""
+    width = len(header)
+    numeric = [index for index in range(width)
+               if any(index < len(row) and _number(row[index]) is not None for row in rows)
+               and all(_number(row[index]) is not None for row in rows
+                       if index < len(row) and str(row[index]).strip())]
+    category = None
+    for index in range(width):
+        values = [str(row[index]).strip() for row in rows if index < len(row) and str(row[index]).strip()]
+        if (index not in numeric and len(values) >= 3 and len(set(values)) <= GROUP_LIMIT
+                and len(set(values)) * 2 <= len(values)):
+            category = index
+            break
+    if category is None or not numeric:
+        return ''
+    groups = {}
+    for row in rows:
+        key = str(row[category]).strip() if category < len(row) else ''
+        if not key:
+            continue
+        group = groups.setdefault(key, {'count': 0, 'sums': {}})
+        group['count'] += 1
+        for index in numeric:
+            value = _number(row[index]) if index < len(row) else None
+            if value is not None:
+                group['sums'][index] = group['sums'].get(index, 0.0) + value
+    parts = []
+    for key, group in groups.items():
+        sums = ', '.join(f'{header[index]} toplamı {_format_number(value)}'
+                         for index, value in group['sums'].items())
+        parts.append(f'{header[category]} = {key} ({group["count"]} satır)'
+                     + (f': {sums}' if sums else ''))
+    return 'Toplamlar (tüm satırlardan hesaplandı): ' + '; '.join(parts)
+
+
+def _excel_date_styles(archive, names):
+    """styles.xml'de tarih bicimli hucre stillerinin indeksleri (F96)."""
+    if 'xl/styles.xml' not in names:
+        return set()
+    root = ElementTree.fromstring(archive.read('xl/styles.xml'))
+    custom = {}
+    for item in root.iter(_S + 'numFmt'):
+        code = re.sub(r'"[^"]*"|\[[^\]]*\]|\\.', '', item.get('formatCode', '')).lower()
+        custom[int(item.get('numFmtId', 0))] = code != 'general' and bool(re.search(r'[ymd]', code))
+    styles = set()
+    xfs = root.find(_S + 'cellXfs')
+    for index, xf in enumerate(xfs if xfs is not None else []):
+        number = int(xf.get('numFmtId', 0))
+        if custom.get(number, 14 <= number <= 22 or 45 <= number <= 47):
+            styles.add(index)
+    return styles
+
+
+def _excel_date(value):
+    """Excel seri tarihi (45877) -> '2025-08-07'; saat varsa 'YYYY-MM-DD HH:MM'."""
+    from datetime import datetime, timedelta
+    try:
+        moment = datetime(1899, 12, 30) + timedelta(days=float(value))
+    except (TypeError, ValueError, OverflowError):
+        return value
+    return moment.strftime('%Y-%m-%d %H:%M' if moment.hour or moment.minute else '%Y-%m-%d')
+
+
 def _rows_text(name, rows):
     """Tablo satirlari -> 'Baslik: deger; ...' paragraflari (ilk dolu satir baslik)."""
     rows = [row for row in rows if any(str(cell).strip() for cell in row)]
@@ -214,6 +301,9 @@ def _rows_text(name, rows):
         return f'{name}\n\n(boş sayfa)'
     header = [str(cell).strip() or f'Sütun {index + 1}' for index, cell in enumerate(rows[0])]
     lines = [f'{name} · sütunlar: ' + ', '.join(header)]
+    totals = _group_totals(header, rows[1:SHEET_ROWS + 1])
+    if totals:
+        lines.append(totals)
     for number, row in enumerate(rows[1:SHEET_ROWS + 1], 2):
         cells = [f'{header[index] if index < len(header) else f"Sütun {index + 1}"}: {value}'
                  for index, value in enumerate(row) if str(value).strip()]
@@ -243,6 +333,7 @@ def sheet_pages(path):
             for rel in ElementTree.fromstring(archive.read('xl/_rels/workbook.xml.rels')):
                 target = rel.get('Target', '').lstrip('/')
                 targets[rel.get('Id')] = target if target.startswith('xl/') else 'xl/' + target
+        dates = _excel_date_styles(archive, names)
         pages = []
         workbook = ElementTree.fromstring(archive.read('xl/workbook.xml'))
         for sheet in workbook.iter(_S + 'sheet'):
@@ -263,6 +354,8 @@ def sheet_pages(path):
                         text = shared[index] if index < len(shared) else ''
                     elif kind == 'b':
                         text = 'DOĞRU' if value.text == '1' else 'YANLIŞ'
+                    elif int(cell.get('s', 0) or 0) in dates and kind in (None, 'n'):
+                        text = _excel_date(value.text)
                     else:
                         text = value.text or ''
                     cells[_column(cell.get('r')) if cell.get('r') else len(cells)] = text
