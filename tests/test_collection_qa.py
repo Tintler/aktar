@@ -152,6 +152,47 @@ class CollectionQATests(unittest.TestCase):
                                        base=self.work).ask('regresyon')
             self.assertEqual(used, ['analiz'])
 
+    def statement(self, folder, name, text):
+        path = self.root / folder / name
+        path.parent.mkdir(exist_ok=True)
+        path.write_bytes(b'x')
+        source = {'kind': 'pdf'}
+        data = qa.build_data(path, [{'start': 1.0, 'end': 1.0, 'text': text}], source)
+        save_json(qa.cache_path(path, qa.source_key(source), self.work), data)
+        search_index.build(path, self.cfg, FakeClient(), self.work, log=QUIET)
+        return path
+
+    def test_current_state_question_adds_latest_statement_of_each_series(self):
+        """F95: 'su an' sorusunda arama eski ayi secse de her serinin son ekstresi baglama girer."""
+        self.assertEqual(collection_qa.series_key('E/2025-03-03 World Gold Hesap.pdf'),
+                         collection_qa.series_key('E/2026-09-02 World Gold Hesap.pdf'))
+        self.assertEqual(collection_qa.series_key('E/2025-02-05 2025 Ocak ayı hesap.pdf'),
+                         collection_qa.series_key('E/2026-09-04 2026 Ağustos ayı hesap.pdf'))
+        gold = [self.statement('E', f'2026-0{month} World Gold Hesap.pdf', f'altın bakiye {month}0 gram')
+                for month in (1, 2, 3)]
+        cash = [self.statement('E', f'2026-0{month} {name} ayı hesap.pdf', f'dolar bakiye {month}00')
+                for month, name in ((1, 'Ocak'), (2, 'Şubat'))]
+        videos = gold + cash + self.videos
+        dates = {str(path): path.stem[:7] for path in gold + cash}
+        chat = collection_qa.CollectionQA(videos, 'Finans', lambda: dict(self.cfg), log=QUIET,
+                                          base=self.work, dates=dates)
+        client = FakeClient('Cevap.')
+        old_only = [{'video': str(gold[0]), 'start': 1.0, 'end': 1.0}]  # arama eski ayi secer
+        with unittest.mock.patch('collection_qa.today', lambda: '2026-10-15'),                 unittest.mock.patch('search_index.search', lambda *args, **kwargs: old_only):
+            chat.ask('şu an güncel varlıklarım ne kadar', client)
+        context = client.messages[0]['content']
+        self.assertIn('TODAY: 2026-10-15', context)
+        self.assertIn('altın bakiye 30 gram', context)
+        self.assertIn('dolar bakiye 200', context)
+        self.assertIn('MOST RECENT DOCUMENT OF EACH SERIES (use for current values): '
+                      'V3 (date: 2026-03), V5 (date: 2026-02)', context)
+        # tarihli belgeler kronolojik: eski ocak ekstresi son ekstreden once gelir
+        self.assertLess(context.index('### V1 '), context.index('### V3 '))
+        # guncel durum sorulmayinca son ekstre zorla eklenmez
+        client = FakeClient('Cevap.')
+        chat.ask('regresyon', client)
+        self.assertNotIn('MOST RECENT', client.messages[0]['content'])
+
     def test_empty_index_raises_helpful_error(self):
         chat = collection_qa.CollectionQA([self.root / 'yok.mkv'], 'ML', lambda: dict(self.cfg),
                                           log=QUIET, base=self.work)
