@@ -302,6 +302,14 @@ class LibraryTests(unittest.TestCase):
         library.set_date(data, [first], '')
         self.assertEqual(list(library.manual_dates(data)), [library._key(second)])
 
+    def test_progress_names_the_selected_ocr_engine(self):
+        """F91: Tesseract seciliyken ilerleme 'gorü modeli' demesin; gorseller her zaman gorü."""
+        import documents
+        self.assertEqual([documents.reader_name({'ocr_engine': engine, 'ocr_model': 'glm-ocr'})
+                          for engine in ('tesseract', 'model', 'vision')],
+                         ['Tesseract', 'OCR modeli', 'görü modeli'])
+        self.assertEqual(documents.reader_name({'ocr_engine': 'tesseract'}, image=True), 'görü modeli')
+
     def test_default_title(self):
         self.assertEqual(library.default_title([self.media]), 'media')
         self.assertEqual(library.default_title([self.media / 'Ders 2.mp4']), 'media')

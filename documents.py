@@ -464,6 +464,15 @@ def ocr_engine(cfg):
     return engine
 
 
+READER_NAMES = {'tesseract': 'Tesseract', 'model': 'OCR modeli', 'vision': 'görü modeli'}
+
+
+def reader_name(cfg, image=False):
+    """Ilerleme yazilari icin okuyucu adi (F91): taranmis sayfalar secili OCR motoruyla,
+    gorseller her zaman gorsel modelle okunur."""
+    return READER_NAMES['vision'] if image else READER_NAMES.get(ocr_engine(cfg), 'görü modeli')
+
+
 def tesseract_workers():
     """Ayni anda calisan Tesseract sayisi: bir-iki cekirdek arayuze kalir, en fazla 8."""
     import os
@@ -867,5 +876,5 @@ def load_session(path, base=None, log=print, ocr=None, progress=None, cancelled=
     except OSError:
         pass
     log(f'Belge metni hazır: {pages} sayfa, {len(segments)} paragraf'
-        + (f' ({read} sayfa görü modeliyle okundu).' if read else '.'))
+        + (f' ({read} sayfa {getattr(ocr, "label", "görü modeli")} ile okundu).' if read else '.'))
     return data, cache

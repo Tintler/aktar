@@ -693,6 +693,7 @@ def vision_reader(cfg, log=print):
     # Tesseract: sayfalar paralel ve gri tonlu (hizli) cizilir; gorsel model tek tek.
     read.workers = documents.tesseract_workers() if use_tesseract else 1
     read.grayscale = use_tesseract
+    read.label = documents.reader_name(cfg)  # gunlukte 'N sayfa Tesseract ile okundu'
     return read
 
 

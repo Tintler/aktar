@@ -89,9 +89,11 @@ class DocumentMixin:
         'Hepsini hazirla'ya birakilir."""
         log = lambda message: self._log('[Belge] ' + str(message))  # noqa: E731
 
+        reader = ['görü modeli']  # F91: secili OCR motorunun adi (cfg okununca)
+
         def progress(done, total):
             if not doc.ready:
-                doc.note = f'Görü modeliyle okunuyor… {done}/{total}'
+                doc.note = f'{reader[0][0].upper() + reader[0][1:]} ile okunuyor… {done}/{total}'
                 self._push_doc(doc)
 
         def work():
@@ -99,6 +101,7 @@ class DocumentMixin:
                      'root': None, 'missing': False, 'new': False}
             try:
                 cfg = load_config()
+                reader[0] = documents.reader_name(cfg, doc.kind == 'image')
                 scanned = len(documents.scanned_pages(doc.path)) if doc.kind == 'pdf' else 0
                 allow = scanned <= VISION_PAGES_ON_OPEN
                 if doc.kind == 'image' or (scanned and allow):
@@ -111,7 +114,7 @@ class DocumentMixin:
                         raise
                     raise documents.NoTextError(
                         f'taranmış belge ({scanned} sayfa); kütüphanede "Hepsini hazırla" ile '
-                        'görü modeliyle okutun.') from None
+                        'okutun.') from None
                 if str(cfg.get('embedding_model', '')).strip():
                     try:
                         library.index(entry, cfg, log=log)

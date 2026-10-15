@@ -29,9 +29,9 @@ REPEATED_ERROR_LIMIT = 3  # ust uste ayni hata: kuyruk durur
 KIND_LABELS = {'video': 'Video', 'document': 'Belge', 'image': 'Görsel'}
 STATUS_TEXT = {'ready': 'Hazır', 'transcript': 'Metin hazır', 'pending': 'Bekliyor',
                'no_subtitle': 'Altyazı yok · Whisper bekliyor',
-               'no_text': 'Metin yok · görü modeli bekliyor', 'missing': 'Bulunamadı'}
+               'no_text': 'Metin yok · OCR bekliyor', 'missing': 'Bulunamadı'}
 META_TEXT = {'ready': 'hazır', 'transcript': 'metin hazır', 'pending': 'bekliyor',
-             'no_subtitle': 'Whisper bekliyor', 'no_text': 'görü bekliyor', 'missing': 'bulunamadı'}
+             'no_subtitle': 'Whisper bekliyor', 'no_text': 'OCR bekliyor', 'missing': 'bulunamadı'}
 OCR_OVERRIDES = ('tesseract', 'model', 'vision')  # prepare_start: yalnizca bu hazirlik icin
 PLAN_GROUPS = ('ready', 'summary', 'index', 'document', 'subtitle', 'vision', 'whisper')
 
@@ -693,7 +693,8 @@ class LibraryMixin:
                 vision = document and allow_vision and documents.needs_vision(path)
             except (RuntimeError, ValueError, OSError):
                 vision = False
-            started(index, path, 'görü modeliyle okunuyor' if vision else 'indeksleniyor' if has_text
+            reader = documents.reader_name(cfg, entry['kind'] == 'image')
+            started(index, path, f'{reader} ile okunuyor' if vision else 'indeksleniyor' if has_text
                     else 'belgeden metin' if document else 'Whisper ile transkript' if whisper
                     else 'altyazıdan metin')
 
@@ -710,7 +711,7 @@ class LibraryMixin:
             try:
                 outcome = library.transcribe(entry, cfg, allow_whisper, log=log, progress=whisper_progress,
                                              cancelled=cancel.is_set, allow_vision=allow_vision,
-                                             vision_progress=counted('Görü'))
+                                             vision_progress=counted('Görü' if reader == 'görü modeli' else 'OCR'))
                 if outcome != 'skipped' and str(cfg.get('embedding_model', '')).strip():
                     if not has_text:
                         started(index, path, 'indeksleniyor')

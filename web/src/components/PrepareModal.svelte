@@ -28,7 +28,7 @@
     ['index', 'database', '', 'Yalnızca indekslenecek', 'Transkript hazır; embedding ile aranabilir yapılır'],
     ['document', 'fileText', '', 'Belgelerden metin', 'PDF metin katmanı, Word, Excel, EPUB ve metin dosyaları'],
     ['subtitle', 'subtitles', '', 'Gömülü altyazıdan', 'Hızlı · şarkı/yazı izleri atlanır, en uygun akış seçilir'],
-    ['vision', 'image', 'warn', 'Taranmış PDF / görsel → görü modeli', 'Metni olmayan sayfalar ve görseller; yalnızca görü seçeneği açıksa'],
+    ['vision', 'image', 'warn', 'Taranmış PDF / görsel → OCR', 'Metni olmayan sayfalar ve görseller; yalnızca bu seçenek açıksa'],
     ['whisper', 'mic', 'warn', 'Altyazı yok → Whisper', 'Konuşma sesten metne çevrilir; yalnızca Whisper seçeneği açıksa'],
   ];
   const readyCount = $derived(counts ? counts.ready + (summaries ? 0 : counts.summary) : 0);
@@ -68,7 +68,7 @@
   {#if p.failed?.length}<p class="warn">{p.failed.length} dosya okunamadı ve atlanacak: {p.failed.slice(0, 3).join(', ')}</p>{/if}
   <div class="opts">
     <Toggle bind:checked={summaries} label="Dosya özetleri ve koleksiyon özeti çıkar" />
-    <Toggle bind:checked={vision} label="Taranmış PDF ve görselleri görü modeliyle oku" />
+    <Toggle bind:checked={vision} label={`Taranmış PDF'leri ${ENGINES[ocr || p.ocr_engine] ?? 'OCR'} ile, görselleri görü modeliyle oku`} />
     <Toggle bind:checked={whisper} disabled={!p.whisper} label="Altyazısız videolarda Whisper kullan" />
     {#if vision && counts?.vision}
       <label class="engine">
