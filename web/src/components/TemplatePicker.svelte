@@ -56,7 +56,8 @@
 </script>
 
 <button type="button" class="tpl" class:on={!!name || !!note} class:label {disabled} {title} onclick={open}>
-  <Icon name="scroll" size={16} />{#if label || name}<span class="ellipsis">{name || (note ? 'Not' : 'Şablon')}</span>{/if}
+  <!-- dar sohbet kutularinda yalnizca simge (secili sablon yesil yanar; adi ipucunda) -->
+  <Icon name="scroll" size={16} />{#if label}<span class="ellipsis">{name || (note ? 'Not' : 'Şablon')}</span>{/if}
 </button>
 
 <style>
