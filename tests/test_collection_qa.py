@@ -211,6 +211,37 @@ class CollectionQATests(unittest.TestCase):
         hits = chat.latest_hits(chat.latest_documents('güncel fon bakiyem'), chat.config_provider())
         self.assertEqual([hit['start'] for hit in hits], [2.0])
 
+    def test_undated_inventory_survives_many_statement_series(self):
+        """F97: tarihsiz envanter, 25 tarihli seri arasinda da guncel durum baglamina girer."""
+        source = {'kind': 'sheet'}
+        statements, dates = [], {}
+        for number in range(25):
+            path = self.statement('E', f'2026-09-0{number % 9 + 1} Banka{chr(65 + number)} ekstre.pdf',
+                                  f'Banka{chr(65 + number)} bakiye 1.000,00 TL')
+            statements.append(path)
+            dates[str(path)] = '2026-09'
+        inventory = self.root / 'Inventory.xlsx'
+        inventory.write_bytes(b'x')
+        rows = ['Toplamlar (tüm satırlardan hesaplandı): Cins = Altın (3 satır): Miktar(g) toplamı 21']
+        rows += [f'Satır {row}: Cins: Altın; Miktar(g): 7' for row in range(2, 5)]
+        segments = [{'start': 1.0, 'end': 1.0, 'text': text} for text in rows]
+        save_json(qa.cache_path(inventory, qa.source_key(source), self.work),
+                  qa.build_data(inventory, segments, source))
+        chat = collection_qa.CollectionQA(statements + [inventory] + self.videos, 'Finans',
+                                          lambda: dict(self.cfg), log=QUIET, base=self.work,
+                                          dates=dates)
+        latest = chat.latest_documents('şu an varlıklarım', self.cfg)
+        self.assertIn(('', inventory), latest)
+        self.assertLessEqual(len(latest), collection_qa.LATEST_SERIES)
+        client = FakeClient('Cevap.')
+        with unittest.mock.patch('search_index.search', lambda *args, **kwargs: []):
+            chat.ask('şu an varlıklarım', client)
+        context = client.messages[0]['content']
+        self.assertIn('Miktar(g) toplamı 21', context)
+        self.assertIn('V26 (undated)', context)
+        # tutar izi olmayan tarihsiz belge (video, kilavuz) listeye girmez
+        self.assertNotIn(('', self.videos[0]), latest)
+
     def test_empty_index_raises_helpful_error(self):
         chat = collection_qa.CollectionQA([self.root / 'yok.mkv'], 'ML', lambda: dict(self.cfg),
                                           log=QUIET, base=self.work)

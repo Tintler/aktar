@@ -36,7 +36,9 @@ _PAGE = re.compile(r'(?:[sS]\.\s?)?(\d+)')
 # F95: "guncel / su an / son durum" sorularinda her serinin en son belgesi aramadan bagimsiz eklenir
 RECENT_WORDS = re.compile(r'güncel|şu ?an|şimdi|bugün|\bson\b|mevcut|kalan|elimde|elimdeki'
                           r'|\blatest\b|\bcurrent\b|\bnow\b')
-LATEST_SERIES = 12  # en fazla bu kadar serinin son belgesi
+LATEST_SERIES = 20  # en fazla bu kadar serinin son belgesi
+LATEST_MIN_CHARS = 800  # her son belgeye en az bu kadar yer kalacak kadar belge alinir
+UNDATED_MIN_SCORE = 10  # tarihsiz belge en az bu kadar tutar/bakiye izi tasirsa girer
 LATEST_SHARE = 0.5  # baglam butcesinin son belgelere ayrilan payi
 _MONTH_WORDS = re.compile(r'\b(?:ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim'
                           r'|kasım|aralık|january|february|march|april|may|june|july|august'
@@ -49,7 +51,7 @@ Rules:
 - Ground the answer in the excerpts. Combine information from several videos when the question asks for it, and say which video covers what (use the video title when it helps the reader).
 - Support claims with citations in square brackets: video id + timestamp, e.g. [V3 12:34] for a moment or [V3 12:34-13:10] for a stretch; several at once as [V3 12:34; V7 5:10]. For documents cite the page instead: [V5 s.12]; an image is a single page given as a description plus its visible text, cite it as [V7 s.1]. Put the citation right after the sentence it supports. Use only video ids and timestamps that appear in the excerpts; never invent one.
 - Documents may carry their own date (for example a statement or report date) as "date: 2026-09" in their headings and summaries. Several documents can be issues of the same series (monthly credit card statements, fund reports): use the dates to tell them apart, answer time-based questions ("last month", "in March") with the matching dates, and name the date when you refer to such a document.
-- TODAY's date is given. When the question asks about the current state (current balance, holdings, debt, "güncel", "şu an", "son durum"), take for each account or series its most recent dated document as the current value, name that date, and never add up balances from several months of the same account. A list of the most recent document of each series may be given for this.
+- TODAY's date is given. When the question asks about the current state (current balance, holdings, debt, "güncel", "şu an", "son durum"), take for each account or series its most recent dated document as the current value, name that date, and never add up balances from several months of the same account. A list of the most recent document of each series may be given for this. An undated list of holdings (an inventory spreadsheet of gold, cash or foreign currency) is current unless a newer document covers the same item; if a table gives "Toplamlar", use those totals instead of adding up its rows yourself.
 - Numbers the user gives in the question (exchange rates, prices, gram gold price) are inputs, not holdings. For a calculation take the amounts from the documents and write every step explicitly, e.g. "125,40 gr × 6.569 TL = 823.752,60 TL", then the total; double-check the arithmetic. If an amount the calculation needs is missing from the documents, say which one instead of guessing.
 - A collection overview and short per-video summaries may also be given. Use them for broad questions (what the collection covers, which video is about what, how the topics progress), but cite timestamps only from the excerpts.
 - If the material does not cover the question, say so clearly. You may add brief general knowledge only if you mark it explicitly as not coming from the videos (for example "Videolarda geçmiyor ama genel olarak ...") and you never cite it.
@@ -124,6 +126,14 @@ def _figure_score(lines):
     """Sayfadaki tutar/bakiye yogunlugu: '37.149,57' gibi sayilar + bakiye/toplam sozcukleri."""
     text = ' '.join(line['text'] for line in lines)
     return len(_FIGURE.findall(text)) + 2 * len(_FIGURE_WORDS.findall(text.casefold()))
+
+
+def _pages(lines):
+    """Belge satirlari sayfa sayfa: {sayfa: [satirlar]}."""
+    pages = {}
+    for line in lines:
+        pages.setdefault(line['start'], []).append(line)
+    return pages
 
 
 def series_key(path):
@@ -222,23 +232,32 @@ class CollectionQA:
             return None
         return [{'video': str(self.videos[0]), 'start': lines[0]['start'], 'end': lines[-1]['end']}]
 
-    def latest_documents(self, question):
-        """Guncel durum sorusunda (F95) her serinin en son tarihli belgesi, en yeniden eskiye.
+    def latest_documents(self, question, cfg=None):
+        """Guncel durum sorusunda (F95) her serinin en son belgesi. Donen: [(tarih, yol)].
 
         Arama benzer aylik ekstreler arasinda eski ayi secebilir; 'su an' sorusunda son ekstre
-        bu yuzden ayrica baglama konur. Donen: [(tarih, yol)]."""
+        bu yuzden ayrica baglama konur. F97: tarihsiz ama tutar iceren belgeler (envanter
+        tablosu) de girer; sira tarihe degil tutar yogunluguna gore, sayi butceye gore sinirli
+        (eskiden en eski tarihli envanter 12 serilik sinirdan dusuyordu)."""
         if not RECENT_WORDS.search(question.casefold()):
             return []
         latest = {}
         for video in self.videos:
             data = self._video_lines(video)
-            date = self._date(video) if data and data[3] and data[1] else ''
-            if not date:
+            if not (data and data[3] and data[1]):
                 continue
-            key = series_key(video)
+            date = self._date(video)
+            score = max(_figure_score(lines) for lines in _pages(data[1]).values())
+            if not date and score < UNDATED_MIN_SCORE:
+                continue  # tarihsiz ve tutarsiz belge (kilavuz vb.) guncel durumu tasimaz
+            key = series_key(video) if date else _key(video)
             if key not in latest or date > latest[key][0]:
-                latest[key] = (date, video)
-        return sorted(latest.values(), key=lambda item: item[0], reverse=True)[:LATEST_SERIES]
+                latest[key] = (date, video, score)
+        budget = int(int((cfg or {}).get('qa_context_chars', 24000)) * LATEST_SHARE)
+        count = max(1, min(LATEST_SERIES, budget // LATEST_MIN_CHARS))
+        chosen = sorted(latest.values(), key=lambda item: (-item[2], item[0]))[:count]
+        return [(date, video) for date, video, _score in
+                sorted(chosen, key=lambda item: item[0], reverse=True)]
 
     def latest_hits(self, latest, cfg):
         """Son belgelerin sayfalari (F96): once tutar/bakiye yogun sayfalar, belgeler sirayla.
@@ -250,9 +269,7 @@ class CollectionQA:
         budget = int(int(cfg.get('qa_context_chars', 24000)) * LATEST_SHARE)
         ranked = []
         for _date, video in latest:
-            pages = {}
-            for line in self._video_lines(video)[1]:
-                pages.setdefault(line['start'], []).append(line)
+            pages = _pages(self._video_lines(video)[1])
             ranked.append(sorted(pages.items(), key=lambda item: -_figure_score(item[1])))
         fair = budget // max(1, len(latest))
         hits, used = [], 0
@@ -344,7 +361,7 @@ class CollectionQA:
             raise ValueError('Soru boş olamaz.')
         cfg = qa_config(self.config_provider())  # F72: soru-cevap modeli
         client = client or Client(cfg, log=self.log)
-        latest = [] if len(self.videos) == 1 else self.latest_documents(question)
+        latest = [] if len(self.videos) == 1 else self.latest_documents(question, cfg)
         hits = self.whole_hits(cfg) or (self.latest_hits(latest, cfg) + search_index.search(
             self.videos, self._query(question), cfg, client, limit=HIT_LIMIT, base=self.base,
             log=self.log))
@@ -353,7 +370,8 @@ class CollectionQA:
                              '"Hepsini hazırla" ile indekslendi mi?')
         context, videos = self.build_context(hits, cfg)
         shown = {_key(path) for path in videos.values()}
-        recent = [f'{self.labels[_key(video)]} (date: {date})' for date, video in latest
+        recent = [f'{self.labels[_key(video)]} ' + (f'(date: {date})' if date else '(undated)')
+                  for date, video in latest
                   if _key(video) in shown]
         if recent:
             context += ('\n\nMOST RECENT DOCUMENT OF EACH SERIES (use for current values): '
