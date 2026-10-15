@@ -340,6 +340,11 @@ Video ve belge sohbetleri Kütüphane'den açılan dosyalarda da saklanır; pane
 ### 3.10 Konsol
 Sol menüdeki **Konsol**, uygulamanın bütün günlüğünü gösterir: çeviri adımları, toplu hazırlık, OCR, Whisper, sohbet ve hata ayrıntıları. Üstteki kutuyla günlükte arama yapılır, **Hatalar ve uyarılar** yalnızca sorunlu satırları gösterir, **Kopyala** görünen satırları panoya alır. Konsol açık değilken yeni bir hata yazılırsa menüdeki simgede kırmızı bir nokta belirir.
 
+### 3.11 Abonelikler
+Sol menüdeki **Abonelikler**, düzenli ve tek seferlik ödemelerinizi (Netflix, Amazon Prime, elektrik faturası, bir kurs ücreti…) takip eder. **Yeni kayıt** ile ad, kategori, tutar ve para birimi (TRY, USD, EUR, GBP), tür (**Tekrarlayan** ya da **Tek seferlik**), dönem (haftalık, aylık, 3 ayda bir, 6 ayda bir, yıllık), durum (**Aktif**, **Deneme**, **Durduruldu**, **İptal edildi**), başlangıç, yenileme/ödeme ve bitiş tarihleri girilir. **Ödeme** bölümünde yöntem (kredi kartı, banka kartı, havale/otomatik ödeme, nakit), banka, kart adı ve kartın son 4 hanesi yazılabilir; kart numarasının tamamı saklanmaz.
+
+Yenileme tarihi geçmişte kaldıysa bir sonraki ödeme tarihi dönem eklenerek kendiliğinden hesaplanır (31'inde yenilenen aylık kayıt kısa aylarda ayın son gününe düşer). Sayfanın üstünde aylık ve yıllık toplam (para birimine göre ayrı), önümüzdeki 30 günde ödenecek tutar ve aktif kayıt sayısı; sağda banka ve ödeme yöntemine göre aylık yük görünür. Durduruldu/iptal edilmiş ve tek seferlik kayıtlar aylık toplama girmez. Bir satıra tıklayınca kayıt düzenlenir ya da silinir. Kayıtlar kütüphane klasöründeki `subscriptions.data.json` dosyasında durur.
+
 ---
 
 ## 4. Terim sözlüğü (glossary)

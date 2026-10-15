@@ -17,6 +17,7 @@
   import Chat from './views/Chat.svelte';
   import Files from './views/Files.svelte';
   import Console from './views/Console.svelte';
+  import Subscriptions from './views/Subscriptions.svelte';
   import { app, init, toasts, dismissToast, go, toggleSidebar } from './lib/state.svelte.js';
   import { call } from './lib/api.js';
   import { frame, initFrame, dragArea } from './lib/frame.svelte.js';
@@ -29,6 +30,7 @@
     ['library', 'Kütüphane', 'library'],
     ['files', 'Dosya incele', 'fileSearch'],
     ['translate', 'Altyazı Çevir', 'languages'],
+    ['subscriptions', 'Abonelikler', 'creditCard'],
     ['console', 'Konsol', 'terminal'],
   ];
   // Oynatici / belge acikken, dosya nereden acildiysa o menu ogesi vurgulanir.
@@ -134,6 +136,7 @@
       {:else if app.view === 'chat'}<Chat />
       {:else if app.view === 'files'}<Files />
       {:else if app.view === 'console'}<Console />
+      {:else if app.view === 'subscriptions'}<Subscriptions />
       {:else if app.view === 'translate'}<Translate />
       {:else if app.view === 'player'}<Player />
       {:else if app.view === 'document'}<Document />

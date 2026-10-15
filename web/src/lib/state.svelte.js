@@ -46,7 +46,7 @@ export function setThink(value) {
   try { localStorage.setItem('aktar.think', app.think ? '1' : '0'); } catch { /* depo yok */ }
 }
 
-const VIEWS = ['chat', 'library', 'files', 'translate', 'console'];
+const VIEWS = ['chat', 'library', 'files', 'translate', 'subscriptions', 'console'];
 
 export const toasts = $state([]);
 

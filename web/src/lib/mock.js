@@ -97,11 +97,47 @@ export function createMock(emit) {
   let mailRules = [{ id: 'r1', title: 'World Gold ekstreleri', sender: '@worldcard.com.tr', subject: 'Hesap Özeti', what: 'pdf', since: '2025-01-01', folder: 'D:\Finans\Ekstreler', enabled: true, has_password: false, fetched: 9 }];
   const mailState = () => ({ rules: mailRules, account: true, address: settings.mail_address, checked: '2026-10-15T09:12:00', busy: false,
     what: [{ id: 'pdf', label: 'Ekler (PDF, Excel, Word…)' }, { id: 'html', label: 'E-posta gövdesi' }, { id: 'both', label: 'Ekler ve gövde' }] });
+  const sub = (values) => ({ category: '', currency: 'TRY', kind: 'recurring', cycle: 'monthly', status: 'active', start_date: '2025-01-01',
+    end_date: '', auto_renew: true, method: 'credit', bank: '', card: '', card_last4: '', notes: '', ...values });
+  let subs = [
+    sub({ id: 's1', name: 'Netflix', category: 'Dijital yayın', amount: 229.99, renewal_date: '2026-10-18', bank: 'Garanti BBVA', card: 'Bonus', card_last4: '4821' }),
+    sub({ id: 's2', name: 'Amazon Prime', category: 'Dijital yayın', amount: 69.9, renewal_date: '2026-11-02', bank: 'Akbank', card: 'Axess', card_last4: '1290' }),
+    sub({ id: 's3', name: 'Elektrik', category: 'Fatura', amount: 840, renewal_date: '2026-10-25', method: 'transfer', bank: 'İş Bankası', card: 'Otomatik ödeme talimatı' }),
+    sub({ id: 's4', name: 'iCloud+', category: 'Bulut', amount: 99.99, currency: 'USD', cycle: 'yearly', renewal_date: '2027-03-12', method: 'debit', bank: 'Akbank', card_last4: '7730' }),
+    sub({ id: 's5', name: 'Spor salonu', category: 'Spor', amount: 1500, status: 'paused', renewal_date: '2026-12-01', bank: 'Garanti BBVA' }),
+  ];
+  const subsView = () => {
+    const rate = { weekly: 52 / 12, monthly: 1, quarterly: 1 / 3, semiannual: 1 / 6, yearly: 1 / 12 };
+    const live = (s) => s.kind === 'recurring' && ['active', 'trial'].includes(s.status);
+    const items = subs.map((s) => ({ ...s, next_due: ['paused', 'cancelled'].includes(s.status) ? '' : s.renewal_date,
+      days_left: ['paused', 'cancelled'].includes(s.status) ? null : Math.round((new Date(s.renewal_date) - new Date('2026-10-15')) / 864e5),
+      monthly: live(s) ? +(s.amount * rate[s.cycle]).toFixed(2) : 0 }));
+    const sum = (list, f) => list.reduce((acc, s) => ({ ...acc, [s.currency]: +((acc[s.currency] ?? 0) + f(s)).toFixed(2) }), {});
+    const monthly = sum(items.filter((s) => s.monthly), (s) => s.monthly);
+    const groups = {};
+    for (const s of items.filter((s) => s.monthly)) {
+      const g = (groups[s.bank + s.method + s.currency] ??= { bank: s.bank || 'Banka belirtilmedi', method: s.method, currency: s.currency, monthly: 0, count: 0 });
+      g.monthly = +(g.monthly + s.monthly).toFixed(2); g.count++;
+    }
+    return { items, categories: ['Dijital yayın', 'Müzik', 'Yazılım', 'Bulut', 'Fatura', 'Diğer'], summary: {
+      monthly, yearly: Object.fromEntries(Object.entries(monthly).map(([k, v]) => [k, +(v * 12).toFixed(2)])),
+      upcoming: sum(items.filter((s) => s.days_left !== null && s.days_left <= 30), (s) => s.amount), upcoming_days: 30,
+      active: items.filter((s) => ['active', 'trial'].includes(s.status)).length,
+      by_payment: Object.values(groups).sort((a, b) => b.monthly - a.monthly) } };
+  };
   const api = {
     library_open: async () => library,
     library_state: async () => library,
     library_overview: async () => library.collections.map((c) => ({ ...c, count: c.files, summary: chat.overview.summary, topics: chat.overview.topics })),
     chat_state: async () => ({ ...chat, entries: chat.entries.map((e) => ({ ...e })) }),
+    // F106: abonelikler (tarih hesabi yok; gercek hesap subscriptions.py'de)
+    subs_state: async () => subsView(),
+    subs_save: async (item) => {
+      const index = subs.findIndex((s) => s.id === item.id);
+      if (index >= 0) subs[index] = item; else subs.push({ ...item, id: 'm' + Date.now() });
+      return subsView();
+    },
+    subs_delete: async (id) => { subs = subs.filter((s) => s.id !== id); return subsView(); },
     // F104: sohbet sablonlari
     templates_list: async () => templates.map((t) => ({ ...t })),
     templates_save: async (items) => (templates = items.filter((t) => t.name.trim() && t.text.trim()).map((t, i) => ({ ...t, id: t.id || 'm' + Date.now() + i }))),
