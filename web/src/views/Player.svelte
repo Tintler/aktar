@@ -8,6 +8,8 @@
   import { call, on } from '../lib/api.js';
   import { openMenu } from '../lib/menu.svelte.js';
   import { StreamFeed, mseSupported } from '../lib/streamfeed.js';
+  import NotesPanel from '../components/NotesPanel.svelte';
+  import { notes, loadNotes, startNote, NOTE_COLORS } from '../lib/notes.svelte.js';
 
   const p = $derived(app.player);
   const STEP = 5;
@@ -116,6 +118,18 @@
     else if (event.key === 'ArrowLeft') { event.preventDefault(); seekTo(time - STEP); }
     else if (event.key === 'ArrowRight') { event.preventDefault(); seekTo(time + STEP); }
     else if (event.key === 'f') toggleFullscreen();
+    else if (event.key === 'n' && !event.ctrlKey && !event.metaKey) { event.preventDefault(); noteHere(); }
+  }
+
+  // --- notlar (F113) -----------------------------------------------------------
+  $effect(() => {
+    if (p?.path) loadNotes(p.path);
+  });
+
+  function noteHere() {
+    videoEl?.pause();
+    if (document.fullscreenElement) document.exitFullscreen();
+    startNote(Math.round(time * 10) / 10);
   }
 
   function mediaError() {
@@ -279,6 +293,11 @@
                 <i class="done" style:width="{Math.max(0, Math.min(1, (time - seg.start) / (seg.end - seg.start))) * 100}%"></i>
               </div>
             {/each}
+            {#if notes.path === p.path}
+              {#each notes.items as note (note.id)}
+                <span class="pin" style:left="{(note.at / (duration || 1)) * 100}%" style:background={NOTE_COLORS[note.color]}></span>
+              {/each}
+            {/if}
             <span class="knob" style:left="{(time / (duration || 1)) * 100}%"></span>
             {#if hover}<span class="tip" style:left="{hover.x}px">{fmt(hover.time)}{chapterAt(hover.time) ? ' · ' + chapterAt(hover.time) : ''}</span>{/if}
           </div>
@@ -295,11 +314,16 @@
             {#if (p.audio ?? []).length > 1}
               <button class="icon-btn sm" title="Ses parçası" onclick={audioMenu}><Icon name="headphones" size={18} /></button>
             {/if}
+            <button class="icon-btn sm" title="Bu ana not ekle (N)" onclick={noteHere}><Icon name="squarePen" size={16} /></button>
+            <button class="icon-btn sm" class:on={notes.open} title="Notlar" onclick={() => (notes.open = !notes.open)}><Icon name="list" size={18} /></button>
             <button class="icon-btn sm" class:on={ccKey} title="Altyazılar" onclick={ccMenu}><Icon name="subtitles" size={18} /></button>
             <button class="icon-btn sm" title="Tam ekran (F)" onclick={toggleFullscreen}><Icon name={fullscreen ? 'shrink' : 'expand'} size={16} /></button>
           </div>
         </div>
       </div>
+      {#if notes.open && notes.path === p.path}
+        <div class="notes-wrap"><NotesPanel path={p.path} current={time} onjump={(at) => seekTo(at)} /></div>
+      {/if}
     </div>
   {/if}
 </section>
@@ -336,4 +360,7 @@
   .chapter { font-size: 12px; color: var(--secondary); background: var(--surface); padding: 3px 10px; border-radius: 999px; max-width: 260px; }
   .grow { flex: 1; }
   .icon-btn.on { color: var(--accent); }
+  .pin { position: absolute; top: 2px; width: 4px; height: 14px; margin-left: -2px; border-radius: 2px; pointer-events: none; box-shadow: 0 0 0 1px var(--panel); }
+  .notes-wrap { flex: none; height: 34%; min-height: 150px; display: flex; flex-direction: column; }
+  .notes-wrap > :global(.notes) { flex: 1; }
 </style>

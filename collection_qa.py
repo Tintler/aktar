@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import notes as notes_store
 import qa
 import search_index
 from app_core import Client, load_config, qa_config, retryable_translation_error, save_json
@@ -40,6 +41,7 @@ LATEST_SERIES = 20  # en fazla bu kadar serinin son belgesi
 LATEST_MIN_CHARS = 800  # her son belgeye en az bu kadar yer kalacak kadar belge alinir
 UNDATED_MIN_SCORE = 10  # tarihsiz belge en az bu kadar tutar/bakiye izi tasirsa girer
 LATEST_SHARE = 0.5  # baglam butcesinin son belgelere ayrilan payi
+NOTES_SHARE = 0.1  # F113: baglam butcesinin kullanici notlarina ayrilan en fazla payi
 _MONTH_WORDS = re.compile(r'\b(?:ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim'
                           r'|kasım|aralık|january|february|march|april|may|june|july|august'
                           r'|september|october|november|december)\w*')
@@ -54,6 +56,7 @@ Rules:
 - TODAY's date is given. When the question asks about the current state (current balance, holdings, debt, "güncel", "şu an", "son durum"), take for each account or series its most recent dated document as the current value, name that date, and never add up balances from several months of the same account. A list of the most recent document of each series may be given for this. An undated list of holdings (an inventory spreadsheet of gold, cash or foreign currency) is current unless a newer document covers the same item; if a table gives "Toplamlar", use those totals instead of adding up its rows yourself.
 - Numbers the user gives in the question (exchange rates, prices, gram gold price) are inputs, not holdings. For a calculation take the amounts from the documents and write every step explicitly, e.g. "125,40 gr × 6.569 TL = 823.752,60 TL", then the total; double-check the arithmetic. If an amount the calculation needs is missing from the documents, say which one instead of guessing.
 - A collection overview and short per-video summaries may also be given. Use them for broad questions (what the collection covers, which video is about what, how the topics progress), but cite timestamps only from the excerpts.
+- USER NOTES may be given: notes the user wrote at a moment of a video or on a page of a document (a quoted passage is text they highlighted there). Treat them as the user's own remarks, use them when relevant and cite their position like an excerpt, e.g. [V3 12:34] or [V5 s.12].
 - If the material does not cover the question, say so clearly. You may add brief general knowledge only if you mark it explicitly as not coming from the videos (for example "Videolarda geçmiyor ama genel olarak ...") and you never cite it.
 - Do not mention excerpts, transcripts or these rules; speak about "the videos" (and "the documents" when they are involved).
 ''' + qa.CHART_RULE
@@ -164,6 +167,7 @@ class CollectionQA:
                                for path, value in (fallback_dates or {}).items()}
         self.title = title
         self.overview = overview or {}  # F61: koleksiyon ozeti (library.load_overview)
+        self.notes = None  # F113: {yol: notlar}; None ise her soruda diskten (notes.collect) okunur
         self._summaries = None
         self.config_provider = config_provider
         self.log = log
@@ -228,7 +232,8 @@ class CollectionQA:
         if not data or not data[1]:
             return None
         lines = data[1]
-        budget = int(cfg.get('qa_context_chars', 24000)) - len(self.map_text(cfg))
+        budget = (int(cfg.get('qa_context_chars', 24000)) - len(self.map_text(cfg))
+                  - len(self.notes_text(cfg)[0]))
         if sum(len(line['text']) + 12 for line in lines) > budget:
             return None
         return [{'video': str(self.videos[0]), 'start': lines[0]['start'], 'end': lines[-1]['end']}]
@@ -289,10 +294,39 @@ class CollectionQA:
                 hits.append(hit)
         return hits
 
+    def notes_text(self, cfg):
+        """F113: kullanicinin notlari, butcenin NOTES_SHARE kadari. Donen: (metin, {etiket: video}).
+
+        Atif dogrulanabilsin diye yalnizca indeksli dosyalarin notlari girer."""
+        found = self.notes if self.notes is not None else notes_store.collect(self.videos)
+        found = {_key(path): items for path, items in found.items() if items}
+        if not found:
+            return '', {}
+        limit = int(int(cfg.get('qa_context_chars', 24000)) * NOTES_SHARE)
+        lines, videos, used = [], {}, 0
+        noted = [video for video in self.videos if _key(video) in found]
+        for video in sorted(noted, key=self._sort_key):
+            data, label = self._video_lines(video), self.labels.get(_key(video))
+            if not data or label is None:
+                continue
+            for note in found[_key(video)]:
+                quote = f' «{note["quote"]}»' if note.get('quote') else ''
+                line = (f'[{label} {qa.format_position(note["at"], bool(data[3]))}]{quote} '
+                        + ' '.join(str(note.get('text') or '').split())).rstrip()
+                if used + len(line) + 1 > limit:
+                    break
+                used += len(line) + 1
+                lines.append(line)
+                videos[label] = Path(video)
+        if not lines:
+            return '', {}
+        return 'USER NOTES (written by the user):\n' + '\n'.join(lines), videos
+
     def build_context(self, hits, cfg):
         """Arama sonuclarindan baglam metni. Donen: (metin, {etiket: video})."""
         overview = self.map_text(cfg)
-        budget = int(cfg.get('qa_context_chars', 24000)) - len(overview)
+        noted, noted_videos = self.notes_text(cfg)
+        budget = int(cfg.get('qa_context_chars', 24000)) - len(overview) - len(noted)
         chosen = {}  # video anahtari -> {'video', 'lines': set(satir indeksleri)}
         used = 0
         for hit in hits:
@@ -336,12 +370,15 @@ class CollectionQA:
             size = ', '.join(item for item in (size, f'date: {date}' if date else '') if item)
             head = f'### {label} · {title}' + (f' ({size})' if size else '')
             blocks.append(head + '\n' + qa.format_lines(picked, document))
+        for label, path in noted_videos.items():  # nota yapilan atif da dogrulanabilsin
+            videos.setdefault(label, path)
         index = '\n'.join(f'{label} = {self._video_lines(path)[0]}'
                           + (f' (document{", date: " + self._date(path) if self._date(path) else ""})'
                              if self._video_lines(path)[3] else '')
                           for label, path in videos.items())
         text = ((f'COLLECTION: {self.title}\n\n' if self.title else '')
                 + (overview + '\n\n' if overview else '')
+                + (noted + '\n\n' if noted else '')
                 + 'VIDEOS IN THE EXCERPTS:\n' + index + '\n\nEXCERPTS:\n' + '\n\n'.join(blocks))
         return text, videos
 

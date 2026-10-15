@@ -17,6 +17,7 @@ import chat_templates
 import collection_qa
 import documents
 import library
+import notes
 from app_core import WINDOWS, load_config
 from bridge_library import chat_entries, reasoning_feed
 
@@ -178,6 +179,32 @@ class DocumentMixin:
         if doc.session is not None:
             doc.session.history = []
         return self._doc_chat(doc)
+
+    # --- not ve vurgu (F113); oynatici da ayni metotlari kullanir --------------
+    def notes_list(self, path):
+        return notes.load(Path(str(path)))
+
+    def notes_add(self, path, at, text='', quote='', color=None):
+        """Not ekler; guncel not listesini dondurur."""
+        try:
+            notes.add(Path(str(path)), at, text, quote, color)
+        except (ValueError, OSError) as error:
+            return {'error': 'Not kaydedilemedi: ' + str(error)}
+        return self.notes_list(path)
+
+    def notes_update(self, path, note_id, text=None, color=None):
+        try:
+            notes.update(Path(str(path)), str(note_id), text, color)
+        except OSError as error:
+            return {'error': 'Not kaydedilemedi: ' + str(error)}
+        return self.notes_list(path)
+
+    def notes_delete(self, path, note_id):
+        try:
+            notes.delete(Path(str(path)), str(note_id))
+        except OSError as error:
+            return {'error': 'Not silinemedi: ' + str(error)}
+        return self.notes_list(path)
 
     def open_external(self, path):
         """Dosyayi isletim sisteminin varsayilan uygulamasinda acar."""
