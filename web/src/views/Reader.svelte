@@ -1,9 +1,13 @@
 <script>
-  // Okuma ekrani (Cevirgec Reader). Sesli okuma (cumle vurgusu, oynatici) Asama 4'te tts.py ile gelecek.
+  // Okuma ekrani ve sesli okuma (Cevirgec Reader): bolum cizimi, icindekiler, yer imleri, cumle cumle okuma.
   import { tick, untrack } from 'svelte';
   import Icon from '../lib/Icon.svelte';
-  import { app, act, saveReaderPrefs, READER_DEFAULTS } from '../lib/state.svelte.js';
+  import { app, act, toast, saveReaderPrefs, saveTtsPrefs, READER_DEFAULTS } from '../lib/state.svelte.js';
   import { call } from '../lib/api.js';
+  import { confirm } from '../lib/confirm.svelte.js';
+  import { segment, QUOTE_DEFAULTS } from '../lib/sentences.js';
+  import { player, play, pause, resume, stop, step, setSpeed, setSentences, setHooks, setPauses } from '../lib/player.svelte.js';
+  import { resolvePauses, pauseAfter } from '../lib/pauses.js';
 
   let { onclose } = $props();
 
@@ -15,6 +19,9 @@
   let pageWrap = $state();
   let article = $state();
   let saveTimer = null;
+  let sentences = $state.raw([]);
+  let breaks = new Set();   // sentences that end a paragraph
+  const SPEEDS = [0.8, 1, 1.25, 1.5, 1.75, 2];
 
   const PAPERS = {
     theme: null,
@@ -29,8 +36,9 @@
   const currentToc = $derived(book ? book.toc.reduce((found, entry, i) => (entry.section <= section ? i : found), -1) : -1);
   const bookmarkHere = $derived(book?.bookmarks.find((b) => b.section === section && Math.abs(b.offset - app.reading.offset) < 0.015) ?? null);
 
-  async function load(number, { offset = 0, anchor = '' } = {}) {
+  async function load(number, { offset = 0, anchor = '', continueReading = false } = {}) {
     if (!book || number < 0 || number >= sectionCount) return;
+    if (player.active && !continueReading) stop();
     resetPull();
     savePosition(true);
     loading = true;
@@ -46,7 +54,145 @@
     const target = anchor ? pageWrap.querySelector(`[id="${CSS.escape(anchor)}"]`) : null;
     if (target) target.scrollIntoView({ block: 'start' });
     else pageWrap.scrollTop = offset * Math.max(0, pageWrap.scrollHeight - pageWrap.clientHeight);
+    ({ sentences, breaks } = segment(article, splitOptions()));
+    setSentences(sentences, { book: book.id, language: book.language || 'tr', breaks });
+    refreshCached();
     savePosition(true);
+  }
+
+  // ---- read aloud
+
+  const splitOptions = () => ({ ...QUOTE_DEFAULTS, ...(app.ttsPrefs.split ?? {}) });
+
+  $effect(() => setPauses(resolvePauses(app.ttsPrefs.pauses)));
+  function highlight(index) {
+    for (const el of article?.querySelectorAll('.s.now') ?? []) el.classList.remove('now');
+    const spans = article?.querySelectorAll(`.s[data-i="${index}"]`) ?? [];
+    for (const el of spans) el.classList.add('now');
+    const first = spans[0];
+    if (first) {
+      const box = first.getBoundingClientRect(), view = pageWrap.getBoundingClientRect();
+      if (box.top < view.top + 40 || box.bottom > view.bottom - 60) first.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }
+
+  setHooks({
+    onsentence: highlight,
+    onerror: (message) => toast(message, 'error'),
+    onend: async () => {
+      if (section < sectionCount - 1) {
+        await load(section + 1, { continueReading: true });
+        // The next chapter may not be prepared: make sure the engine is there before reading on.
+        if (player.active && (await ensureEngine())) play(0);
+        else if (player.active) stop();
+      } else {
+        stop();
+        highlight(-1);
+        toast('Kitabın sonuna gelindi.');
+      }
+    },
+  });
+
+  $effect(() => () => { stop(); });   // leaving the reader ends the reading session
+
+  function firstVisibleSentence() {
+    const top = pageWrap.getBoundingClientRect().top;
+    const span = [...article.querySelectorAll('.s')].find((el) => el.getBoundingClientRect().bottom > top + 8);
+    return span ? Number(span.dataset.i) : 0;
+  }
+
+  const LANGUAGE_NAMES = { tr: 'Türkçe', en: 'İngilizce', de: 'Almanca', fr: 'Fransızca', es: 'İspanyolca', it: 'İtalyanca' };
+
+  // ---- prepared (cached) audio
+  let cachedCount = $state(0);
+
+  async function refreshCached() {
+    const list = sentences;
+    const count = list.length ? await call('tts_cached', book.id, list, app.ttsPrefs.speed, book.language || 'tr') : 0;
+    if (list === sentences) cachedCount = typeof count === 'number' ? count : 0;
+  }
+
+  $effect(() => {
+    // A finished or advancing preparation of this book changes what is ready.
+    if (app.ttsPrepare?.book === book?.id || app.ttsPrepare === null) refreshCached();
+  });
+
+  // Plays from the cache when the whole chapter is prepared; otherwise starts (or reuses) the engine
+  // chosen for the book's language and waits until it is ready.
+  async function ensureEngine({ needEngine = false } = {}) {
+    if (!needEngine && sentences.length) {
+      await refreshCached();
+      if (cachedCount === sentences.length) return true;
+    }
+    app.tts = await call('tts_load', book.language || 'tr');
+    while (app.tts.state === 'loading') await new Promise((r) => setTimeout(r, 200));
+    if (app.tts.state === 'missing') {
+      const key = (book.language || 'tr').split(/[-_]/)[0].toLowerCase();
+      const go = await confirm({
+        title: 'Ses motoru yok',
+        message: `Bu kitabın dili ${LANGUAGE_NAMES[key] ?? `"${key}"`}; kurulu ses motorlarında bu dil için ses yok. ` +
+          'Ayarlar → Sesli okuma bölümünden bu dili destekleyen bir motor kurabilirsiniz.',
+        ok: 'Ayarlara git', cancel: 'Kapat',
+      });
+      if (go) app.view = 'settings';
+      return false;
+    }
+    if (app.tts.state !== 'ready') { toast(app.tts.message || 'Ses motoru yüklenemedi.', 'error'); return false; }
+    return true;
+  }
+
+  async function togglePlay() {
+    if (player.playing) { pause(); return; }
+    if (player.active) { resume(); return; }
+    if (!sentences.length) { toast('Bu bölümde okunacak metin yok.'); return; }
+    if (!(await ensureEngine())) return;
+    setSpeed(app.ttsPrefs.speed);
+    play(firstVisibleSentence());
+  }
+
+  function cycleSpeed() {
+    const next = SPEEDS[(SPEEDS.indexOf(app.ttsPrefs.speed) + 1) % SPEEDS.length] ?? 1;
+    app.ttsPrefs.speed = next;
+    setSpeed(next);
+    saveTtsPrefs();
+  }
+
+  let showPrepare = $state(false);
+
+  // Renders this chapter, or every chapter from here to the end, into the cache in the background.
+  async function prepare(toEnd) {
+    showPrepare = false;
+    if (app.ttsPrepare) return;
+    let list = sentences;
+    if (toEnd) {
+      list = [...sentences];
+      for (let number = section + 1; number < sectionCount; number++) {
+        const result = await call('reader_section', book.id, number);
+        if (!result || result.error) continue;
+        const holder = document.createElement('div');
+        holder.innerHTML = result.html;
+        list.push(...segment(holder, splitOptions()).sentences);
+      }
+    }
+    if (!list.length) { toast('Hazırlanacak metin yok.'); return; }
+    if (!(await ensureEngine({ needEngine: true }))) return;
+    const result = await act('tts_prepare', book.id, list, app.ttsPrefs.speed, book.language || 'tr');
+    if (result?.started) app.ttsPrepare = { book: book.id, done: 0, total: result.total };
+  }
+
+  function cancelPrepare() {
+    call('tts_prepare_cancel');
+  }
+
+  async function exportSection() {
+    if (app.ttsExport) return;
+    if (!sentences.length) { toast('Bu bölümde kaydedilecek metin yok.'); return; }
+    if (!(await ensureEngine())) return;
+    const pauses = resolvePauses(app.ttsPrefs.pauses);
+    const gaps = sentences.map((text, i) => pauseAfter(text, breaks.has(i), pauses, app.ttsPrefs.speed));
+    const result = await act('tts_export', `${book.title} - ${sectionTitle}`, sentences, app.ttsPrefs.speed, book.id,
+      book.language || 'tr', gaps);
+    if (result?.started) app.ttsExport = { done: 0, total: sentences.length };
   }
 
   function currentOffset() {
@@ -80,6 +226,8 @@
 
   function onPageClick(event) {
     const link = event.target.closest('a');
+    const sentence = event.target.closest('.s');
+    if (!link && sentence && player.active) { play(Number(sentence.dataset.i)); return; }
     if (!link) return;
     event.preventDefault();
     if (link.dataset.ext) act('reader_open_link', link.dataset.ext);
@@ -148,6 +296,7 @@
   function keydown(event) {
     if (event.target.closest('input, textarea, select')) return;
     if (event.key === 'Escape') { showAa = false; }
+    if (event.code === 'Space' && player.active && !event.target.closest('button')) { event.preventDefault(); togglePlay(); }
     if (event.altKey && event.key === 'ArrowRight') load(section + 1);
     if (event.altKey && event.key === 'ArrowLeft') load(section - 1);
   }
@@ -250,7 +399,7 @@
             <Icon name="back" size={16} /> Önceki bölüm</button>
         {/if}
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-        <article class="page selectable" class:faded={loading} bind:this={article} onclick={onPageClick}
+        <article class="page selectable" class:faded={loading} class:listening={player.active} bind:this={article} onclick={onPageClick}
           style:font-size="{app.reader.size}px" style:line-height={app.reader.leading}
           style:font-family={fonts[app.reader.font]} style:max-width="{app.reader.width}px">
           {@html html}
@@ -271,10 +420,38 @@
         <button class="icon-btn" title="Önceki bölüm (Alt+←)" disabled={section <= 0} onclick={() => load(section - 1)}><Icon name="back" /></button>
         <div class="where">
           <b>Bölüm {section + 1} / {sectionCount} · %{Math.round(app.reading.percent)}</b>
-          <small>{sectionTitle}</small>
+          <small>{#if app.tts.state === 'loading'}{app.tts.message || 'Ses modeli yükleniyor…'}{:else if player.active}Cümle {player.index + 1} / {player.total} · {app.engines.find((e) => e.id === app.tts.engine)?.name ?? ''}{#if player.waiting} · hazırlanıyor…{/if}{:else}{sectionTitle}{/if}</small>
         </div>
       </div>
+      <div class="controls">
+        <button class="icon-btn" title="Önceki cümle" disabled={!player.active} onclick={() => step(-1)}><Icon name="prev" /></button>
+        <button class="play" title={player.playing ? 'Duraklat (Boşluk)' : 'Sesli oku'} onclick={togglePlay}>
+          <Icon name={player.playing ? 'pause' : 'play'} size={20} /></button>
+        <button class="icon-btn" title="Sonraki cümle" disabled={!player.active} onclick={() => step(1)}><Icon name="next" /></button>
+        {#if player.active}<button class="icon-btn" title="Okumayı bitir" onclick={() => { stop(); highlight(-1); }}><Icon name="stop" /></button>{/if}
+      </div>
       <div class="right">
+        <button class="chip acc" title="Okuma hızı" onclick={cycleSpeed}>{app.ttsPrefs.speed.toLocaleString('tr-TR')}×</button>
+        {#if app.ttsPrepare?.book === book.id}
+          <button class="chip acc" title="Hazırlamayı durdur" onclick={cancelPrepare}>
+            Hazırlanıyor {app.ttsPrepare.done}/{app.ttsPrepare.total} <Icon name="x" size={12} /></button>
+        {:else}
+          <div class="prep">
+            <button class="chip" class:ready={sentences.length && cachedCount === sentences.length}
+              title="Sesi önceden üretip saklar; hazır bölümler motor yüklenmeden anında okunur"
+              disabled={Boolean(app.ttsPrepare)} onclick={() => (showPrepare = !showPrepare)}>
+              <Icon name={sentences.length && cachedCount === sentences.length ? 'check' : 'headphones'} size={14} />
+              {sentences.length && cachedCount === sentences.length ? 'Hazır' : cachedCount ? `Hazır ${cachedCount}/${sentences.length}` : 'Hazırla'}</button>
+            {#if showPrepare}
+              <div class="prep-menu">
+                <button onclick={() => prepare(false)}>Bu bölümü hazırla</button>
+                <button onclick={() => prepare(true)}>Buradan kitabın sonuna kadar hazırla</button>
+              </div>
+            {/if}
+          </div>
+        {/if}
+        <button class="chip" title="Bu bölümü WAV ses dosyası olarak kaydet" disabled={Boolean(app.ttsExport)} onclick={exportSection}>
+          <Icon name="download" size={14} />{app.ttsExport ? `Kaydediliyor ${app.ttsExport.done}/${app.ttsExport.total}` : 'Kaydet'}</button>
         <button class="icon-btn" title="Sonraki bölüm (Alt+→)" disabled={section >= sectionCount - 1} onclick={() => load(section + 1)}><Icon name="forward" /></button>
       </div>
     </div>
@@ -349,8 +526,11 @@
   .pull-hint { text-align: center; margin-top: 8px; font: 12px var(--sans); opacity: .45; }
   .the-end { text-align: center; margin-top: 48px; font: 600 13px var(--sans); letter-spacing: .12em; text-transform: uppercase; opacity: .5; }
 
+  .page.listening :global(.s) { cursor: pointer; border-radius: 3px; }
+  .page.listening :global(.s:hover) { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .page :global(.s.now) { background: color-mix(in srgb, var(--accent) 26%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent); }
 
-  .player { position: relative; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 16px; padding: 10px 16px; border-top: 1px solid var(--outline); background: var(--panel); }
+  .player { position: relative; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; padding: 10px 16px; border-top: 1px solid var(--outline); background: var(--panel); }
   .player .book { position: absolute; left: 0; right: 0; top: -1px; height: 2px; border-radius: 0; background: transparent; }
   .left, .right { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .right { justify-content: flex-end; }
@@ -358,4 +538,16 @@
   .where b, .where small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .where b { font-size: 13px; }
   .where small { color: var(--dim); font-size: 12px; }
+  .controls { display: flex; align-items: center; gap: 6px; }
+  .play { width: 44px; height: 44px; border-radius: 50%; background: var(--text); color: var(--window); display: grid; place-items: center; }
+  .play:hover { transform: scale(1.05); }
+  .chip { height: 30px; padding: 0 12px; border-radius: 999px; background: var(--surface); font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .chip:not(:disabled):hover { background: var(--surface-hover); }
+  .chip.acc { color: var(--accent); min-width: 54px; justify-content: center; }
+  .chip.ready { color: var(--ok); }
+  .prep { position: relative; }
+  .prep-menu { position: absolute; bottom: 38px; right: 0; background: var(--overlay); border: 1px solid var(--outline); border-radius: 10px;
+    padding: 4px; box-shadow: 0 8px 28px var(--shadow); z-index: 20; white-space: nowrap; }
+  .prep-menu button { display: block; width: 100%; text-align: left; padding: 8px 12px; border-radius: 7px; font-size: 13px; }
+  .prep-menu button:hover { background: var(--surface-hover); }
 </style>

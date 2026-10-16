@@ -30,3 +30,9 @@ ui.json
 
 # Okuma sayfasi kitapligi (kullanici verisi)
 book_library.json
+
+# Sesli okuma: kurulu motorlar, hazirlanan sesler, motor paketi derlemesi
+ses-motorlari/
+ses-onbellegi/
+build-engines/
+dist-engines/

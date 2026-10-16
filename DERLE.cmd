@@ -33,6 +33,7 @@ py -3 -m PyInstaller ^
     --add-data "bin\ffmpeg.exe;bin" --add-data "bin\ffprobe.exe;bin" ^
     --add-data "assets;assets" ^
     --add-data "translation_prompt.txt;." --add-data "book_translation_prompt.txt;." ^
+    --add-data "engines\ema\motor.json;engines\ema" --add-data "engines\voxcpm\motor.json;engines\voxcpm" ^
     --add-data "web\dist;web\dist" ^
     --exclude-module faster_whisper --exclude-module ctranslate2 ^
     --exclude-module PySide6 --exclude-module PyQt5 --exclude-module PyQt6 ^

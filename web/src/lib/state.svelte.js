@@ -28,6 +28,12 @@ export const app = $state({
   shelf: [],
   reading: { book: null, section: 0, offset: 0, percent: 0 },
   reader: { size: 19, font: 'serif', leading: 1.75, width: 680, paper: 'theme' },
+  // Sesli okuma (bridge_tts): motor durumu, kurulu motorlar, hazirlama/kayit ilerlemesi, tercihler (ui.json 'tts').
+  tts: { state: 'idle', message: '', device: null, exporting: false },
+  engines: [],
+  ttsPrepare: null,           // {book, done, total}: cumleler hazirlanirken
+  ttsExport: null,
+  ttsPrefs: { device: 'auto', speed: 1, voices: {}, options: {} },
   // Komut satirindan ya da baska sayfadan acilmak uzere bekleyen video (Translate acilinca alir).
   pendingVideo: null,
   library: { collections: [], slug: '', title: '', folders: [], rows: [], meta: '', scanning: false, queue: null, kinds: {} },
@@ -79,6 +85,10 @@ export async function openInReader(path) {
 
 export function saveReaderPrefs() {
   savePref({ reader: $state.snapshot(app.reader) });
+}
+
+export function saveTtsPrefs() {
+  savePref({ tts: $state.snapshot(app.ttsPrefs) });
 }
 
 export const toasts = $state([]);
@@ -215,6 +225,29 @@ export async function init() {
     if (added?.length) toast(added.length === 1 ? 'Kitap kitaplığa eklendi.' : `${added.length} kitap kitaplığa eklendi.`, 'ok');
     for (const message of errors ?? []) toast(message, 'error');
   });
+  on('tts', (status) => {
+    app.tts = status;
+    // Yuklenirken bir ses inmis olabilir: "indirildi" isaretleri yenilenir.
+    if (status.state === 'ready') call('tts_engines').then((list) => { if (Array.isArray(list)) app.engines = list; });
+  });
+  on('tts_prepare', (data) => {
+    if (!data.finished) { app.ttsPrepare = { book: data.book, done: data.done, total: data.total }; return; }
+    app.ttsPrepare = null;
+    if (data.error) toast('Hazırlama durdu: ' + data.error, 'error');
+    else if (data.cancelled) toast(`Hazırlama durduruldu (${data.done} cümle hazır).`);
+    else toast(`Ses hazırlandı (${data.done} cümle).`, 'ok');
+  });
+  on('tts_export', (data) => {
+    if (!data.finished) { app.ttsExport = data; return; }
+    app.ttsExport = null;
+    if (data.error) toast('Ses kaydedilemedi: ' + data.error, 'error');
+    else toast(`Ses kaydedildi (${data.count} cümle): ${data.path}`, 'ok');
+  });
+  on('tts_engines', ({ engines, done, error }) => {
+    app.engines = engines;
+    if (done) toast(done, 'ok');
+    if (error) toast(error, 'error');
+  });
   on('library', (state) => setLibrary(state));
   on('row', ({ row, meta }) => {
     const index = app.library.rows.findIndex((r) => r.key === row.key);
@@ -278,11 +311,13 @@ export async function init() {
   app.think = !!app.prefs.think;
   app.books.preAnalysis = !!app.prefs.book_pre_analysis;
   app.reader = { ...READER_DEFAULTS, ...(app.prefs.reader ?? {}) };
+  app.ttsPrefs = { device: 'auto', speed: 1, voices: {}, options: {}, ...(app.prefs.tts ?? {}) };
   app.models = { names: [], message: '', ...start.models };
   setTranslate(start.translate);
   setLibrary(start.library);
   applyBookSnapshot(start.books);
   call('shelf_list').then((books) => { if (Array.isArray(books)) app.shelf = books; });
+  call('tts_status').then((status) => { if (status?.state) app.tts = status; });
   call('refresh_models');
   // Komut satirindan ("Birlikte ac") gelen video Altyazi Cevir'de acilir.
   if (start.open?.length) openInTranslate(start.open[0]);

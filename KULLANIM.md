@@ -387,6 +387,13 @@ Sol menüdeki **Okuma**, EPUB kitaplarınızı uygulama içinde okumanızı sağ
 
 Okurken üstteki liste düğmesi **İçindekiler** ve **Yer imleri** panelini açar; yer imi düğmesi bulunduğunuz yeri işaretler. Bölüm sonunda **Sonraki bölüm**'e basın ya da kaydırmaya devam edin; **Alt+←/→** bölümler arasında geçer. **Aa** düğmesi yazı boyutu, yazı tipi (Literata serif / Inter), satır aralığı, sütun genişliği ve sayfa rengini (tema, koyu, sepya, açık) değiştirir; seçimler `ui.json`'da saklanır. Okuma konumu kendiliğinden kaydedilir ve kitaplıkta ilerleme yüzdesi olarak görünür. Kitaptaki web bağlantıları sistem tarayıcısında açılır; betikler, stiller ve dış kaynaklar kitaptan hiç yüklenmez.
 
+### 3.15 Sesli okuma
+Okuma sayfasında alttaki **oynat** düğmesi bölümü cümle cümle sesli okur; okunan cümle vurgulanır, metne tıklayınca o cümleye atlanır, **Boşluk** duraklatır. Hız düğmesi okuma hızını değiştirir. **Hazırla** bu bölümün (ya da buradan kitabın sonuna kadar) sesini önceden üretip `ses-onbellegi` klasöründe saklar; hazır bölümler motor yüklenmeden anında okunur. **Kaydet** bölümü tek bir WAV dosyası olarak yazar.
+
+Ses, bilgisayarınızda çalışan ayrı bir ses motoruyla üretilir (Çevirgeç'in motorları): **EMA Lightning** (küçük ve hızlı Türkçe ses) ve **VoxCPM** (Trendyol-TTS anlatıcı, tarifle tasarlanan ya da bir kayıttan klonlanan ses; NVIDIA ekran kartı önerilir). Kaynak koddan çalışırken `py -3 -m pip install -r requirements-tts.txt` ile paketler kuruluysa motorlar doğrudan kullanılır. `.exe` için motor paketini proje klasöründe `DERLE_SES.cmd` ile oluşturun (`dist-enginesktar-ses-<motor>-win64.zip`) ve **Ayarlar → Sesli okuma → Dosyadan kur** ile kurun; motorlar `ses-motorlari` klasörüne açılır, modeller ilk kullanımda iner. Çevirgeç için derlenmiş paketler de kurulabilir. Ses, işlemci (CPU/GPU), varsayılan hız, cümle ve paragraf sonu duraklamaları ve tırnak içini bölmeme aynı bölümden ayarlanır (`ui.json` → `tts`).
+
+Motor yalnızca okurken çalışan bir alt süreçtir; Aktar kapanınca (çökse bile) kendiliğinden kapanır.
+
 ---
 
 ## 4. Terim sözlüğü (glossary)

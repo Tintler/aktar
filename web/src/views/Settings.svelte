@@ -2,6 +2,7 @@
   import Icon from '../lib/Icon.svelte';
   import Toggle from '../components/Toggle.svelte';
   import TemplateEditor from '../components/TemplateEditor.svelte';
+  import VoiceSettings from '../components/VoiceSettings.svelte';
   import { app, act, setTheme, reloadThemes, toast } from '../lib/state.svelte.js';
   import { resolveTheme } from '../lib/theme.js';
   import { call, on } from '../lib/api.js';
@@ -245,6 +246,8 @@
           </div>
         </section>
         {/if}
+
+        <VoiceSettings />
 
         <section>
           <h2>Video oynatma</h2>

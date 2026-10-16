@@ -30,7 +30,7 @@ if ! command -v npm >/dev/null 2>&1; then
 fi
 (cd web && npm ci && npm run build)
 
-set -- --add-data "$ROOT/assets:assets" --add-data "$ROOT/translation_prompt.txt:." --add-data "$ROOT/book_translation_prompt.txt:."     --add-data "$ROOT/web/dist:web/dist"
+set -- --add-data "$ROOT/assets:assets" --add-data "$ROOT/translation_prompt.txt:." --add-data "$ROOT/book_translation_prompt.txt:." --add-data "$ROOT/engines/ema/motor.json:engines/ema" --add-data "$ROOT/engines/voxcpm/motor.json:engines/voxcpm"     --add-data "$ROOT/web/dist:web/dist"
 if [ -x bin/ffmpeg ] && [ -x bin/ffprobe ]; then
     mkdir -p build/linux/bin
     cp bin/ffmpeg bin/ffprobe build/linux/bin/
