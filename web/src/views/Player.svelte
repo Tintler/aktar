@@ -45,6 +45,34 @@
   let software = false;              // GPU kodlamasi basarisiz: islemci (x264) kullanilir (F120)
   let encoder = '';                  // akisin GPU kodlayicisi ('' islemci)
   let encoderLabel = $state('');
+  let codec = $state('');            // kaynak goruntu kodu (rozet)
+
+  // Takilma tanisi (F121): oynatma beklemeye gecince onde ne kadar veri oldugu Konsol'a yazilir.
+  // Onde veri varken takiliyorsa cozucu yetismiyor; yoksa veri gec geliyor.
+  let waitStart = null, waitAhead = 0, lastNote = 0;
+  function bufferedAhead() {
+    const ranges = videoEl?.buffered;
+    const now = videoEl?.currentTime ?? 0;
+    for (let i = 0; i < (ranges?.length ?? 0); i++) if (now >= ranges.start(i) - 0.5 && now <= ranges.end(i)) return ranges.end(i) - now;
+    return 0;
+  }
+  function stalled() {
+    loading = true;
+    if (!playing || pending) return;   // ilk yukleme ve sarma sayilmaz
+    waitStart = performance.now();
+    waitAhead = bufferedAhead();
+  }
+  function resumed() {
+    loading = false;
+    if (waitStart === null) return;
+    const seconds = (performance.now() - waitStart) / 1000;
+    waitStart = null;
+    if (seconds < 0.4 || performance.now() - lastNote < 5000) return;
+    lastNote = performance.now();
+    const how = mode === 'direct' ? 'doğrudan' : encoderLabel ? 'dönüştürülerek · ' + encoderLabel : 'paketlenerek';
+    const cause = waitAhead > 1.5 ? 'önde veri vardı: çözücü yetişmiyor' : 'önde veri yoktu: veri geç geliyor';
+    call('player_note', `Takılma ${seconds.toFixed(1)} sn (${fmt(time)}, ${(codec || '?').toUpperCase()} ${how}; önde ${waitAhead.toFixed(1)} sn, ${cause})`);
+  }
   // WebView'in kendi cozebildigi ek kodlar (HEVC yalnizca donanim cozucusu/eklentisi varsa):
   // varsa arka uc o goruntuyu donusturmeden (dogrudan ya da yalnizca paketleyerek) verir.
   const hevcType = (c) => document.createElement('video').canPlayType(`video/mp4; codecs="${c}"`) !== '' || mseSupported(`video/mp4; codecs="${c}"`);
@@ -54,6 +82,7 @@
     if (!result || !videoEl) return;
     encoder = result.encoder ?? '';
     encoderLabel = result.encoder_label ?? '';
+    codec = result.codec ?? '';
     error = '';
     loading = true;
     audio = result.audio;
@@ -400,8 +429,8 @@
         <div class="surface" role="presentation" onclick={toggle} ondblclick={toggleFullscreen}>
           <!-- svelte-ignore a11y_media_has_caption -->
           <video bind:this={videoEl} preload="auto" onloadedmetadata={metadata} ontimeupdate={timeupdate}
-            onplay={() => (playing = true)} onpause={() => (playing = false)} onwaiting={() => (loading = true)}
-            onplaying={() => (loading = false)} oncanplay={() => (loading = false)} onerror={mediaError}></video>
+            onplay={() => (playing = true)} onpause={() => (playing = false)} onwaiting={stalled}
+            onplaying={resumed} oncanplay={() => (loading = false)} onerror={mediaError}></video>
           {#if subtitle.length}
             <div class="subtitle">
               {#each subtitle as lines, c}
@@ -443,7 +472,9 @@
             <span class="mono time">{fmt(time)} / {fmt(duration)}</span>
             {#if chapterAt(time)}<span class="chapter ellipsis">{chapterAt(time)} ›</span>{/if}
             <span class="grow"></span>
-            {#if mode !== 'direct'}<span class="badge" title={encoderLabel
+            {#if mode === 'direct'}<span class="badge" title={`Video dönüştürülmeden oynatılıyor; görüntüyü WebView kendisi çözüyor${codec === 'hevc'
+              ? " (Windows'un HEVC çözücüsüyle). Takılıyorsa Ayarlar → Video oynatma → \"HEVC'yi WebView ile doğrudan oynat\"ı kapatın" : ''}.`}>doğrudan{codec ? ' · ' + codec.toUpperCase() : ''}</span>
+            {:else}<span class="badge" title={encoderLabel
               ? `Video tarayıcının çözemediği bir biçimde; ffmpeg ile anında H.264'e dönüştürülüyor (${encoderLabel}). Ayarlar → Video oynatma'dan değiştirilebilir.`
               : 'Video tarayıcının doğrudan çalamadığı bir kapta; görüntü dönüştürülmeden ffmpeg ile paketleniyor.'}>{encoderLabel ? (encoder ? 'GPU ile dönüştürülerek' : 'işlemciyle dönüştürülerek') : 'paketlenerek'}</span>{/if}
             {#if (p.audio ?? []).length > 1}

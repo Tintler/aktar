@@ -101,6 +101,20 @@ class PlanTests(unittest.TestCase):
             self.assertEqual(media_server.hw_encoder('amf'), 'amf')
         self.assertEqual(media_server.encoder_label(None), 'işlemci (x264)')
 
+    def test_detection_runs_in_background(self):
+        calls = []
+        done = mock.Mock()
+        with mock.patch.dict(media_server._hw_works, clear=True), \
+                mock.patch.object(media_server, 'hw_works', side_effect=lambda name: calls.append(name) or False):
+            self.assertTrue(all(value is None for value in media_server.hw_status().values()))
+            media_server.detect_async(done)
+            for _ in range(100):
+                if done.called:
+                    break
+                __import__('time').sleep(0.02)
+        self.assertEqual(calls, list(media_server.HW_ORDER))
+        done.assert_called_once()
+
     def test_stream_url_carries_encoder(self):
         server = media_server.MediaServer()
         server.start()

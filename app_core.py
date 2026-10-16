@@ -60,6 +60,9 @@ DEFAULT_CONFIG = {
     # Oynaticida donusturme gereken videolar (F120): 'auto' calisan ilk GPU kodlayicisi
     # (NVIDIA, Intel, AMD, Windows MF), ya da 'nvenc' | 'qsv' | 'amf' | 'mf' | 'off' (yalniz islemci).
     'video_hw': 'auto',
+    # WebView HEVC'yi kendisi cozebiliyorsa (donanim cozucusu) donusturmeden oynatilir (F117).
+    # Kapatilirsa HEVC her zaman yukaridaki kodlayiciyla H.264'e donusturulur.
+    'video_direct_hevc': True,
     # Kutuphane indeksi (F57): LM Studio'daki embedding modeli (bos: indeksleme kapali).
     # Sablonlar EmbeddingGemma bicimindedir; baska model icin config.json'da degistirilir.
     'embedding_model': '',

@@ -84,9 +84,18 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
         return getattr(self._dialogs, name)(*args)
 
     # ------------------------------------------------------------------ acilis
+    def _video_encoders(self):
+        """Ayarlar sayfasi icin GPU kodlayicilari; 'works' None ise deneme suruyor (sayfa beklemez)."""
+        status = media_server.hw_status()
+        if any(value is None for value in status.values()):
+            media_server.detect_async(lambda: self._emit('video_encoders', self._video_encoders()))
+        return [{'id': name, 'label': media_server.HW_ENCODERS[name][0], 'works': status[name]}
+                for name in media_server.HW_ORDER]
+
     def startup(self):
         """Sayfa ilk acildiginda: arayuz tercihleri, temalar, durum ve komut satiri dosyasi."""
         themes.install_presets()
+        media_server.detect_async()   # F120: GPU kodlayicilari arka planda bir kez denenir
         paths, self._startup_paths = self._startup_paths, []
         self._start_watch()  # F114: izlenen koleksiyonlar arka planda taranir
         return {'prefs': self.ui_prefs(), 'themes': themes.list_themes(),
@@ -181,9 +190,7 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
                 'whisper_models': list(dict.fromkeys(WHISPER_MODELS + (str(value.get('whisper_model', '')),))),
                 'ocr_engines': [{'id': key, 'label': label} for key, label in OCR_ENGINES],
                 'cuda_markers': list(CUDA_MARKERS),
-                'video_encoders': [{'id': name, 'label': label, 'works': media_server.hw_works(name)}
-                                   for name, (label, _, _) in media_server.HW_ENCODERS.items()
-                                   if name in media_server.HW_ORDER]}
+                'video_encoders': self._video_encoders()}
 
     def save_settings(self, values):
         try:

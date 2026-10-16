@@ -192,12 +192,16 @@ class PlayerMixin:
         if video is None:
             return {'error': 'Açık video yok.'}
         info = video.info
+        if not load_config().get('video_direct_hevc', True):
+            codecs = []   # Ayarlar: HEVC her zaman donusturulur
         chosen = media_server.plan(video.path, info, audio_index, transcode=bool(transcode),
                                    extra=[str(item) for item in codecs or []])
+        codec = (info['video'] or {}).get('codec', '')
         if force_stream or transcode:
             chosen['mode'] = 'stream'
         if chosen['mode'] == 'direct':
-            return {'url': self._media.file_url(video.path), 'offset': 0.0, 'mode': 'direct', 'audio': chosen['audio']}
+            return {'url': self._media.file_url(video.path), 'offset': 0.0, 'mode': 'direct', 'audio': chosen['audio'],
+                    'codec': codec}
         start = max(0.0, min(float(start or 0.0), max(0.0, info['duration'] - 1)))
         if chosen['video'] == 'copy' and info['video'] is not None:
             # Goruntu kopyalaninca akis anahtar kareden baslar; arayuz farki kendisi sarar.
@@ -215,7 +219,12 @@ class PlayerMixin:
                 'mode': 'stream', 'audio': chosen['audio'], 'transcode': chosen['video'] == 'x264',
                 'encoder': chosen.get('encoder') or '', 'encoder_label': media_server.encoder_label(chosen.get('encoder'))
                 if chosen['video'] == 'x264' else '',
-                'mime': media_server.stream_mime(info, chosen), 'duration': info['duration']}
+                'mime': media_server.stream_mime(info, chosen), 'duration': info['duration'], 'codec': codec}
+
+    def player_note(self, text):
+        """Oynaticinin tani notu (takilma, F121) Konsol'a yazilir."""
+        self._log('[Oynatıcı] ' + ' '.join(str(text or '').split())[:300])
+        return True
 
     def player_close(self):
         """Oynatici sayfasindan cikildi: sunucudaki akislar durur, hazirlik surer."""

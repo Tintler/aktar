@@ -164,6 +164,36 @@ def hw_works(name):
         return _hw_works[name]
 
 
+def hw_status():
+    """Denenmis kodlayicilarin sonucu (bekletmez): ad -> True / False / None (henuz denenmedi)."""
+    return {name: _hw_works.get(name) for name in HW_ORDER}
+
+
+_detecting = []
+
+
+def detect_async(done=None):
+    """Kodlayicilari arka planda (uygulama icindeki is parcaciginda) bir kez dener; bitince done()."""
+    if all(value is not None for value in hw_status().values()) or _detecting:
+        if done and not _detecting:
+            done()
+        return
+
+    def run():
+        try:
+            for name in HW_ORDER:
+                try:
+                    hw_works(name)
+                except RuntimeError:   # ffmpeg yok
+                    _hw_works.setdefault(name, False)
+        finally:
+            _detecting.clear()
+        if done:
+            done()
+    _detecting.append(True)
+    threading.Thread(target=run, name='aktar-hw-detect', daemon=True).start()
+
+
 def hw_encoder(choice='auto'):
     """Ayara gore kullanilacak GPU kodlayicisi ('nvenc' ...) ya da None (islemci: libx264)."""
     if choice == 'off':

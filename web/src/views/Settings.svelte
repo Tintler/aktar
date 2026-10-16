@@ -4,7 +4,8 @@
   import TemplateEditor from '../components/TemplateEditor.svelte';
   import { app, act, setTheme, reloadThemes, toast } from '../lib/state.svelte.js';
   import { resolveTheme } from '../lib/theme.js';
-  import { call } from '../lib/api.js';
+  import { call, on } from '../lib/api.js';
+  import { onDestroy } from 'svelte';
 
   let info = $state(null);       // get_settings sonucu (varsayilanlar, kilitler, secenekler)
   let cfg = $state(null);
@@ -20,6 +21,9 @@
     saved = JSON.stringify(cfg);
   }
   load();
+  // GPU kodlayici denemesi arka planda biter (F120); sayfa beklemeden acilir.
+  const offEncoders = on('video_encoders', (list) => { if (info) info.video_encoders = list; });
+  onDestroy(offEncoders);
 
   const locked = (key) => info?.locked.includes(key);
   const names = $derived(app.models.names ?? []);
@@ -201,12 +205,17 @@
           <h2>Video oynatma</h2>
           <div class="fr">
             <div class="l">Dönüştürmede donanım hızlandırma<small>Oynatıcı bir videoyu çözemezse (örn. HEVC/x265) anında H.264'e dönüştürür. GPU kodlayıcısı işlemciyi rahatlatır ve takılmayı azaltır; çalışmazsa oynatıcı kendiliğinden işlemciye geçer.
-              {#if info.video_encoders?.length}<br />Bu bilgisayarda: {info.video_encoders.filter((e) => e.works).map((e) => e.label).join(', ') || 'çalışan GPU kodlayıcısı bulunamadı'}{/if}</small></div>
+              {#if info.video_encoders?.length}<br />Bu bilgisayarda: {info.video_encoders.some((e) => e.works === null) ? 'denetleniyor…'
+                : info.video_encoders.filter((e) => e.works).map((e) => e.label).join(', ') || 'çalışan GPU kodlayıcısı bulunamadı'}{/if}</small></div>
             <select class="field w" bind:value={cfg.video_hw}>
               <option value="auto">Otomatik (GPU varsa)</option>
-              {#each info.video_encoders ?? [] as e}<option value={e.id}>{e.label}{e.works ? '' : ' (çalışmıyor)'}</option>{/each}
+              {#each info.video_encoders ?? [] as e}<option value={e.id}>{e.label}{e.works === false ? ' (çalışmıyor)' : ''}</option>{/each}
               <option value="off">Yalnız işlemci</option>
             </select>
+          </div>
+          <div class="fr">
+            <div class="l">HEVC'yi WebView ile doğrudan oynat<small>Açıkken HEVC/x265 videoyu WebView kendisi çözer (bilgisayarda HEVC çözücüsü varsa). Bu videolar takılıyorsa kapatın: HEVC her zaman yukarıdaki kodlayıcıyla H.264'e dönüştürülür.</small></div>
+            <Toggle bind:checked={cfg.video_direct_hevc} />
           </div>
         </section>
 
