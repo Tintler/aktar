@@ -42,6 +42,8 @@ _BRACKET = re.compile(r'\[([^\[\]\n]{3,80})\]')
 _CITE_ITEM = re.compile(r'\s*(' + _STAMP + r')(?:\s*[-–—]\s*(' + _STAMP + r'))?\s*')
 _BARE = re.compile(r'(?<![\d:.,\[])(' + _STAMP + r')(?:\s*[-–—]\s*(' + _STAMP + r'))?(?![\d:])')
 _THINK = re.compile(r'(?is)<think>.*?</think>')
+# SRT/mov_text bicim etiketleri (<font size="54">, <i>, </b>...): gosterimde ve transkriptte atilir.
+_MARKUP_TAG = re.compile(r'</?[A-Za-z][\w-]*(?:\s[^<>]*)?/?>')
 
 
 # --- zaman ----------------------------------------------------------------
@@ -87,7 +89,7 @@ def transcript_from_cues(cues, keep_lines=False):
     """
     segments = []
     for cue in cues:
-        visible = visible_cue_text(cue)
+        visible = _MARKUP_TAG.sub('', visible_cue_text(cue))
         if keep_lines:
             text = '\n'.join(' '.join(line.split()) for line in visible.split('\n') if line.strip())
         else:

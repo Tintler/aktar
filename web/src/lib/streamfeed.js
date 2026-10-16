@@ -2,7 +2,8 @@
 // Akis `offset` anindan baslar; timestampOffset sayesinde videonun zamani gercek zamandir ve
 // indirilmis kisimda tarayici kendisi sarar. Indirilmemis bir ana sarmak icin akis o andan
 // yeniden baslatilir (start). Bellek: oynatma noktasinin cok gerisindeki veri silinir,
-// cok ilerisi indirilmeden bekler.
+// cok ilerisi indirilmeden bekler. Tarayicinin MSE kotasi (~150 MB) dolarsa parca ATILMAZ
+// (atilan parca akisi bozar): ileri sinir kucultulur ve oynatma ilerleyene kadar beklenir.
 
 const AHEAD = 120;      // saniye: oynatma noktasinin bu kadar ilerisi indirilince bekle
 const BEHIND = 90;      // saniye: bunun gerisindeki veri silinir
@@ -21,6 +22,7 @@ export class StreamFeed {
     this.source = null;
     this.buffer = null;
     this.onerror = null;
+    this.limit = AHEAD;
   }
 
   stop() {
@@ -46,6 +48,7 @@ export class StreamFeed {
   async start({ url, offset, mime, duration }) {
     this.stop();
     const token = this.token;
+    this.limit = AHEAD;
     const controller = (this.controller = new AbortController());
     const source = new MediaSource();
     const objectUrl = URL.createObjectURL(source);
@@ -68,7 +71,7 @@ export class StreamFeed {
       const response = await fetch(url, { signal: controller.signal });
       const reader = response.body.getReader();
       for (;;) {
-        while (this.ahead() > AHEAD && token === this.token) await sleep(400);
+        while (this.ahead() > this.limit && token === this.token) await sleep(400);
         if (token !== this.token) break;
         const { done, value } = await reader.read();
         if (done || token !== this.token) break;
@@ -92,17 +95,24 @@ export class StreamFeed {
       buffer.remove(0, now - BEHIND);
       await once(buffer, 'updateend');
     }
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (;;) {
       try {
         buffer.appendBuffer(chunk);
         await once(buffer, 'updateend');
         return;
       } catch (error) {
         if (error.name !== 'QuotaExceededError') throw error;
-        buffer.remove(0, Math.max(0, this.video.currentTime - 10));
+      }
+      // Kota doldu: yer acilana kadar bekle; sonraki parcalar daha az ileri indirilir.
+      this.limit = Math.max(15, Math.min(this.limit, this.ahead()) * 0.7);
+      const behind = this.video.currentTime - 10;
+      if (buffer.buffered.length && behind > buffer.buffered.start(0) + 1) {
+        buffer.remove(0, behind);
         await once(buffer, 'updateend');
+      } else {
         await sleep(500);
       }
+      if (token !== this.token) return;
     }
   }
 }

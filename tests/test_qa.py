@@ -121,6 +121,12 @@ class DisplaySubtitleTests(unittest.TestCase):
                          'Birinci satır\nikinci satır')
         self.assertEqual(qa.transcript_from_cues([cue])[0]['text'], 'Birinci satır ikinci satır')
 
+    def test_srt_markup_tags_are_removed(self):
+        cues = subtitle.parse_srt('1\n00:06:52,000 --> 00:06:54,000\n<font size="54">>> RIGHT.</font>\n\n'
+                                  '2\n00:06:55,000 --> 00:06:57,000\n<i>I <3 you</i>\n')
+        self.assertEqual([item['text'] for item in qa.transcript_from_cues(cues, keep_lines=True)],
+                         ['>> RIGHT.', 'I <3 you'])
+
     def test_timeline_returns_active_and_overlapping_text(self):
         timeline = qa.SubtitleTimeline([
             {'start': 10.0, 'end': 14.0, 'text': 'b'},
