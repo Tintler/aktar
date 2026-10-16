@@ -28,6 +28,7 @@ export const app = $state({
   shelf: [],
   reading: { book: null, section: 0, offset: 0, percent: 0 },
   reader: { size: 19, font: 'serif', leading: 1.75, width: 680, paper: 'theme' },
+  settingsTab: 'models',      // Ayarlar sayfasinin acik kategorisi (ui.json 'settings_tab')
   // Sesli okuma (bridge_tts): motor durumu, kurulu motorlar, hazirlama/kayit ilerlemesi, tercihler (ui.json 'tts').
   tts: { state: 'idle', message: '', device: null, exporting: false },
   engines: [],
@@ -311,6 +312,7 @@ export async function init() {
   app.think = !!app.prefs.think;
   app.books.preAnalysis = !!app.prefs.book_pre_analysis;
   app.reader = { ...READER_DEFAULTS, ...(app.prefs.reader ?? {}) };
+  if (app.prefs.settings_tab) app.settingsTab = app.prefs.settings_tab;
   app.ttsPrefs = { device: 'auto', speed: 1, voices: {}, options: {}, ...(app.prefs.tts ?? {}) };
   app.models = { names: [], message: '', ...start.models };
   setTranslate(start.translate);
@@ -398,6 +400,12 @@ export async function openFile(row, at = null, origin = 'library') {
 export function openInTranslate(path) {
   app.pendingVideo = path;
   app.view = 'translate';
+}
+
+// Ayarlar'i belirli bir kategoride acar (orn. sesli okumada motor yoksa 'voice').
+export function openSettings(tab) {
+  app.settingsTab = tab;
+  go('settings');
 }
 
 export function go(view) {

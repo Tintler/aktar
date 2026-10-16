@@ -3,7 +3,7 @@
   import Modal from './Modal.svelte';
   import Toggle from './Toggle.svelte';
   import Icon from '../lib/Icon.svelte';
-  import { act, go, toast } from '../lib/state.svelte.js';
+  import { act, openSettings, toast } from '../lib/state.svelte.js';
   import { call } from '../lib/api.js';
   import { confirm } from '../lib/confirm.svelte.js';
 
@@ -84,7 +84,7 @@
       <div class="note warn">
         <Icon name="alert" size={16} />
         <span>Önce Gmail adresinizi ve uygulama şifrenizi girin.</span>
-        <button class="btn sm" onclick={() => { onclose(); go('settings'); }}>Ayarlar → E-posta</button>
+        <button class="btn sm" onclick={() => { onclose(); openSettings('connections'); }}>Ayarlar → E-posta</button>
       </div>
     {:else}
       <p class="dim small">{info.address} · kurala uyan postaların ekleri seçtiğiniz klasöre "gün ad" biçiminde indirilir (ör. 2026-10-03 Hesap Ozeti.pdf). Aynı posta ve aynı içerik iki kez indirilmez; yeni dosyalar listede "yeni" görünür.</p>

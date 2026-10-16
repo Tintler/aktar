@@ -2,7 +2,7 @@
   // Sohbet sablonu secici (F104): dusunme dugmesinin yaninda. kind: 'collection' | 'assistant' | 'doc' | 'video'.
   // Koleksiyonda secim ve not koleksiyona yazilir; digerlerinde tarayici deposunda hatirlanir.
   import Icon from '../lib/Icon.svelte';
-  import { app, act, go } from '../lib/state.svelte.js';
+  import { app, act, openSettings } from '../lib/state.svelte.js';
   import { openMenu } from '../lib/menu.svelte.js';
   import { prompt } from '../lib/confirm.svelte.js';
   import { templates, loadTemplates, templateFor, setTemplateFor, templateName } from '../lib/templates.svelte.js';
@@ -34,7 +34,7 @@
   }
 
   function editTemplates() {
-    go('settings');
+    openSettings('chat');
     setTimeout(() => document.getElementById('sohbet-sablonlari')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
   }
 

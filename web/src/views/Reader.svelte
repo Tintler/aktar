@@ -134,7 +134,7 @@
           'Ayarlar → Sesli okuma bölümünden bu dili destekleyen bir motor kurabilirsiniz.',
         ok: 'Ayarlara git', cancel: 'Kapat',
       });
-      if (go) app.view = 'settings';
+      if (go) { app.settingsTab = 'voice'; app.view = 'settings'; }
       return false;
     }
     if (app.tts.state !== 'ready') { toast(app.tts.message || 'Ses motoru yüklenemedi.', 'error'); return false; }
