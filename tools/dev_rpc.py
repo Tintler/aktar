@@ -1,11 +1,12 @@
 """Gelistirme koprusu: Bridge'i HTTP uzerinden acar; web arayuzu tarayicida gercek arka uca baglanir.
 
-    py -3 tools/dev_rpc.py [--app-dir KLASOR] [--port 8765] [--allow-lan]
+    py -3 tools/dev_rpc.py [--app-dir KLASOR] [--port 8765] [--allow-lan] [--save-dir KLASOR]
     (web klasorunde) npm run dev  ->  http://localhost:5173/?rpc=http://127.0.0.1:8765
 
 --app-dir: config.json, library/ ve work_files/ icin baska klasor (gercek verilere dokunmadan
 deneme). --allow-lan: LM Studio adresinde yerel ag adresine izin verir (yalnizca deneme).
-Yalnizca 127.0.0.1'i dinler. Dosya pencereleri bu kipte acilmaz (None doner).
+Yalnizca 127.0.0.1'i dinler. Dosya pencereleri bu kipte acilmaz (None doner); --save-dir verilirse
+kayit penceresi onerilen adi o klasore yazilacak yol olarak dondurur (disa aktarma/klip denemesi).
 """
 from __future__ import annotations
 
@@ -26,6 +27,7 @@ def main():
     parser.add_argument('--app-dir', type=Path)
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--allow-lan', action='store_true')
+    parser.add_argument('--save-dir', type=Path)
     args = parser.parse_args()
 
     import app_core
@@ -48,6 +50,12 @@ def main():
     class Dialogs:
         def __getattr__(self, _name):
             return lambda *_args: None
+
+        def save_file(self, _title, filename, _types=()):
+            if not args.save_dir:
+                return None
+            args.save_dir.mkdir(parents=True, exist_ok=True)
+            return str(args.save_dir / filename)
 
     api = bridge.Bridge(emit=emit, dialogs=Dialogs())
 

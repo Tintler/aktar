@@ -249,9 +249,11 @@ Desteklenen video uzantıları: `.mkv`, `.mp4`, `.m4v`, `.avi`, `.mov`, `.webm`,
 | `Codec` | Altyazı codec'i (subrip, ass, webvtt, mov_text …). |
 | `Dil` | Metadata dil etiketi (varsa). |
 | `Başlık` | Metadata başlık etiketi (varsa). |
-| `Durum` | Desteklenen çıktı formatı (SRT/ASS/SSA/VTT) veya "Görüntü tabanlı - desteklenmiyor". |
+| `Durum` | Desteklenen çıktı formatı (SRT/ASS/SSA/VTT), "Görüntü tabanlı" ya da OCR ile okunmuşsa "OCR · SRT". |
 
-Görüntü tabanlı altyazılar (PGS/VobSub) seçilemez; çevrilemez.
+**Görüntü tabanlı altyazılar (PGS/VobSub/DVB).** Satırdaki **OCR ile oku** düğmesi altyazı görüntülerini metne çevirir: FFmpeg her satırın görüntüsünü ve zamanını çıkarır, aynı görüntüler bir kez okunur. Okuyucu **Ayarlar → OCR motoru**dur (Tesseract akışın diliyle okur; OCR modeli ya da görü modeli LM Studio'da çalışır). Sonuç videonun yanına `<video>.<dil>.srt` olarak yazılır, akış **OCR · SRT** olur ve çevrilebilir. Okuma yarıda kalırsa okunan görüntüler önbellekte kalır, tekrar başlatınca kaldığı yerden sürer.
+
+**Dışa aktar…** (listenin başlığında) işaretli akışı başka biçimde kaydeder; bkz. 3.6 *Altyazıyı dışa aktarma*.
 
 ### 3.3 Altyazıyı Çıkar
 Seçilen metin tabanlı akış, videonun kendi dizinine **orijinal formatta** çıkarılır:
@@ -305,9 +307,30 @@ Video hakkında yerel modelle soru sormanızı sağlar: solda video oynatıcı, 
 - **Video klasöründeki dosyalar:** videoyla aynı adla başlayan `.srt`/`.ass`/`.ssa`/`.vtt` dosyaları. Aktar'ın `<video>_TR` çevirisi de burada çıkar, yani çeviriyi oynatıcıda doğrudan izleyebilirsiniz.
 - **Sesten (Whisper):** Whisper transkripti varsa seçilebilir; yoksa **Sesten oluştur...** ile çıkarılır. Birden fazla ses parçası varsa **Sesten oluştur** alt menüsünden Whisper'a gidecek parça seçilir.
 
+- **Görüntü tabanlı (PGS/VobSub):** **OCR ile oku** seçilince altyazı okunur ve bitince ekranda açılır (bkz. 3.2).
+- Whisper transkriptinde kelime zamanları varsa söylenen kelimeler sarıya döner (CC → **Söylenen kelimeyi vurgula** ile kapatılır). Eski transkriptlerde kelime zamanı yoksa CC → **Kelime zamanlarını çıkar** Whisper'ı bir kez daha çalıştırır.
+
 ASS altyazılarda stil ve konum gösterilmez, yalnızca metin görünür. Ekranda gösterilen altyazı ile soru-cevabın kullandığı transkript birbirinden bağımsızdır.
 
-**Oynatıcı kısayolları:** Boşluk oynat/duraklat, ←/→ 5 saniye, **F** ya da videoya çift tıklama tam ekran. Arama çubuğunun üzerine gelince zaman ve bölüm adı görünür. Sayfadan çıkıp aynı videoya dönünce kaldığı yerden açılır.
+**Altyazı zamanlaması (saat düğmesi).** Altyazı sesle uyuşmuyorsa:
+- **G / H** altyazıyı 0,1 saniye erkene / geçe alır (Shift ile 1 saniye). Panelde değer elle de yazılabilir; artı değer altyazıyı geç gösterir.
+- **Kare hızı:** altyazı ilerledikçe kayıyorsa (başta doğru, sonda saniyelerce kaymış) 23,976 ↔ 25 gibi oranlardan birini seçin.
+- **Elle eşitle:** bir satırı duyduğunuz anda yanındaki **Şimdi**'ye basın. Tek satır kaydırmayı, birbirinden uzak iki satır hem kaydırmayı hem hızı düzeltir.
+- **Whisper ile otomatik hizala:** konuşma Whisper ile çıkarılır (önbellekte varsa kullanılır) ve altyazı satırları konuşmaya oturtulur. Kaydırma ve kare hızı birlikte bulunur; dilden bağımsız olduğu için Türkçe çeviri altyazı da İngilizce sese hizalanabilir. Sonucun yanında güven derecesi yazar; **düşük** ise elle kontrol edin.
+- Düzeltme oynatıcıda anında görünür; dışa aktarma ve klip aynı düzeltmeyi kullanır. Kaynak altyazı dosyası değişmez.
+
+**Altyazıyı dışa aktarma.** Zamanlama panelindeki (ya da Altyazı Çevir'deki) **Dışa aktar…** altyazıyı düzeltilmiş zamanlarla kaydeder. Önerilen ad `<video>.<dil>.<uzantı>`dır; VLC ve mpv bu adlı dosyayı videoyla birlikte kendiliğinden açar. Biçimler:
+- **Kaynağın biçimi** (ASS stilleri korunur), **SRT**, **ASS**, **WebVTT**.
+- Whisper transkriptinde ayrıca: **ASS karaoke** (her kelime söylendiği anda renk değiştirir; `\kf` akarak dolar, `\k` kelime kelime; VLC, mpv, MPC-HC ve libass kullanan oynatıcılarda çalışır), **SRT kelime vurgulu** (karaoke desteklemeyen oynatıcılar için, o anki kelime `<font color>` ile renkli), **WebVTT kelime zamanlı**, **SRT tek kelime** (her kelime ayrı satır) ve **JSON** (kelime kelime zamanlar). Vurgu rengi, henüz söylenmeyen renk ve yazı boyutu seçilebilir.
+
+**Klip (makas düğmesi).** Videonun bir bölümünü ayrı dosya olarak kaydeder:
+- **I** başlangıcı, **O** bitişi şu anki konuma koyar; panelde zamanlar elle yazılabilir ya da ‹ › ile 0,1 saniye kaydırılabilir. Seçilen aralık arama çubuğunda gösterilir. **Önizle** aralığı oynatıp sonunda durur.
+- **Satıra hizala** başlangıç ve bitişi altyazı satırlarının sınırlarına, **Kelimeye hizala** (Whisper kelime zamanları) en yakın kelime sınırına çeker; cümle ortasından kesilmez.
+- **Biçim:** MP4, MKV, GIF ya da yalnız ses (M4A). **Kesim:** *Hızlı* yeniden kodlamadan saniyeler içinde keser (başlangıç bir önceki anahtar kareye kayabilir); *Hassas* H.264 ile kare kare keser. Kalite ve çözünürlük (yalnızca küçültür) seçilebilir.
+- **Altyazı:** *Yok*, *Ayrı dosya* (klibin yanına, klibe göre zamanlanmış), *Gömülü* (oynatıcıda açılıp kapanır; MP4'te düz metin, karaoke için MKV) ya da *Görüntüye yak* (her oynatıcıda görünür; karaoke renkleri de yakılır). Altyazı CC menüsünde seçili olandır ve zamanlama düzeltmesi uygulanır.
+- Klip arka planda kaydedilir; ilerleme kontrol çubuğunda görünür. Uygulama kapanırken iş durdurulur, yarım dosya silinir.
+
+**Oynatıcı kısayolları:** Boşluk oynat/duraklat, ←/→ 5 saniye, **F** ya da videoya çift tıklama tam ekran, **N** not, **G / H** altyazı ±0,1 sn, **I / O** klip başlangıcı / bitişi. Arama çubuğunun üzerine gelince zaman ve bölüm adı görünür. Sayfadan çıkıp aynı videoya dönünce kaldığı yerden açılır.
 
 **Belgeler:** PDF sayfaları uygulama içinde gösterilir (sayfa gezinme, yakınlaştırma); diğer belgeler sayfa başlıklarıyla düz metin olarak açılır. Sağdaki **Bu belgeye sor** cevaplarındaki `s.N` atfı belgeyi o sayfaya götürür. **Varsayılan uygulamada aç** dosyayı bilgisayarınızdaki programla açar.
 
@@ -413,8 +436,8 @@ Altyazı, ayarlar (model, glossary, prompt, parti boyutu) veya çeviri protokol�
 ### 6.4 `Yapisal altyazi isaretleri korunmadi`
 Bu hata normal akışta görülmemelidir: model satır sayısını bozsa bile çıktı kaynak yapıya göre **otomatik yeniden bölünür** (log: `BILGI: model satir sayisini degistirdi ... yeniden bolundu.`). Hatayı yine de görürseniz log ile birlikte bildirin.
 
-### 6.5 `Goruntu tabanli altyazi - su anda desteklenmiyor`
-Seçilen akış PGS/VobSub gibi görüntü tabanlıdır; metin çevirisi yapılamaz. Varsa metin tabanlı bir akış seçin.
+### 6.5 `Görüntü tabanlı altyazıyı önce "OCR ile oku" ile metne çevirin`
+Seçilen akış PGS/VobSub gibi görüntü tabanlıdır. Satırdaki **OCR ile oku** ile metne çevirin (bkz. 3.2), sonra çevirin. OCR sonucu kötüyse Ayarlar'dan başka bir OCR motoru seçin (Tesseract'ta akışın dil verisi kurulu olmalı; örneğin İngilizce için `eng`).
 
 ### 6.6 `Bu seri/sozluk dosyasi baska bir Aktar ornesi tarafindan kullaniliyor`
 Aynı seri dosyasına başka bir Aktar penceresi erişiyor. Diğer pencereleri kapatıp yeniden deneyin.

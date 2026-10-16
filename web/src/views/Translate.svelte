@@ -2,6 +2,8 @@
   import Icon from '../lib/Icon.svelte';
   import Toggle from '../components/Toggle.svelte';
   import GlossaryModal from '../components/GlossaryModal.svelte';
+  import SubtitleExportModal from '../components/SubtitleExportModal.svelte';
+  import { subtool, jobText, cancelJob } from '../lib/subtools.svelte.js';
   import { app, act, setTranslate, onDrop, toast, go } from '../lib/state.svelte.js';
   import { prompt, choose, confirm } from '../lib/confirm.svelte.js';
   import { call } from '../lib/api.js';
@@ -15,6 +17,14 @@
   const hasWhisper = $derived(t.streams.some((s) => s.whisper));
   const percent = $derived(t.progress.total ? Math.round((t.progress.done * 100) / t.progress.total) : 0);
   let glossary = $state(null);   // {title, items, save(rows)}
+  let exporting = $state(null);  // {key, label}: disa aktarma penceresi (F118)
+  const ocrJob = $derived(subtool.job?.kind === 'ocr' && subtool.job.path === t.video?.path ? subtool.job : null);
+  const streamKey = (s) => (s.whisper ? 'whisper' : `stream:${s.index}`);
+  const selected = $derived(t.streams.find((s) => s.index === view.stream && s.supported));
+
+  async function readImage(s) {
+    await act('subtitle_ocr', t.video.path, s.index);
+  }
 
   async function openVideo(path) {
     const state = await act('open_video', path);
@@ -117,7 +127,7 @@
   }
 
   const clock = (sec) => { const s = Math.max(0, Math.round(sec)); const m = Math.floor(s / 60); return m + ':' + String(s % 60).padStart(2, '0'); };
-  const statusOf = (s) => s.whisper ? ['Whisper · SRT', 'ok'] : s.image ? ['Görüntü tabanlı', 'danger'] : s.supported ? [s.extension.toUpperCase(), 'ok'] : ['Desteklenmiyor', ''];
+  const statusOf = (s) => s.whisper ? ['Whisper · SRT', 'ok'] : s.ocr ? ['OCR · SRT', 'ok'] : s.image ? ['Görüntü tabanlı', 'warning'] : s.supported ? [s.extension.toUpperCase(), 'ok'] : ['Desteklenmiyor', ''];
 </script>
 
 <section class="page">
@@ -157,7 +167,9 @@
 
       <div class="grid">
         <div class="card list">
-          <div class="card-head"><b>Altyazı akışları</b><span class="dim">{supported > 1 ? 'Tek akış işaretlenebilir' : ''}</span></div>
+          <div class="card-head"><b>Altyazı akışları</b><span class="dim">{supported > 1 ? 'Tek akış işaretlenebilir' : ''}</span>
+            <button class="btn ghost sm" disabled={!selected || t.running} onclick={() => (exporting = { key: streamKey(selected), label: selected.title || selected.codec })}
+              title="İşaretli altyazıyı başka biçimde kaydet (Whisper'da kelime zamanlı / karaoke)"><Icon name="download" size={14} />Dışa aktar…</button></div>
           {#if t.probing}
             <div class="empty"><Icon name="loader" spin /> Akışlar okunuyor…</div>
           {:else}
@@ -170,6 +182,15 @@
                 <span class="lang">{s.language || '—'}</span>
                 <span class="title ellipsis">{s.title || ''}</span>
                 <span class="badge {kind}">{status}</span>
+                {#if s.image && !s.ocr}
+                  {#if ocrJob}
+                    <span class="mono dim ocr">{jobText(ocrJob)}</span>
+                    <button class="btn sm ghost" onclick={(e) => { e.preventDefault(); cancelJob(); }}>Durdur</button>
+                  {:else}
+                    <button class="btn sm" disabled={t.running || !!subtool.job} onclick={(e) => { e.preventDefault(); readImage(s); }}
+                      title="Altyazı görüntüleri Ayarlar'daki OCR motoruyla (Tesseract, OCR modeli ya da görü modeli) okunur; videonun yanına .srt yazılır ve çevrilebilir."><Icon name="image" size={14} />OCR ile oku</button>
+                  {/if}
+                {/if}
               </label>
             {:else}
               <div class="empty">Bu videoda altyazı akışı yok. Konuşmadan altyazı oluşturabilirsiniz.</div>
@@ -215,6 +236,10 @@
   </footer>
 </section>
 
+{#if exporting && t.video}
+  <SubtitleExportModal path={t.video.path} source={exporting.key} label={exporting.label} onclose={() => (exporting = null)} />
+{/if}
+
 {#if glossary}
   <GlossaryModal title={glossary.title} items={glossary.items} onsave={glossary.save} onclose={() => (glossary = null)} />
 {/if}
@@ -250,7 +275,9 @@
   .stream { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 6px; cursor: pointer; }
   .stream:hover { background: var(--surface-hover); }
   .stream.on { background: var(--surface-active); }
-  .stream.off { cursor: default; opacity: .5; }
+  .stream.off { cursor: default; }
+  .stream.off .codec, .stream.off .lang, .stream.off .title { opacity: .5; }
+  .ocr { font-size: 12px; }
   .codec { font-size: 12px; color: var(--accent); min-width: 64px; }
   .stream.off .codec { color: var(--dim); }
   .lang { color: var(--secondary); min-width: 34px; }

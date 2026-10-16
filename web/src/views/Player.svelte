@@ -9,7 +9,11 @@
   import { openMenu } from '../lib/menu.svelte.js';
   import { StreamFeed, mseSupported } from '../lib/streamfeed.js';
   import NotesPanel from '../components/NotesPanel.svelte';
+  import SyncPanel from '../components/SyncPanel.svelte';
+  import ClipPanel from '../components/ClipPanel.svelte';
+  import SubtitleExportModal from '../components/SubtitleExportModal.svelte';
   import { notes, loadNotes, startNote, NOTE_COLORS } from '../lib/notes.svelte.js';
+  import { subtool, onSubtool, IDENTITY, signed, jobText } from '../lib/subtools.svelte.js';
 
   const p = $derived(app.player);
   const STEP = 5;
@@ -73,6 +77,9 @@
     if (!path || path === opened) return;
     opened = path;
     transcode = false;
+    timings = {};          // zamanlama ve klip videoya ozeldir
+    clipRange = null;
+    panel = '';
     const seek = app.playerSeek;
     const start = seek ? seek.time : app.playerPositions[path] ?? 0;
     if (seek) app.playerSeek = null;
@@ -123,7 +130,65 @@
     else if (event.key === 'ArrowRight') { event.preventDefault(); seekTo(time + STEP); }
     else if (event.key === 'f') toggleFullscreen();
     else if (event.key === 'n' && !event.ctrlKey && !event.metaKey) { event.preventDefault(); noteHere(); }
+    else if ((event.key === 'g' || event.key === 'G' || event.key === 'h' || event.key === 'H') && ccKey && !event.ctrlKey) {
+      event.preventDefault();
+      shiftSubtitle((event.key.toLowerCase() === 'g' ? -1 : 1) * (event.shiftKey ? 1 : 0.1));
+    } else if ((event.key === 'i' || event.key === 'o') && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+      markClip(event.key === 'i' ? 'start' : 'end');
+    }
   }
+
+  // --- altyazi zamanlamasi ve klip (F118) ------------------------------------------
+  let panel = $state('');            // alt panel: '' | 'sync' | 'clip' (notlar: notes.open)
+  let timings = $state({});          // altyazi anahtari -> {scale, offset}
+  const timing = $derived(timings[ccKey] ?? IDENTITY);
+  let clipRange = $state(null);      // {start, end}
+  let previewEnd = null;             // onizleme bu anda durur
+  let exporting = $state(false);
+  let osd = $state('');
+  let osdTimer;
+
+  function openPanel(name) {
+    panel = panel === name ? '' : name;
+    if (panel) notes.open = false;
+    if (panel === 'clip' && !clipRange) clipRange = { start: time, end: Math.min(duration || time + 10, time + 10) };
+  }
+  $effect(() => {
+    if (notes.open) panel = '';
+  });
+
+  function flash(text) {
+    osd = text;
+    clearTimeout(osdTimer);
+    osdTimer = setTimeout(() => (osd = ''), 1500);
+  }
+
+  function shiftSubtitle(delta) {
+    const current = timings[ccKey] ?? IDENTITY;
+    timings[ccKey] = { ...current, offset: Math.round((current.offset + delta) * 1000) / 1000 };
+    flash('Altyazı ' + signed(timings[ccKey].offset));
+  }
+
+  function markClip(edge) {
+    if (!duration) return;
+    const range = clipRange ?? { start: time, end: Math.min(duration, time + 10) };
+    if (edge === 'start') clipRange = { start: time, end: range.end > time + 0.1 ? range.end : Math.min(duration, time + 10) };
+    else clipRange = { start: range.start < time - 0.1 ? range.start : Math.max(0, time - 10), end: time };
+    if (panel !== 'clip') { panel = 'clip'; notes.open = false; }
+    flash((edge === 'start' ? 'Başlangıç ' : 'Bitiş ') + fmt(time));
+  }
+
+  function preview(start, end) {
+    previewEnd = end;
+    seekTo(start, true);
+  }
+
+  const offSubtool = onSubtool((job) => {
+    if (job.path !== p?.path || job.state !== 'done') return;
+    if (job.kind === 'ocr') selectSubtitle(job.result.key);
+    else if (job.kind === 'whisper' && ccKey === 'whisper') selectSubtitle('whisper');
+  });
 
   // --- notlar (F113) -----------------------------------------------------------
   $effect(() => {
@@ -193,25 +258,46 @@
 
   function timeupdate() {
     if (!dragging && videoEl) time = offset + videoEl.currentTime;
+    if (previewEnd !== null && time >= previewEnd) {
+      previewEnd = null;
+      videoEl?.pause();
+    }
   }
 
   // --- altyazi ----------------------------------------------------------------
   let ccKey = $state(null);
   let cues = $state([]);
   let cueStarts = [];
+  const ccLabel = $derived(ccKey === 'whisper' ? (p?.whisper || 'Whisper') : (p?.subtitles?.find((s) => s.key === ccKey)?.label ?? ''));
+  let wordHighlight = $state((() => { try { return localStorage.getItem('aktar.karaoke') !== '0'; } catch { return true; } })());
+  // Ekrandaki satirlar; zamanlama duzeltmesi icin video zamani altyazinin kendi zamanina cevrilir.
+  // Kelime zamanli (Whisper) satirlarda soylenmis kelimeler vurgulanir.
   const subtitle = $derived.by(() => {
-    if (!ccKey || !cues.length) return '';
+    if (!ccKey || !cues.length) return [];
+    const src = (time - timing.offset) / timing.scale;
     let lo = 0, hi = cueStarts.length;
-    while (lo < hi) { const mid = (lo + hi) >> 1; if (cueStarts[mid] <= time) lo = mid + 1; else hi = mid; }
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (cueStarts[mid] <= src) lo = mid + 1; else hi = mid; }
     const active = [];
     for (let i = lo - 1; i >= 0; i--) {
-      if (cues[i].start < time - 60) break;
-      if (time < cues[i].end) active.unshift(cues[i].text);
+      if (cues[i].start < src - 60) break;
+      if (src < cues[i].end && !active.some((c) => c.text === cues[i].text)) active.unshift(cues[i]);
     }
-    return [...new Set(active)].join('\n');
+    return active.map((cue) => lineTokens(cue, wordHighlight ? src : null));
   });
 
+  function lineTokens(cue, src) {
+    const lines = cue.text.split('\n');
+    if (src === null || !cue.words?.length) return lines.map((line) => [{ text: line, sung: false }]);
+    const starts = cue.words.flatMap((w) => String(w[2]).split(/\s+/).filter(Boolean).map(() => w[0]));
+    let k = 0;
+    return lines.map((line) => line.split(' ').filter(Boolean).map((text) => ({ text, sung: (starts[k++] ?? Infinity) <= src })));
+  }
+
   async function selectSubtitle(key) {
+    if (key?.startsWith('ocr:') && !p?.subtitles?.find((s) => s.key === key)?.ready) {
+      if (await act('subtitle_ocr', p.path, Number(key.slice(4)))) toast('Görüntü tabanlı altyazı OCR ile okunuyor; bitince açılır.', 'info');
+      return;
+    }
     ccKey = key;
     cues = [];
     if (!key) return;
@@ -229,19 +315,38 @@
     const items = [{ label: 'Kapalı', icon: ccKey ? null : 'check', action: () => selectSubtitle(null) }];
     const subs = p?.subtitles;
     const streams = (subs ?? []).filter((s) => s.kind === 'stream');
+    const images = (subs ?? []).filter((s) => s.kind === 'image');
     const files = (subs ?? []).filter((s) => s.kind === 'file');
     for (const [title, list] of [['Videodaki altyazılar', streams], ['Video klasöründeki dosyalar', files]]) {
       if (!list.length) continue;
       items.push('sep', { label: title, disabled: true });
       for (const s of list) items.push({ label: s.label, icon: ccKey === s.key ? 'check' : null, action: () => selectSubtitle(s.key) });
     }
+    if (images.length) {
+      const reading = subtool.job?.kind === 'ocr' && subtool.job.path === p?.path;
+      items.push('sep', { label: 'Görüntü tabanlı (PGS/VobSub)', disabled: true });
+      for (const s of images) {
+        items.push(s.ready ? { label: s.label, icon: ccKey === s.key ? 'check' : null, action: () => selectSubtitle(s.key) }
+          : { label: s.label + (reading ? ' · okunuyor…' : ' · OCR ile oku'), icon: 'image', disabled: reading || !!subtool.job, action: () => selectSubtitle(s.key) });
+      }
+    }
     items.push('sep', { label: 'Sesten (Whisper)', disabled: true });
     if (p?.whisper) items.push({ label: p.whisper, icon: ccKey === 'whisper' ? 'check' : null, action: () => selectSubtitle('whisper') });
+    if (p?.whisper && !p.whisper_words && !subtool.job) items.push({ label: 'Kelime zamanlarını çıkar (karaoke için)', icon: 'mic', action: () => act('whisper_words', p.path, audio) });
     if (p?.transcribing) items.push({ label: 'Konuşmadan metin çıkarılıyor…', disabled: true });
     else if ((p?.audio ?? []).length > 1) {
       for (const track of p.audio) items.push({ label: 'Sesten oluştur · ' + track.label, icon: 'mic', action: () => act('whisper_generate', track.index) });
     } else if (!p?.whisper) items.push({ label: 'Sesten oluştur…', icon: 'mic', action: () => act('whisper_generate', null) });
     if (subs === null) items.push('sep', { label: 'Altyazı akışları okunuyor…', disabled: true });
+    if (ccKey) {
+      items.push('sep', { label: 'Zamanlama ve dışa aktarma…', icon: 'timer', action: () => { if (panel !== 'sync') openPanel('sync'); } });
+      if (cues.some((c) => c.words?.length)) {
+        items.push({ label: 'Söylenen kelimeyi vurgula', icon: wordHighlight ? 'check' : null, action: () => {
+          wordHighlight = !wordHighlight;
+          try { localStorage.setItem('aktar.karaoke', wordHighlight ? '1' : '0'); } catch { /* depo yok */ }
+        } });
+      }
+    }
     openMenu(event, items);
   }
 
@@ -265,6 +370,8 @@
     feed?.stop();
     if (p?.path) app.playerPositions[p.path] = time;
     offWhisper();
+    offSubtool();
+    clearTimeout(osdTimer);
   });
 </script>
 
@@ -284,7 +391,14 @@
           <video bind:this={videoEl} preload="auto" onloadedmetadata={metadata} ontimeupdate={timeupdate}
             onplay={() => (playing = true)} onpause={() => (playing = false)} onwaiting={() => (loading = true)}
             onplaying={() => (loading = false)} oncanplay={() => (loading = false)} onerror={mediaError}></video>
-          {#if subtitle}<div class="subtitle">{subtitle}</div>{/if}
+          {#if subtitle.length}
+            <div class="subtitle">
+              {#each subtitle as lines, c}
+                {#each lines as tokens, l}{#if c || l}<br />{/if}{#each tokens as token, t}{t ? ' ' : ''}<span class:sung={token.sung}>{token.text}</span>{/each}{/each}
+              {/each}
+            </div>
+          {/if}
+          {#if osd}<div class="osd mono">{osd}</div>{/if}
           {#if loading && !error}<div class="spinner"><Icon name="loader" size={34} spin /></div>{/if}
           {#if error}<div class="error">{error}</div>{/if}
         </div>
@@ -302,6 +416,10 @@
                 <span class="pin" style:left="{(note.at / (duration || 1)) * 100}%" style:background={NOTE_COLORS[note.color]}></span>
               {/each}
             {/if}
+            {#if clipRange && panel === 'clip'}
+              <span class="range" style:left="{(clipRange.start / (duration || 1)) * 100}%"
+                style:width="{((clipRange.end - clipRange.start) / (duration || 1)) * 100}%"></span>
+            {/if}
             <span class="knob" style:left="{(time / (duration || 1)) * 100}%"></span>
             {#if hover}<span class="tip" style:left="{hover.x}px">{fmt(hover.time)}{chapterAt(hover.time) ? ' · ' + chapterAt(hover.time) : ''}</span>{/if}
           </div>
@@ -318,6 +436,12 @@
             {#if (p.audio ?? []).length > 1}
               <button class="icon-btn sm" title="Ses parçası" onclick={audioMenu}><Icon name="headphones" size={18} /></button>
             {/if}
+            {#if subtool.job?.path === p.path}
+              <span class="badge accent job" title="Altyazı/klip işi sürüyor">{jobText(subtool.job)}</span>
+            {/if}
+            <button class="icon-btn sm" class:on={panel === 'clip'} title="Klip (I / O: başlangıç / bitiş)" onclick={() => openPanel('clip')}><Icon name="scissors" size={16} /></button>
+            <button class="icon-btn sm" class:on={panel === 'sync'} disabled={!ccKey} title={ccKey ? 'Altyazı zamanlaması ve dışa aktarma (G / H: ±0,1 sn)' : 'Önce bir altyazı seçin'}
+              onclick={() => openPanel('sync')}><Icon name="timer" size={16} /></button>
             <button class="icon-btn sm" title="Bu ana not ekle (N)" onclick={noteHere}><Icon name="squarePen" size={16} /></button>
             <button class="icon-btn sm" class:on={notes.open} title="Notlar" onclick={() => (notes.open = !notes.open)}><Icon name="list" size={18} /></button>
             <button class="icon-btn sm" class:on={ccKey} title="Altyazılar" onclick={ccMenu}><Icon name="subtitles" size={18} /></button>
@@ -327,10 +451,25 @@
       </div>
       {#if notes.open && notes.path === p.path}
         <div class="notes-wrap"><NotesPanel path={p.path} current={time} onjump={(at) => seekTo(at)} /></div>
+      {:else if panel === 'sync' && ccKey}
+        <div class="notes-wrap tools">
+          <SyncPanel path={p.path} source={ccKey} label={ccLabel} {cues} {time} whisper={ccKey === 'whisper'} {audio}
+            bind:timing={() => timing, (value) => (timings[ccKey] = value)}
+            onjump={(at) => seekTo(at)} onexport={() => (exporting = true)} onclose={() => (panel = '')} />
+        </div>
+      {:else if panel === 'clip' && clipRange}
+        <div class="notes-wrap tools">
+          <ClipPanel path={p.path} {time} {duration} bind:clip={clipRange} source={ccKey} sourceLabel={ccLabel} {cues} {timing} {audio}
+            onpreview={preview} onseek={(at) => seekTo(at)} onclose={() => (panel = '')} />
+        </div>
       {/if}
     </div>
   {/if}
 </section>
+
+{#if exporting && p && ccKey}
+  <SubtitleExportModal path={p.path} source={ccKey} label={ccLabel} {timing} {audio} onclose={() => (exporting = false)} />
+{/if}
 
 <style>
   .title { font-size: 24px !important; }
@@ -367,4 +506,11 @@
   .pin { position: absolute; top: 2px; width: 4px; height: 14px; margin-left: -2px; border-radius: 2px; pointer-events: none; box-shadow: 0 0 0 1px var(--panel); }
   .notes-wrap { flex: none; height: 34%; min-height: 150px; display: flex; flex-direction: column; }
   .notes-wrap > :global(.notes) { flex: 1; }
+  .notes-wrap.tools { height: auto; max-height: 46%; min-height: 0; }
+  .notes-wrap.tools > :global(.card) { flex: 1; }
+  .subtitle .sung { color: #ffd400; }
+  .osd { position: absolute; top: 14px; right: 16px; padding: 4px 10px; border-radius: 6px; background: rgba(0, 0, 0, .65); color: #fff; font-size: 13px; pointer-events: none; }
+  .range { position: absolute; top: 4px; height: 10px; border-radius: 3px; pointer-events: none;
+    background: color-mix(in srgb, var(--accent) 30%, transparent); box-shadow: inset 2px 0 var(--accent), inset -2px 0 var(--accent); }
+  .job { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 </style>

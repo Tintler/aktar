@@ -43,6 +43,7 @@ INSTALL_HINT = ('Konuşmadan metin için faster-whisper kurulu değil. Kurmak i�
                                        'requirements-whisper.txt') +
                 ' (veya aktar-whisper paketini uygulama klasörüne koyun; KULLANIM.md 1.5).')
 _SENTENCE_END = re.compile(r'[.?!…]["\')\]]*$')
+_GLUE = re.compile(r"[-'’]\S")   # bosluksuz baslayan ek parca (kelimenin devami)
 
 
 FROZEN_HINT = (f'Konuşmadan metin (Whisper) paketi bulunamadı. Aktar{EXE_SUFFIX} ile aynı klasöre '
@@ -83,13 +84,23 @@ def regroup_words(words, max_chars=CUE_CHARS, max_seconds=CUE_SECONDS):
     """Kelime zamanlarini [(start, end, kelime)] okunabilir altyazi cue'larina toplar.
 
     Cumle sonunda (yeterince uzunsa) veya karakter/sure siniri asilinca boler.
-    Donen: [{'start', 'end', 'text'}] (tek satir metin).
+    Donen: [{'start', 'end', 'text', 'words'}] (tek satir metin; `words` cue'nun kelimeleri
+    [[baslangic, bitis, kelime]], kelime zamanli/karaoke altyazi icin).
     """
     cues = []
     current = None
     for start, end, text in words:
         token = ' '.join(str(text).split())
         if not token:
+            continue
+        if current and _GLUE.match(str(text)):
+            # Whisper bosluksuz devam parcasi verdi ("Image" + "-based", "don" + "'t"): onceki kelimeye eklenir.
+            current['text'] += token
+            current['end'] = float(end)
+            current['words'][-1][1:] = [round(float(end), 3), current['words'][-1][2] + token]
+            if _SENTENCE_END.search(token) and len(current['text']) >= 20:
+                cues.append(current)
+                current = None
             continue
         too_long = current and (len(current['text']) + 1 + len(token) > max_chars
                                 or float(end) - current['start'] > max_seconds)
@@ -99,11 +110,13 @@ def regroup_words(words, max_chars=CUE_CHARS, max_seconds=CUE_SECONDS):
         if too_long:
             cues.append(current)
             current = None
+        word = [round(float(start), 3), round(float(end), 3), token]
         if current is None:
-            current = {'start': float(start), 'end': float(end), 'text': token}
+            current = {'start': float(start), 'end': float(end), 'text': token, 'words': [word]}
         else:
             current['text'] += ' ' + token
             current['end'] = float(end)
+            current['words'].append(word)
         if _SENTENCE_END.search(token) and len(current['text']) >= 20:
             cues.append(current)
             current = None
@@ -146,6 +159,11 @@ def track_suffix(audio_track=None):
 def cache_path(video, model_name=DEFAULT_MODEL, language='', base=None, audio_track=None):
     return qa.cache_path(video, f'whisper-segments:{model_name}:{language or "auto"}'
                                 f'{track_suffix(audio_track)}', base)
+
+
+def has_words(result):
+    """Transkriptte kelime zamanlari var mi (eski onbellekler yalnizca cue zamani tutar)."""
+    return bool(result) and all(item.get('words') for item in result.get('segments') or [{}])
 
 
 def load_cached(video, model_name=DEFAULT_MODEL, language='', base=None, audio_track=None):
@@ -270,17 +288,20 @@ def _device_plan(device):
 
 
 def transcribe(video, model_name=DEFAULT_MODEL, device='auto', language='', base=None,
-               progress=None, cancelled=None, log=print, cuda_dir='', audio_track=None):
+               progress=None, cancelled=None, log=print, cuda_dir='', audio_track=None, need_words=False):
     """Videonun konusmasini zaman damgali cue'lara cevirir (onbellekli).
 
     Donen: {'segments', 'language', 'model', 'duration', 'device', 'audio_track'}.
     `progress(islenen_saniye, toplam_saniye)`; `cancelled()` True ise GracefulStop.
     `audio_track`: Whisper'a gidecek ses akisinin GLOBAL index'i (None: ilk ses akisi).
+    `need_words`: onbellekteki transkriptte kelime zamanlari yoksa yeniden cikarilir.
     """
     cached = load_cached(video, model_name, language, base, audio_track)
-    if cached:
+    if cached and (has_words(cached) or not need_words):
         log('Konuşmadan metin önbellekten yüklendi.')
         return cached
+    if cached:
+        log('Önbellekteki transkriptte kelime zamanları yok; Whisper yeniden çalıştırılıyor.')
     mode = backend()
     if mode is None:
         raise RuntimeError(available()[1])

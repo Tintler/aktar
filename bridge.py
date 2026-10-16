@@ -9,7 +9,7 @@ Bolumler: bu dosyada genel (ayarlar, tema, pencere), bridge_translate.py'de Alty
 bridge_library.py'de Kutuphane (bridge_mail.py'de e-postadan iceri aktarma), bridge_player.py'de oynatici ve videoya soru sor,
 bridge_document.py'de belge goruntuleyici, bridge_assistant.py'de genel sohbet ve tekil dosyalar,
 bridge_subscriptions.py'de abonelik takibi, bridge_voice.py'de sesle soru sorma, bridge_watch.py'de
-klasor izleme.
+klasor izleme, bridge_subtitles.py'de altyazi araclari (zamanlama, disa aktarma, OCR) ve klip.
 """
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ from bridge_library import LibraryMixin
 from bridge_mail import MailMixin
 from bridge_player import PlayerMixin
 from bridge_subscriptions import SubscriptionsMixin
+from bridge_subtitles import SubtitleToolsMixin
 from bridge_translate import TranslateMixin
 from bridge_voice import VoiceMixin
 from bridge_watch import WatchMixin
@@ -52,7 +53,7 @@ def _error(error):
 
 
 class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin, AssistantMixin, FilesMixin,
-             SubscriptionsMixin, VoiceMixin, WatchMixin):
+             SubscriptionsMixin, VoiceMixin, WatchMixin, SubtitleToolsMixin):
     def __init__(self, emit=None, dialogs=None):
         self._emit = emit or (lambda _event, _data: None)
         self._dialogs = dialogs          # desktop.Dialogs: open_file(), open_folder() ...
@@ -68,6 +69,7 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
         self._init_player()
         self._init_document()
         self._init_assistant()
+        self._init_subtools()
 
     # ------------------------------------------------------------------ yardimcilar
     def _log(self, message):
@@ -245,7 +247,8 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
     def request_close(self, close):
         """Pencere kapanirken cagrilir. Hemen kapanabiliyorsa True."""
         reasons = (['Çeviri sürüyor.'] if self._running() else []) + (
-            ['Toplu hazırlık sürüyor.'] if self._queue_running() else [])
+            ['Toplu hazırlık sürüyor.'] if self._queue_running() else []) + (
+            ['Altyazı/klip işi sürüyor.'] if self._tool_running() else [])
         if not reasons:
             return True
         self._pending_close = close
@@ -260,6 +263,7 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
         self._stop_library_for_close()
         self._stop_document_for_close()
         self._stop_player_for_close()
+        self._stop_subtools_for_close()
         self._stop_assistant_for_close()
         self._stop_watch_for_close()
         if close:
@@ -272,5 +276,6 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
         self._stop_library_for_close()
         self._stop_document_for_close()
         self._stop_player_for_close()
+        self._stop_subtools_for_close()
         self._stop_assistant_for_close()
         self._stop_watch_for_close()

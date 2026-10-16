@@ -397,7 +397,8 @@ def load_whisper_session(video, result, base=None, log=print):
     source = {'kind': 'whisper', 'model': result.get('model', ''),
               'language': result.get('language', ''), 'audio_track': result.get('audio_track')}
     return _load_session(video, source,
-                         lambda: [dict(item) for item in result['segments']], base, log)
+                         lambda: [{key: value for key, value in item.items() if key != 'words'}
+                                  for item in result['segments']], base, log)
 
 
 def _load_session(video, source, make_segments, base, log):

@@ -572,8 +572,11 @@ def tesseract_workers():
     return max(1, min(8, (os.cpu_count() or 2) - 2))
 
 
-def tesseract_reader(cfg, log=print):
-    """(png) -> metin; Tesseract yoksa anlasilir hata. Turkce dil verisi yoksa 'eng'e duser."""
+def tesseract_reader(cfg, log=print, lang=None, psm='3'):
+    """(png) -> metin; Tesseract yoksa anlasilir hata. Turkce dil verisi yoksa 'eng'e duser.
+
+    `lang`: ayardaki dil yerine kullanilacak Tesseract dilleri ('eng', 'jpn+eng' ...);
+    `psm`: sayfa bolme kipi (altyazi gibi tek blok yazi icin '6')."""
     import os
     import subprocess
     import tempfile
@@ -583,7 +586,7 @@ def tesseract_reader(cfg, log=print):
                          'paketiyle; Linux: tesseract-ocr tesseract-ocr-tur) ya da Ayarlar\'da '
                          'yolunu gösterin; veya OCR motoru olarak görü modelini seçin.')
     hide = {'creationflags': getattr(subprocess, 'CREATE_NO_WINDOW', 0)} if os_name() == 'nt' else {}
-    wanted = str(cfg.get('tesseract_lang', 'tur+eng')).strip() or 'tur+eng'
+    wanted = str(lang or cfg.get('tesseract_lang', 'tur+eng')).strip() or 'tur+eng'
     try:
         listed = subprocess.run([exe, '--list-langs'], capture_output=True, text=True,
                                 encoding='utf-8', errors='replace', timeout=60, **hide)
@@ -606,7 +609,7 @@ def tesseract_reader(cfg, log=print):
             image = Path(folder) / 'sayfa.png'
             image.write_bytes(png)
             result = subprocess.run([exe, str(image), 'stdout', '-l', '+'.join(langs),
-                                     '--psm', '3'], capture_output=True, timeout=600,
+                                     '--psm', str(psm)], capture_output=True, timeout=600,
                                     env=env, **hide)
         if result.returncode != 0:
             raise ValueError('Tesseract hatası: '

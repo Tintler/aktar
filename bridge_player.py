@@ -15,6 +15,7 @@ import library
 import media_server
 import qa
 import speech
+import subtitle_ocr
 from app_core import GracefulStop, load_config, save_json
 from bridge_library import pending_entry, reasoning_feed
 from media import audio_label, audio_streams, sidecar_subtitles, subtitle_streams
@@ -27,9 +28,17 @@ WHISPER_KEY = 'whisper'
 
 
 def subtitle_sources(video, streams):
-    """CC menusu kaynaklari: videodaki metin akislari + videonun yanindaki dosyalar."""
+    """CC menusu kaynaklari: videodaki metin akislari, goruntu tabanli akislar (OCR ile okunur)
+    ve videonun yanindaki dosyalar."""
     sources = []
     for item in streams or []:
+        if item.get('image'):
+            ready = subtitle_ocr.is_ready(video, item['index'])
+            label = ' · '.join(part for part in (item.get('language') or '', item.get('title') or '',
+                                                 item.get('codec') or '') if part)
+            sources.append({'key': f'ocr:{item["index"]}', 'kind': 'image', 'ready': ready,
+                            'label': (label or ('Akış ' + str(item['index']))) + (' · OCR' if ready else '')})
+            continue
         if not item.get('supported'):
             continue
         label = ' · '.join(part for part in (item.get('language') or '', item.get('title') or '',
@@ -121,9 +130,11 @@ class PlayerMixin:
                 entries.append({'kind': kind, 'text': str(value)})
         return {'path': str(video.path), 'name': video.path.name, 'duration': info.get('duration') or 0.0,
                 'marks': marks, 'audio': [{'index': item['index'], 'label': audio_label(item)} for item in video.audio],
-                'subtitles': [{'key': item['key'], 'label': item['label'], 'kind': item['kind']}
+                'subtitles': [{'key': item['key'], 'label': item['label'], 'kind': item['kind'],
+                               'ready': item.get('ready', True)}
                               for item in subtitle_sources(video.path, video.streams)] if video.streams is not None else None,
                 'whisper': self._whisper_label(video) if video.whisper else '',
+                'whisper_words': speech.has_words(video.whisper) if video.whisper else False,
                 'transcribing': video.transcribing,
                 'qa': {'status': video.status, 'progress': video.progress, 'busy': video.preparing or video.asking
                        or video.transcribing, 'ready': video.ready, 'asking': video.asking,
@@ -198,7 +209,8 @@ class PlayerMixin:
 
     # ------------------------------------------------------------------ altyazi (CC)
     def subtitle_load(self, key):
-        """Gosterilecek altyazinin satirlari: [{'start', 'end', 'text'}]."""
+        """Gosterilecek altyazinin satirlari: [{'start', 'end', 'text'}] (Whisper'da 'words' da:
+        oynatici o an soylenen kelimeyi vurgular)."""
         video = self._player_video
         if video is None:
             return {'error': 'Açık video yok.'}
@@ -206,7 +218,15 @@ class PlayerMixin:
             if key == WHISPER_KEY:
                 if not video.whisper:
                     return {'error': 'Whisper transkripti yok.'}
-                segments = speech.display_segments(video.whisper['segments'])
+                return [{'start': float(item['start']), 'end': float(item['end']), 'text': str(item['text']),
+                         'words': item.get('words') or []}
+                        for item in sorted(speech.display_segments(video.whisper['segments']),
+                                           key=lambda item: item['start'])]
+            elif str(key).startswith('ocr:'):
+                cached = subtitle_ocr.load_cached(video.path, int(str(key).split(':', 1)[1]))
+                if not cached:
+                    return {'error': 'Bu altyazı henüz OCR ile okunmadı.'}
+                segments = cached['segments']
             elif str(key).startswith('stream:'):
                 index = int(str(key).split(':', 1)[1])
                 stream = next((item for item in video.streams or [] if item['index'] == index), None)

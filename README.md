@@ -22,6 +22,8 @@ Videolarınızı ve belgelerinizi **yerel bir yapay zeka modeliyle** inceleyen m
 - **Sohbet ve Dosya incele:** Serbest sohbet ya da tek bir dosyayı koleksiyona eklemeden açıp soru sorma.
 - **Altyazı çevirisi:** SRT, ASS, SSA ve VTT biçimleri, zamanlamalar ve ASS etiketleri korunur. Dizi bölümleri arasında terim sözlüğü ve isim tutarlılığı sağlanır.
 - **Altyazısız videolar:** faster-whisper ile konuşma yerelde metne çevrilir (isteğe bağlı, NVIDIA GPU desteğiyle).
+- **Altyazı araçları:** Kaymış altyazı G/H ile, iki noktadan ya da Whisper'a göre otomatik hizalanır (kare hızı farkı dahil) ve düzeltilmiş olarak dışa aktarılır. Whisper kelime zamanlarıyla karaoke ASS (`\k`), kelime vurgulu SRT ve JSON çıktısı alınır. PGS/VobSub görüntü altyazıları OCR ile metne çevrilir.
+- **Klip:** Seçilen aralık MP4/MKV/GIF ya da ses olarak kaydedilir; altyazı ayrı dosya, gömülü ya da görüntüye yakılmış (karaoke dahil) eklenebilir.
 - **Videonun görüntüsü:** İsteğe bağlı olarak görüntü değiştikçe kare alınır; slayt yazıları OCR ile, sahneler görü modeliyle okunur ve sorulara katılır.
 - **Klasör izleme ve ekstreler:** Uygulama açıkken izlenen klasörlere düşen dosyalar kendiliğinden hazırlanır; banka ve kart ekstrelerinden abonelik, fatura ve harcama takibi yapılır.
 - **Yerleşik oynatıcı:** MKV, AC3/DTS gibi biçimler FFmpeg ile dönüştürülerek oynatılır.
@@ -60,7 +62,7 @@ Açılan **Kütüphane** sayfasına bir klasör sürükleyin; koleksiyon oluşur
 
 ## Sınırlamalar
 
-- Yalnızca metin tabanlı altyazılar çevrilir; PGS/VobSub gibi görüntü tabanlı altyazılar desteklenmez.
+- Görüntü tabanlı altyazılar (PGS/VobSub) önce OCR ile okunur; okuma kalitesi seçilen OCR motoruna bağlıdır.
 - Cevaplar transkripte dayanır; videodaki görüntü yalnızca **Videoların görüntüsünü de oku** seçilerek hazırlanan videolarda, alınan karelerden görülür.
 - Uygulama kapalıyken arka planda hiçbir şey çalışmaz; klasör izleme ve e-posta kontrolü yalnızca uygulama açıkken yapılır.
 - Çeviri kalitesi seçilen modele bağlıdır.

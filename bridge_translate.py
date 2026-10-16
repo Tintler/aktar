@@ -17,6 +17,8 @@ from pathlib import Path
 import series
 import speech
 import subtitle
+import subtitle_export
+import subtitle_ocr
 from app_core import (APP_DIR, GracefulStop, PauseController, TranslationEngine, _dedupe_glossary,
                       load_config, merge_glossaries, read, render_output)
 from media import VIDEO_EXTENSIONS, extract_subtitle, subtitle_streams, unique_output_path, unique_source_path
@@ -171,6 +173,9 @@ class TranslateMixin:
                 streams = []
                 self._log(str(error))
                 self._emit('toast', {'message': str(error), 'kind': 'error'})
+            for item in streams:
+                if item.get('image') and subtitle_ocr.is_ready(path, item['index']):
+                    item.update(supported=True, ocr=True, extension='srt')   # OCR ile okunmus (F118)
             cached = self._cached_whisper(path)
             if self._video != path:
                 return
@@ -347,8 +352,8 @@ class TranslateMixin:
             return {'error': 'Önce bir altyazı akışı işaretleyin.'}
         if stream['index'] == WHISPER_STREAM and not (self._whisper or {}).get('segments'):
             return {'error': 'Whisper transkripti bulunamadı; yeniden oluşturun.'}
-        if stream['image']:
-            return {'error': 'Görüntü tabanlı altyazı şu anda desteklenmiyor.'}
+        if stream['image'] and not stream.get('ocr'):
+            return {'error': 'Görüntü tabanlı altyazıyı önce "OCR ile oku" ile metne çevirin.'}
         if not stream['supported']:
             return {'error': 'Desteklenmeyen altyazı codec: ' + stream['codec']}
         glossary = list(self._chapter_glossary)
@@ -464,6 +469,12 @@ class TranslateMixin:
             if stream['index'] == WHISPER_STREAM:
                 kind, payload = 'srt', subtitle.parse_srt(whisper_srt(self._whisper['segments']))
                 self._log('Kaynak: Whisper transkripti (' + str(len(payload)) + ' satır).')
+            elif stream.get('ocr'):
+                cached = subtitle_ocr.load_cached(video, stream['index'])
+                if not cached:
+                    raise ValueError('OCR sonucu bulunamadı; altyazıyı yeniden OCR ile okuyun.')
+                kind, payload = subtitle_export.segments_document(cached['segments'])
+                self._log('Kaynak: OCR ile okunan altyazı (' + str(len(payload)) + ' satır).')
             else:
                 source = work_dir / f"{video_name}.{stream['extension']}"
                 extract_subtitle(video, stream['index'], source, codec=stream['codec'])
