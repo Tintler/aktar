@@ -63,6 +63,9 @@ DEFAULT_CONFIG = {
     # WebView HEVC'yi kendisi cozebiliyorsa (donanim cozucusu) donusturmeden oynatilir (F117).
     # Kapatilirsa HEVC her zaman yukaridaki kodlayiciyla H.264'e donusturulur.
     'video_direct_hevc': True,
+    # Oynatici motoru (F122): 'mpv' gomulu libmpv (her bicim, donanim cozme; Windows'ta libmpv-2.dll
+    # varsa), 'web' WebView <video> + ffmpeg donusturme.
+    'player_engine': 'mpv',
     # Kutuphane indeksi (F57): LM Studio'daki embedding modeli (bos: indeksleme kapali).
     # Sablonlar EmbeddingGemma bicimindedir; baska model icin config.json'da degistirilir.
     'embedding_model': '',
@@ -223,6 +226,8 @@ def validate_config(cfg):
         raise ValueError('qa_context_chars en az 1000 olmalı.')
     if not str(cfg.get('whisper_model', DEFAULT_CONFIG['whisper_model'])).strip():
         raise ValueError('whisper_model boş olamaz.')
+    if cfg.get('player_engine', 'mpv') not in ('mpv', 'web'):
+        raise ValueError('player_engine mpv veya web olmalı.')
     if cfg.get('video_hw', 'auto') not in ('auto', 'nvenc', 'qsv', 'amf', 'mf', 'off'):
         raise ValueError('video_hw auto, nvenc, qsv, amf, mf veya off olmalı.')
     if cfg.get('whisper_device', 'auto') not in ('auto', 'cuda', 'cpu'):

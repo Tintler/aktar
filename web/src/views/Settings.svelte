@@ -203,6 +203,15 @@
 
         <section>
           <h2>Video oynatma</h2>
+          {#if info.mpv}
+            <div class="fr">
+              <div class="l">Oynatıcı motoru<small>mpv: her biçim (HEVC, 10 bit, MKV, AC3/DTS) dönüştürmeden, ekran kartıyla çözülerek oynatılır; ASS ve karaoke altyazılar gerçek haliyle görünür. WebView: uygulama içi tarayıcı; çözemediği videolar ffmpeg ile dönüştürülür (aşağıdaki ayarlar yalnızca bunun için).</small></div>
+              <select class="field w" bind:value={cfg.player_engine}>
+                <option value="mpv">mpv (gömülü, önerilen)</option>
+                <option value="web">WebView</option>
+              </select>
+            </div>
+          {/if}
           <div class="fr">
             <div class="l">Dönüştürmede donanım hızlandırma<small>Oynatıcı bir videoyu çözemezse (örn. HEVC/x265) anında H.264'e dönüştürür. GPU kodlayıcısı işlemciyi rahatlatır ve takılmayı azaltır; çalışmazsa oynatıcı kendiliğinden işlemciye geçer.
               {#if info.video_encoders?.length}<br />Bu bilgisayarda: {info.video_encoders.some((e) => e.works === null) ? 'denetleniyor…'

@@ -15,6 +15,7 @@ import webview
 from webview.dom import DOMEventHandler
 
 import mic_permission
+import native_player
 import themes
 from app_core import ROOT
 from bridge import Bridge
@@ -87,6 +88,8 @@ def main():
                                    background_color=palette['window'][:7],
                                    frameless=frameless(), easy_drag=False)
     state['window'] = dialogs.window = window
+    if native_player.available():   # F122: gomulu mpv (libmpv-2.dll bin\ icinde)
+        bridge._native = native_player.NativePlayer(window, emit, bridge._log)
     if frameless():
         bridge._frame = WindowFrame(window, emit, maximized=geometry['maximized'], bounds=geometry['bounds'])
 

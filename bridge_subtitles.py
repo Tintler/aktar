@@ -235,6 +235,8 @@ class SubtitleToolsMixin:
             self._push_player(player)
         if getattr(self, '_video', None) == path and audio_track is None:
             self._whisper = result
+        if hasattr(self, '_forget_native_sources'):
+            self._forget_native_sources(path)   # mpv altyazisi yeni transkriptten uretilsin
         return result
 
     def subtitle_align(self, path, key, audio_index=None):
@@ -310,6 +312,8 @@ class SubtitleToolsMixin:
 
     def _after_ocr(self, path, index):
         """OCR bitti: Altyazi Cevir'deki akis cevrilebilir olur, oynaticinin CC menusu yenilenir."""
+        if hasattr(self, '_forget_native_sources'):
+            self._forget_native_sources(path)
         if getattr(self, '_video', None) == path:
             for item in self._streams:
                 if item.get('index') == index:

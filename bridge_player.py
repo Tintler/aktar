@@ -129,6 +129,7 @@ class PlayerMixin:
             else:
                 entries.append({'kind': kind, 'text': str(value)})
         return {'path': str(video.path), 'name': video.path.name, 'duration': info.get('duration') or 0.0,
+                'engine': self._engine() if hasattr(self, '_engine') else 'web',
                 'marks': marks, 'audio': [{'index': item['index'], 'label': audio_label(item)} for item in video.audio],
                 'subtitles': [{'key': item['key'], 'label': item['label'], 'kind': item['kind'],
                                'ready': item.get('ready', True)}

@@ -1,0 +1,225 @@
+"""Gomulu mpv oynatici (deneme, F122): video WebView yerine libmpv ile oynatilir.
+
+Neden: WebView'in <video> ogesi yalnizca birkac kodu cozer; HEVC/10 bit/MKV/AC3 icin ffmpeg ile anlik
+donusturme + Media Source zinciri gerekiyordu ve takiliyordu. mpv her bicimi dogrudan, donanim
+cozmeyle (d3d11va/nvdec) oynatir ve yerel dosya gibi aninda sarar.
+
+Nasil: Pencereye (WinForms) yerel bir Panel eklenir; mpv o panelin penceresine (`wid`) cizer.
+Arayuz video alaninin dikdortgenini (CSS pikseli * devicePixelRatio) bildirir, panel oraya tasinir.
+Kontroller HTML'de kalir: oynat/duraklat/sarma komutlari buraya gelir; mpv zamani ve durumu
+'mpv' olayiyla geri bildirir. Videonun ustune HTML cizilemez (yerel pencere ustte kalir).
+
+Yalnizca Windows (WinForms); libmpv-2.dll uygulama klasorundeki bin\\ icinde aranir.
+Uygulama kapaninca mpv sonlandirilir; arka planda hicbir sey kalmaz.
+"""
+from __future__ import annotations
+
+import os
+import sys
+import threading
+import time
+from pathlib import Path
+
+from app_core import APP_DIR, ROOT, WINDOWS
+
+DLL_NAME = 'libmpv-2.dll'
+# mpv tuslari -> arayuzde ayni kisayol (Player.svelte keydown ile ayni anlam)
+FORWARD_KEYS = ('MBTN_LEFT', 'MBTN_LEFT_DBL', 'SPACE', 'LEFT', 'RIGHT', 'f', 'n', 'g', 'h', 'G', 'H', 'i', 'o', 'ESC')
+_mpv_module = []
+
+
+def dll_folder():
+    for folder in (APP_DIR / 'bin', ROOT / 'bin', APP_DIR):
+        if (folder / DLL_NAME).is_file():
+            return folder
+    return None
+
+
+def load_mpv():
+    """python-mpv modulu (libmpv yuklenmis) ya da None."""
+    if _mpv_module:
+        return _mpv_module[0]
+    if not WINDOWS:
+        return None
+    folder = dll_folder()
+    if folder is None:
+        return None
+    try:
+        os.add_dll_directory(str(folder))
+    except (AttributeError, OSError):
+        pass
+    os.environ['PATH'] = str(folder) + os.pathsep + os.environ.get('PATH', '')
+    try:
+        import mpv  # noqa: PLC0415 - libmpv yolu ayarlandiktan sonra yuklenmeli
+    except (ImportError, OSError):
+        return None
+    _mpv_module.append(mpv)
+    return mpv
+
+
+def available():
+    """libmpv ve python-mpv var mi (DLL yuklenmeden; ilk videoda yuklenir)."""
+    import importlib.util
+    return WINDOWS and dll_folder() is not None and importlib.util.find_spec('mpv') is not None
+
+
+class NativePlayer:
+    """Pencereye gomulu tek mpv ornegi. Tum WinForms islemleri pencerenin UI is parcaciginda."""
+
+    TICK = 0.25   # zaman bildirimi en fazla bu siklikta
+
+    def __init__(self, window, emit, log=print):
+        self.window = window
+        self.emit = emit
+        self.log = log
+        self.panel = None
+        self.player = None
+        self.path = None
+        self._last = 0.0
+        self._lock = threading.Lock()
+
+    # ------------------------------------------------------------------ UI is parcacigi
+    def _ui(self, fn, wait=True):
+        from System import Action, Func, Object
+        form = self.window.native
+        if not wait:
+            form.BeginInvoke(Action(fn))
+            return None
+        box = []
+        form.Invoke(Func[Object](lambda: box.append(fn())))
+        return box[0] if box else None
+
+    def _ensure(self):
+        if self.player is not None:
+            return
+        mpv = load_mpv()
+        if mpv is None:
+            raise RuntimeError('libmpv bulunamadı (bin\\libmpv-2.dll).')
+
+        def make_panel():
+            from System.Drawing import Color
+            from System.Windows.Forms import Panel
+            panel = Panel()
+            panel.BackColor = Color.Black
+            panel.Visible = False
+            self.window.native.Controls.Add(panel)
+            panel.BringToFront()
+            return int(panel.Handle.ToInt64()), panel
+        handle, self.panel = self._ui(make_panel)
+        self.player = mpv.MPV(
+            wid=str(handle), hwdec='auto-safe', keep_open='yes', idle='yes', osc=False,
+            input_default_bindings=False, input_vo_keyboard=True, input_cursor=True,
+            cursor_autohide='no', sub_auto='no', log_handler=self._mpv_log, loglevel='warn')
+        # Video penceresi tiklamayi ve klavyeyi alir: arayuzun kisayollarina iletilir (bosluk, oklar...).
+        for key in FORWARD_KEYS:
+            self.player.register_key_binding(key, lambda state, _name, _char, key=key: self._key(state, key))
+        for name in ('time-pos', 'pause', 'duration', 'eof-reached', 'hwdec-current', 'paused-for-cache',
+                     'video-codec'):
+            self.player.observe_property(name, self._changed)
+
+    def _key(self, state, key):
+        if state and state[0] in ('d', 'p'):   # basildi (birakma degil)
+            self.emit('mpv_key', {'key': key})
+
+    def _mpv_log(self, level, prefix, text):
+        if level in ('error', 'fatal'):
+            self.log(f'[mpv] {prefix}: {text.strip()}')
+
+    def _changed(self, name, value):
+        if name == 'time-pos':
+            now = time.monotonic()
+            if now - self._last < self.TICK:
+                return
+            self._last = now
+        self.emit('mpv', self.state())
+
+    def state(self):
+        player = self.player
+        if player is None:
+            return {'ready': False}
+        try:
+            return {'ready': True, 'path': self.path, 'time': player.time_pos or 0.0,
+                    'duration': player.duration or 0.0, 'paused': bool(player.pause),
+                    'eof': bool(player.eof_reached), 'hwdec': player.hwdec_current or 'no',
+                    'codec': player.video_codec or '', 'buffering': bool(player.paused_for_cache)}
+        except Exception:  # mpv kapanirken
+            return {'ready': False}
+
+    # ------------------------------------------------------------------ komutlar
+    def open(self, path, start=0.0, play=False):
+        with self._lock:
+            self._ensure()
+            self.path = str(path)
+            self.player.pause = not play
+            self.player.sid = 'no'   # gomulu altyazi kendiliginden acilmaz; CC menusu secer
+            self.player.loadfile(self.path, start=f'{max(0.0, float(start)):.3f}', sid='no')
+        return self.state()
+
+    def command(self, name, value=None):
+        player = self.player
+        if player is None:
+            return {'ready': False}
+        if name == 'toggle':
+            player.pause = not player.pause
+        elif name == 'play':
+            player.pause = False
+        elif name == 'pause':
+            player.pause = True
+        elif name == 'seek':
+            player.seek(max(0.0, float(value)), reference='absolute', precision='exact')
+        elif name == 'audio':   # ffprobe GLOBAL index -> mpv ses parcasi
+            track = next((item for item in player.track_list or [] if item.get('type') == 'audio'
+                          and item.get('ff-index') == int(value)), None)
+            if track is not None:
+                player.aid = track['id']
+        elif name == 'volume':
+            player.volume = max(0.0, min(100.0, float(value) * 100))
+        elif name == 'mute':
+            player.mute = bool(value)
+        return self.state()
+
+    def place(self, x, y, width, height, visible=True):
+        """Paneli pencere istemci alanindaki fiziksel piksel dikdortgenine tasir."""
+        if self.panel is None:
+            return
+
+        def move():
+            self.panel.SetBounds(int(x), int(y), max(1, int(width)), max(1, int(height)))
+            self.panel.Visible = bool(visible) and width > 2 and height > 2
+            if self.panel.Visible:
+                self.panel.BringToFront()
+        self._ui(move, wait=False)
+
+    def subtitle(self, path):
+        """Gosterilen altyaziyi degistirir: `path` (dosya) ya da None (kapali). Oncekiler kaldirilir."""
+        player = self.player
+        if player is None:
+            return
+        for track in list(player.track_list or []):
+            if track.get('type') == 'sub' and track.get('external'):
+                try:
+                    player.command('sub-remove', track['id'])
+                except Exception:
+                    pass
+        if path:
+            player.command('sub-add', str(path), 'select')
+        else:
+            player.sid = 'no'
+
+    def show_text(self, text, ms=1500):
+        if self.player is not None:
+            self.player.show_text(str(text), ms)
+
+    def hide(self):
+        if self.panel is not None:
+            self._ui(lambda: setattr(self.panel, 'Visible', False), wait=False)
+        if self.player is not None:
+            self.player.pause = True
+
+    def close(self):
+        player, self.player = self.player, None
+        if player is not None:
+            try:
+                player.terminate()
+            except Exception:
+                pass

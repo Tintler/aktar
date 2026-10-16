@@ -29,6 +29,7 @@ from bridge_assistant import AssistantMixin, FilesMixin
 from bridge_document import DocumentMixin
 from bridge_library import LibraryMixin
 from bridge_mail import MailMixin
+from bridge_native import NativePlayerMixin
 from bridge_player import PlayerMixin
 from bridge_subscriptions import SubscriptionsMixin
 from bridge_subtitles import SubtitleToolsMixin
@@ -54,7 +55,7 @@ def _error(error):
 
 
 class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin, AssistantMixin, FilesMixin,
-             SubscriptionsMixin, VoiceMixin, WatchMixin, SubtitleToolsMixin):
+             SubscriptionsMixin, VoiceMixin, WatchMixin, SubtitleToolsMixin, NativePlayerMixin):
     def __init__(self, emit=None, dialogs=None):
         self._emit = emit or (lambda _event, _data: None)
         self._dialogs = dialogs          # desktop.Dialogs: open_file(), open_folder() ...
@@ -71,6 +72,7 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
         self._init_document()
         self._init_assistant()
         self._init_subtools()
+        self._init_native()
 
     # ------------------------------------------------------------------ yardimcilar
     def _log(self, message):
@@ -190,7 +192,7 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
                 'whisper_models': list(dict.fromkeys(WHISPER_MODELS + (str(value.get('whisper_model', '')),))),
                 'ocr_engines': [{'id': key, 'label': label} for key, label in OCR_ENGINES],
                 'cuda_markers': list(CUDA_MARKERS),
-                'video_encoders': self._video_encoders()}
+                'video_encoders': self._video_encoders(), 'mpv': self._native is not None}
 
     def save_settings(self, values):
         try:
@@ -275,6 +277,7 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
         self._stop_document_for_close()
         self._stop_player_for_close()
         self._stop_subtools_for_close()
+        self._stop_native_for_close()
         self._stop_assistant_for_close()
         self._stop_watch_for_close()
         if close:
@@ -288,5 +291,6 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
         self._stop_document_for_close()
         self._stop_player_for_close()
         self._stop_subtools_for_close()
+        self._stop_native_for_close()
         self._stop_assistant_for_close()
         self._stop_watch_for_close()

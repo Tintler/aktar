@@ -211,6 +211,35 @@ class ExportTests(unittest.TestCase):
             subtitle_export.render_whisper(result, 'karaoke')
         self.assertIn('hi', subtitle_export.render_whisper(result, 'srt'))
 
+    def test_mov_text_font_size_is_dropped(self):
+        text = '1\n00:00:01,000 --> 00:00:02,000\n<font size="54">>> HEY</font> <font color="#ff0" size=54>a</font>\n'
+        kind, payload = subtitle.parse_by_extension(text, '.srt')
+        out = subtitle_export.render_document(kind, payload, 'source')
+        self.assertIn('>> HEY <font color="#ff0">a</font>', out)
+        self.assertNotIn('size', out)
+
+    def test_native_subtitle_written_for_mpv(self):
+        import bridge_native
+
+        class Host(bridge_native.NativePlayerMixin, bridge_subtitles.SubtitleToolsMixin):
+            def _log(self, message):
+                pass
+        host = Host()
+        host._init_native()
+        host._native = mock.Mock()
+        result = {'segments': speech.regroup_words(WORDS), 'language': 'en'}
+        with tempfile.TemporaryDirectory() as folder, \
+                mock.patch.object(bridge_subtitles.qa, 'work_dir', return_value=Path(folder)), \
+                mock.patch.object(bridge_native.qa, 'work_dir', return_value=Path(folder)), \
+                mock.patch.object(host, '_whisper_for', return_value=result):
+            self.assertTrue(host.mpv_subtitle('v.mkv', 'whisper', {'offset': 1}))
+            target = host._native.subtitle.call_args.args[0]
+            self.assertEqual(target.suffix, '.ass')
+            self.assertIn('{\\kf', target.read_text(encoding='utf-8'))
+            self.assertIn('0:00:02.00', target.read_text(encoding='utf-8'))
+            host.mpv_subtitle('v.mkv', None)
+            host._native.subtitle.assert_called_with(None)
+
     def test_style_sanitised(self):
         style = subtitle_export.style_of({'color': 'red', 'size': 999, 'mode': 'x', 'font': 'A,B'})
         self.assertEqual((style['color'], style['size'], style['mode'], style['font']), ('#FFD400', 160, 'kf', 'A B'))

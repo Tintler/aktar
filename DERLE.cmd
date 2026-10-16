@@ -30,7 +30,7 @@ py -3 -m PyInstaller ^
     --noconfirm --clean --onefile --windowed ^
     --name Aktar ^
     %ICON_ARG% ^
-    --add-data "bin;bin" ^
+    --add-data "bin\ffmpeg.exe;bin" --add-data "bin\ffprobe.exe;bin" ^
     --add-data "assets;assets" ^
     --add-data "translation_prompt.txt;." ^
     --add-data "web\dist;web\dist" ^
@@ -42,6 +42,15 @@ py -3 -m PyInstaller ^
 if errorlevel 1 (
     echo HATA: Derleme basarisiz.
     exit /b 1
+)
+
+rem Gomulu oynatici (libmpv, ~120 MB) .exe'ye gomulmez: her acilista acilmasin diye yanina konur.
+if exist "bin\libmpv-2.dll" (
+    if not exist "dist\bin" mkdir "dist\bin"
+    copy /y "bin\libmpv-2.dll" "dist\bin\" >nul
+    echo libmpv-2.dll dist\bin\ icine kopyalandi: Aktar.exe ile birlikte bin\ klasorunu da tasiyin.
+) else (
+    echo UYARI: bin\libmpv-2.dll yok; oynatici WebView ile calisir ^(bkz. bin\README.txt^).
 )
 
 echo.

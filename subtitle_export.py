@@ -89,6 +89,20 @@ def _ass_text(text):
     return str(text).replace('{', '(').replace('}', ')').replace('\\', '/')
 
 
+_FONT_SIZE = re.compile(r'(<font\b[^>]*?)\s+size\s*=\s*"?[^"\s>]*"?', re.I)
+_EMPTY_FONT = re.compile(r'<font\s*>(.*?)</font>', re.I | re.S)
+
+
+def drop_font_size(text):
+    """SRT/VTT'deki <font size> etiketlerini atar (renk kalir). MP4 mov_text'ten gelen altyazilar
+    piksel boyutu tasir; libass (mpv, goruntuye yakma) bunu kendi kucuk tuvaline gore buyutur."""
+    text = _FONT_SIZE.sub(r'\1', text)
+    previous = None
+    while previous != text:
+        previous, text = text, _EMPTY_FONT.sub(r'\1', text)
+    return text
+
+
 # --- altyazi belgesi ---------------------------------------------------------
 def segments_document(segments):
     """Whisper segmentleri -> ('srt', [Cue]) (satirlar 42 karakterde bolunur)."""
@@ -116,7 +130,8 @@ def render_document(kind, payload, fmt='source', timing=None, length=None, style
     if fmt == 'source' or fmt == kind or (fmt == 'ass' and kind == 'ssa'):
         if not subtitle.translatable(cues):
             raise ValueError('Seçilen aralıkta altyazı satırı yok.')
-        return subtitle.render_by_kind(kind, payload, cues)
+        text = subtitle.render_by_kind(kind, payload, cues)
+        return drop_font_size(text) if kind in ('srt', 'vtt') else text
     items = qa.transcript_from_cues(cues, keep_lines=True)
     if not items:
         raise ValueError('Seçilen aralıkta altyazı satırı yok.')

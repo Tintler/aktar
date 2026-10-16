@@ -6,7 +6,8 @@
   import Icon from '../lib/Icon.svelte';
   import { app, act, toast } from '../lib/state.svelte.js';
   import { call, on } from '../lib/api.js';
-  import { openMenu } from '../lib/menu.svelte.js';
+  import { openMenu, menu } from '../lib/menu.svelte.js';
+  import { pending as dialog } from '../lib/confirm.svelte.js';
   import { StreamFeed, mseSupported } from '../lib/streamfeed.js';
   import NotesPanel from '../components/NotesPanel.svelte';
   import SyncPanel from '../components/SyncPanel.svelte';
@@ -43,9 +44,55 @@
 
   let transcode = false;             // kopyalanan goruntu cozulemedi: H.264'e yeniden kodlanir
   let software = false;              // GPU kodlamasi basarisiz: islemci (x264) kullanilir (F120)
-  let encoder = '';                  // akisin GPU kodlayicisi ('' islemci)
+  let encoder = $state('');          // akisin GPU kodlayicisi ('' islemci)
   let encoderLabel = $state('');
   let codec = $state('');            // kaynak goruntu kodu (rozet)
+
+  // --- gomulu mpv (F122) ---------------------------------------------------------
+  // engine 'mpv': video WebView'de degil, pencereye gomulu mpv'de oynar. Arayuz video alaninin
+  // dikdortgenini bildirir; mpv durumu 'mpv' olayiyla gelir. Videonun ustune HTML cizilemediginden
+  // menu ya da pencere acikken video gizlenir.
+  const native = $derived(p?.engine === 'mpv');
+  let hwdec = $state('');
+  let surface = $state();
+  let lastRect = '';
+  let rafId = 0;
+  const covered = $derived(!!menu.current || exporting || !!dialog.current || !!app.review);
+  function placeLoop() {
+    rafId = requestAnimationFrame(placeLoop);
+    if (!native || !surface) return;
+    const r = surface.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const visible = !covered && app.view === 'player' && r.width > 2 && r.height > 2;
+    const key = [r.left, r.top, r.width, r.height, dpr, visible].map((v) => (typeof v === 'number' ? Math.round(v * 100) : v)).join(',');
+    if (key === lastRect) return;
+    lastRect = key;
+    call('mpv_place', r.left * dpr, r.top * dpr, r.width * dpr, r.height * dpr, visible);
+  }
+  rafId = requestAnimationFrame(placeLoop);
+  const offMpv = on('mpv', (s) => {
+    if (!native || !s.ready || s.path !== p?.path) return;
+    if (!dragging) time = s.time;
+    playing = !s.paused;
+    loading = s.buffering;
+    hwdec = s.hwdec;
+    if (previewEnd !== null && time >= previewEnd) {
+      previewEnd = null;
+      call('mpv_command', 'pause');
+    }
+  });
+  const offKeys = on('mpv_key', ({ key }) => {
+    if (!native || app.view !== 'player') return;
+    const actions = {
+      MBTN_LEFT: toggle, MBTN_LEFT_DBL: toggleFullscreen, SPACE: toggle, f: toggleFullscreen, n: noteHere,
+      LEFT: () => seekTo(time - STEP), RIGHT: () => seekTo(time + STEP),
+      g: () => ccKey && shiftSubtitle(-0.1), h: () => ccKey && shiftSubtitle(0.1),
+      G: () => ccKey && shiftSubtitle(-1), H: () => ccKey && shiftSubtitle(1),
+      i: () => markClip('start'), o: () => markClip('end'),
+      ESC: () => document.fullscreenElement && document.exitFullscreen(),
+    };
+    actions[key]?.();
+  });
 
   // Takilma tanisi (F121): oynatma beklemeye gecince onde ne kadar veri oldugu Konsol'a yazilir.
   // Onde veri varken takiliyorsa cozucu yetismiyor; yoksa veri gec geliyor.
@@ -78,6 +125,19 @@
   const hevcType = (c) => document.createElement('video').canPlayType(`video/mp4; codecs="${c}"`) !== '' || mseSupported(`video/mp4; codecs="${c}"`);
   const codecs = [['hevc', 'hvc1.1.6.L120.B0'], ['hevc10', 'hvc1.2.4.L120.B0']].filter(([, c]) => hevcType(c)).map(([name]) => name);
   async function load(audioIndex, at, play, force = false) {
+    if (native) {
+      mode = 'native';
+      error = '';
+      if (audioIndex !== null && audioIndex !== undefined && audio !== null && opened === p.path && audioIndex !== audio) {
+        audio = audioIndex;
+        await act('mpv_command', 'audio', audioIndex);
+        return;
+      }
+      audio = audioIndex;
+      const state = await act('mpv_open', p.path, at, play);
+      if (state) { time = at; codec = (state.codec || '').split(' ')[0].toLowerCase(); }
+      return;
+    }
     const result = await act('player_source', audioIndex, at, force || transcode, transcode, codecs, software);
     if (!result || !videoEl) return;
     encoder = result.encoder ?? '';
@@ -124,7 +184,7 @@
   // Atif / arama sonucu: o ana git.
   $effect(() => {
     const seek = app.playerSeek;
-    if (!seek || !videoEl || !src || p?.path !== opened) return;
+    if (!seek || p?.path !== opened || (!native && (!videoEl || !src))) return;
     app.playerSeek = null;
     seekTo(seek.time, seek.play);
   });
@@ -143,6 +203,12 @@
   function seekTo(target, play = null) {
     target = Math.max(0, Math.min(target, duration || target));
     const resume = play ?? playing;
+    if (native) {
+      time = target;
+      call('mpv_command', 'seek', target);
+      if (play !== null) call('mpv_command', play ? 'play' : 'pause');
+      return;
+    }
     if (mode === 'direct' || (mode === 'mse' && feed?.has(target))) {
       videoEl.currentTime = target;              // dosyada ya da indirilmis kisimda
       if (resume) videoEl.play().catch(() => {});
@@ -153,13 +219,14 @@
   }
 
   function toggle() {
+    if (native) return call('mpv_command', 'toggle');
     if (!videoEl) return;
     if (videoEl.paused) videoEl.play().catch(() => {});
     else videoEl.pause();
   }
 
   function keydown(event) {
-    if (app.view !== 'player' || event.target.closest('input, textarea, select') || !videoEl) return;
+    if (app.view !== 'player' || event.target.closest('input, textarea, select') || (!videoEl && !native)) return;
     if (event.key === ' ') { event.preventDefault(); toggle(); }
     else if (event.key === 'ArrowLeft') { event.preventDefault(); seekTo(time - STEP); }
     else if (event.key === 'ArrowRight') { event.preventDefault(); seekTo(time + STEP); }
@@ -194,6 +261,7 @@
   });
 
   function flash(text) {
+    if (native) return call('mpv_osd', text);   // HTML videonun ustunde gorunmez
     osd = text;
     clearTimeout(osdTimer);
     osdTimer = setTimeout(() => (osd = ''), 1500);
@@ -231,7 +299,8 @@
   });
 
   function noteHere() {
-    videoEl?.pause();
+    if (native) call('mpv_command', 'pause');
+    else videoEl?.pause();
     if (document.fullscreenElement) document.exitFullscreen();
     startNote(Math.round(time * 10) / 10);
   }
@@ -347,6 +416,15 @@
     cueStarts = result.map((c) => c.start);
   }
 
+  // mpv: secili altyazi (zamanlama duzeltmesi ve karaoke vurgusuyla) mpv'ye verilir; kisa beklemeyle.
+  let subTimer;
+  $effect(() => {
+    if (!native || !p?.path) return;
+    const args = [p.path, ccKey, $state.snapshot(timing), wordHighlight];
+    clearTimeout(subTimer);
+    subTimer = setTimeout(() => act('mpv_subtitle', ...args), ccKey ? 250 : 0);
+  });
+
   const offWhisper = on('whisper_ready', ({ path }) => {
     if (path === p?.path) selectSubtitle('whisper');
   });
@@ -403,10 +481,16 @@
   }
 
   $effect(() => {
-    if (videoEl) { videoEl.volume = volume; videoEl.muted = muted; }
+    if (native) { call('mpv_command', 'volume', volume); call('mpv_command', 'mute', muted); }
+    else if (videoEl) { videoEl.volume = volume; videoEl.muted = muted; }
   });
 
   onDestroy(() => {
+    cancelAnimationFrame(rafId);
+    clearTimeout(subTimer);
+    offMpv();
+    offKeys();
+    if (native) call('mpv_hide');
     feed?.stop();
     if (p?.path) app.playerPositions[p.path] = time;
     offWhisper();
@@ -426,12 +510,12 @@
     </div>
     <div class="page-body body">
       <div class="player card" class:full={fullscreen} bind:this={shell}>
-        <div class="surface" role="presentation" onclick={toggle} ondblclick={toggleFullscreen}>
+        <div class="surface" role="presentation" bind:this={surface} onclick={toggle} ondblclick={toggleFullscreen}>
           <!-- svelte-ignore a11y_media_has_caption -->
-          <video bind:this={videoEl} preload="auto" onloadedmetadata={metadata} ontimeupdate={timeupdate}
+          <video class:hidden={native} bind:this={videoEl} preload="auto" onloadedmetadata={metadata} ontimeupdate={timeupdate}
             onplay={() => (playing = true)} onpause={() => (playing = false)} onwaiting={stalled}
             onplaying={resumed} oncanplay={() => (loading = false)} onerror={mediaError}></video>
-          {#if subtitle.length}
+          {#if subtitle.length && !native}
             <div class="subtitle">
               {#each subtitle as lines, c}
                 {#each lines as tokens, l}{#if c || l}<br />{/if}{#each tokens as token, t}{t ? ' ' : ''}<span class:sung={token.sung}>{token.text}</span>{/each}{/each}
@@ -439,7 +523,8 @@
             </div>
           {/if}
           {#if osd}<div class="osd mono">{osd}</div>{/if}
-          {#if loading && !error}<div class="spinner"><Icon name="loader" size={34} spin /></div>{/if}
+          {#if native && covered}<div class="covered">Video, açık menü ya da pencere kapanınca görünür</div>{/if}
+          {#if loading && !error && !native}<div class="spinner"><Icon name="loader" size={34} spin /></div>{/if}
           {#if error}<div class="error">{error}</div>{/if}
         </div>
         <div class="controls">
@@ -472,7 +557,10 @@
             <span class="mono time">{fmt(time)} / {fmt(duration)}</span>
             {#if chapterAt(time)}<span class="chapter ellipsis">{chapterAt(time)} ›</span>{/if}
             <span class="grow"></span>
-            {#if mode === 'direct'}<span class="badge" title={`Video dönüştürülmeden oynatılıyor; görüntüyü WebView kendisi çözüyor${codec === 'hevc'
+            {#if native}<span class="badge" class:ok={hwdec && hwdec !== 'no'} title={hwdec && hwdec !== 'no'
+              ? `Gömülü mpv oynatıcı; görüntü ekran kartında çözülüyor (${hwdec}).`
+              : 'Gömülü mpv oynatıcı; görüntü işlemcide çözülüyor (donanım çözücüsü kullanılamadı).'}>mpv · {hwdec && hwdec !== 'no' ? 'donanım' : 'işlemci'}{codec ? ' · ' + codec.toUpperCase() : ''}</span>
+            {:else if mode === 'direct'}<span class="badge" title={`Video dönüştürülmeden oynatılıyor; görüntüyü WebView kendisi çözüyor${codec === 'hevc'
               ? " (Windows'un HEVC çözücüsüyle). Takılıyorsa Ayarlar → Video oynatma → \"HEVC'yi WebView ile doğrudan oynat\"ı kapatın" : ''}.`}>doğrudan{codec ? ' · ' + codec.toUpperCase() : ''}</span>
             {:else}<span class="badge" title={encoderLabel
               ? `Video tarayıcının çözemediği bir biçimde; ffmpeg ile anında H.264'e dönüştürülüyor (${encoderLabel}). Ayarlar → Video oynatma'dan değiştirilebilir.`
@@ -550,6 +638,8 @@
   .pin { position: absolute; top: 2px; width: 4px; height: 14px; margin-left: -2px; border-radius: 2px; pointer-events: none; box-shadow: 0 0 0 1px var(--panel); }
   .notes-wrap { flex: none; height: 34%; min-height: 150px; display: flex; flex-direction: column; }
   .notes-wrap > :global(.notes) { flex: 1; }
+  video.hidden { display: none; }
+  .covered { position: absolute; color: rgba(255, 255, 255, .6); font-size: 13px; pointer-events: none; }
   .notes-wrap.tools { height: auto; max-height: 46%; min-height: 0; }
   .notes-wrap.tools > :global(.card) { flex: 1; }
   .subtitle .sung { color: #ffd400; }

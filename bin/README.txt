@@ -18,3 +18,10 @@ Linux: ffmpeg/ffprobe'u sistemden kurmaniz yeterlidir (sudo apt install ffmpeg);
 bu klasordeki .exe dosyalari Linux'ta yok sayilir. Tasinabilir Linux ikilileri
 kullanmak isterseniz (or. https://johnvansickle.com/ffmpeg/) calistirilabilir
 olarak bin/ffmpeg ve bin/ffprobe adlariyla koyun; ./derle.sh bunlari pakete gomer.
+
+Gomulu oynatici (Windows, istege bagli): libmpv-2.dll
+    https://github.com/shinchiro/mpv-winbuild-cmake/releases
+    mpv-dev-x86_64-<tarih>-git-<surum>.7z arsivindeki libmpv-2.dll dosyasini bu klasore
+    koyun (py -3 -m pip install python-mpv de gerekir). DERLE.cmd onu .exe'ye gommez,
+    dist\bin\ icine kopyalar: Aktar.exe'nin yanindaki bin\ klasorunde durmalidir.
+    Yoksa oynatici WebView ile calisir.

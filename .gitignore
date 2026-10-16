@@ -10,6 +10,7 @@ bin/ffmpeg.exe
 bin/ffprobe.exe
 bin/ffmpeg
 bin/ffprobe
+bin/libmpv-2.dll
 work_files/
 config.json
 offscreen*.png
