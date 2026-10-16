@@ -211,6 +211,19 @@
                 <option value="web">WebView</option>
               </select>
             </div>
+            {#if cfg.player_engine === 'mpv'}
+              <div class="fr">
+                <div class="l">mpv görüntü çıkışı<small>Ses gelip görüntü siyah kalıyorsa diğer seçenekleri deneyin. Seçim bir sonraki videoda uygulanır; Konsol'daki "[mpv] Çıkış:" satırı kullanılan çıkışı gösterir.</small></div>
+                <select class="field w" bind:value={cfg.mpv_output}>
+                  <option value="safe">Uyumlu (Direct3D 11)</option>
+                  <option value="next">gpu-next (Direct3D 11, yeni)</option>
+                </select>
+              </div>
+              <div class="fr">
+                <div class="l">mpv donanım çözme<small>Kapalıyken video işlemcide çözülür (daha çok işlemci kullanır ama ekran kartı sürücüsü sorunlarından etkilenmez).</small></div>
+                <Toggle bind:checked={cfg.mpv_hwdec} />
+              </div>
+            {/if}
           {/if}
           <div class="fr">
             <div class="l">Dönüştürmede donanım hızlandırma<small>Oynatıcı bir videoyu çözemezse (örn. HEVC/x265) anında H.264'e dönüştürür. GPU kodlayıcısı işlemciyi rahatlatır ve takılmayı azaltır; çalışmazsa oynatıcı kendiliğinden işlemciye geçer.

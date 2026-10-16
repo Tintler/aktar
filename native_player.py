@@ -24,6 +24,13 @@ from app_core import APP_DIR, ROOT, WINDOWS
 
 DLL_NAME = 'libmpv-2.dll'
 # mpv tuslari -> arayuzde ayni kisayol (Player.svelte keydown ile ayni anlam)
+# Goruntu cikisi (Ayarlar 'mpv_output'). Gomulu pencerede D3D11 "flip" sunumu (mpv varsayilani)
+# WebView2'nin DirectComposition'i altinda gorunmez kalabiliyor (ses var, goruntu siyah): 'safe'
+# eski blit sunumunu kullanir.
+OUTPUTS = {
+    'safe': {'vo': 'gpu', 'gpu_api': 'd3d11', 'd3d11_flip': 'no'},
+    'next': {'vo': 'gpu-next', 'gpu_api': 'd3d11'},
+}
 FORWARD_KEYS = ('MBTN_LEFT', 'MBTN_LEFT_DBL', 'SPACE', 'LEFT', 'RIGHT', 'f', 'n', 'g', 'h', 'G', 'H', 'i', 'o', 'ESC')
 _mpv_module = []
 
@@ -77,6 +84,8 @@ class NativePlayer:
         self.path = None
         self._last = 0.0
         self._lock = threading.Lock()
+        self._options = None      # mpv'nin acildigi (cikis, donanim cozme) ayari
+        self._reported = None     # tani satiri yazilan dosya
 
     # ------------------------------------------------------------------ UI is parcacigi
     def _ui(self, fn, wait=True):
@@ -89,7 +98,21 @@ class NativePlayer:
         form.Invoke(Func[Object](lambda: box.append(fn())))
         return box[0] if box else None
 
+    def _settings(self):
+        from app_core import load_config
+        try:
+            cfg = load_config()
+        except (OSError, ValueError):
+            cfg = {}
+        output = cfg.get('mpv_output', 'safe')
+        return (output if output in OUTPUTS else 'safe', 'auto-safe' if cfg.get('mpv_hwdec', True) else 'no')
+
     def _ensure(self):
+        options = self._settings()
+        if self.player is not None and options != self._options:
+            # Ayar degisti: mpv yeni secenekle yeniden acilir (panel kalir).
+            self.log(f'[mpv] Görüntü ayarı değişti ({options[0]}, donanım çözme: {options[1]}); oynatıcı yeniden başlatılıyor.')
+            self.close()
         if self.player is not None:
             return
         mpv = load_mpv()
@@ -105,9 +128,11 @@ class NativePlayer:
             self.window.native.Controls.Add(panel)
             panel.BringToFront()
             return int(panel.Handle.ToInt64()), panel
-        handle, self.panel = self._ui(make_panel)
+        if self.panel is None:
+            self._handle, self.panel = self._ui(make_panel)
+        output, hwdec = self._options = options
         self.player = mpv.MPV(
-            wid=str(handle), hwdec='auto-safe', keep_open='yes', idle='yes', osc=False,
+            wid=str(self._handle), hwdec=hwdec, keep_open='yes', idle='yes', osc=False, **OUTPUTS[output],
             input_default_bindings=False, input_vo_keyboard=True, input_cursor=True,
             cursor_autohide='no', sub_auto='no', log_handler=self._mpv_log, loglevel='warn')
         # Video penceresi tiklamayi ve klavyeyi alir: arayuzun kisayollarina iletilir (bosluk, oklar...).
@@ -116,6 +141,31 @@ class NativePlayer:
         for name in ('time-pos', 'pause', 'duration', 'eof-reached', 'hwdec-current', 'paused-for-cache',
                      'video-codec'):
             self.player.observe_property(name, self._changed)
+        self.player.observe_property('video-params', self._report)
+
+    def _report(self, _name, params):
+        """Ilk karede bir kez Konsol'a tani: cikis, cozucu, boyut ve panelin yeri (siyah ekran icin)."""
+        player = self.player
+        if not params or player is None or self._reported == self.path:
+            return
+        self._reported = self.path
+
+        def panel_info():
+            panel = self.panel
+            form = self.window.native
+            return (f'panel {panel.Left},{panel.Top} {panel.Width}x{panel.Height} '
+                    f'{"görünür" if panel.Visible else "gizli"}, sıra {form.Controls.GetChildIndex(panel)}/'
+                    f'{form.Controls.Count}')
+        try:
+            where = self._ui(panel_info)
+        except Exception as error:  # tani satiri oynatmayi bozmasin
+            where = 'panel okunamadı: ' + str(error)
+        try:
+            self.log(f'[mpv] Çıkış: {player.current_vo} ({self._options[0]}), çözücü: '
+                     f'{player.hwdec_current if player.hwdec_current not in (None, "no") else "işlemci"}, görüntü {params.get("w")}x{params.get("h")} '
+                     f'{params.get("pixelformat", "")}; {where}')
+        except Exception:
+            pass
 
     def _key(self, state, key):
         if state and state[0] in ('d', 'p'):   # basildi (birakma degil)
@@ -218,6 +268,7 @@ class NativePlayer:
 
     def close(self):
         player, self.player = self.player, None
+        self._reported = None
         if player is not None:
             try:
                 player.terminate()
