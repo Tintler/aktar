@@ -86,6 +86,9 @@ class WindowFrame:
         # Last normal (not maximised/minimised) rectangle in physical pixels. WinForms' RestoreBounds
         # comes back scaled wrongly on some DPI setups, so the frame keeps track itself.
         self._normal_rect = None
+        # Video tam ekrani (F126): pencere ekranin tamamini (gorev cubugu dahil) kaplar; cikista
+        # onceki durum ve dikdortgen geri konur. Bu surede buyutme sinirlamasi ve boyut kaydi durur.
+        self._fullscreen = None   # None ya da (buyutulmus muydu, [x, y, w, h])
         if SUPPORTED:
             self._user32 = ctypes.WinDLL('user32', use_last_error=True)
             self._user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
@@ -150,7 +153,7 @@ class WindowFrame:
     def _sync(self):
         """Keeps the maximised size right for the current screen and tells the interface the state."""
         # Closing hides the window first; the page is gone by then and cannot be told anything.
-        if not self._hwnd or not self._user32.IsWindowVisible(self._hwnd):
+        if not self._hwnd or not self._user32.IsWindowVisible(self._hwnd) or self._fullscreen is not None:
             return
         try:
             self._fit_maximized()
@@ -165,8 +168,52 @@ class WindowFrame:
             self._maximized = maximized
             self._emit('window', self.state())
 
+    def set_fullscreen(self, on):
+        """Video tam ekrani: pencere bulundugu ekranin tamamini kaplar (gorev cubugu dahil)."""
+        on = bool(on)
+        if on == (self._fullscreen is not None):
+            return
+
+        def apply():
+            from System.Drawing import Rectangle
+            from System.Windows.Forms import FormWindowState, Screen
+            form = self.window.native
+            if on:
+                maximized = form.WindowState == FormWindowState.Maximized
+                bounds = form.Bounds
+                rect = list(self._normal_rect) if maximized and self._normal_rect else \
+                    [bounds.X, bounds.Y, bounds.Width, bounds.Height]
+                self._fullscreen = (maximized, rect)
+                screen = Screen.FromHandle(form.Handle).Bounds
+                if maximized:
+                    form.WindowState = FormWindowState.Normal
+                form.Bounds = Rectangle(screen.X, screen.Y, screen.Width, screen.Height)
+            else:
+                maximized, rect = self._fullscreen
+                self._fullscreen = None
+                form.Bounds = Rectangle(*rect)
+                if maximized:
+                    self._fit_maximized_now(form)
+                    form.WindowState = FormWindowState.Maximized
+        self._ui(apply)
+        if not on:
+            self._sync()
+
+    def _fit_maximized_now(self, form):
+        from System.Drawing import Rectangle
+        from System.Windows.Forms import Screen
+        screen = Screen.FromHandle(form.Handle)
+        area, bounds = screen.WorkingArea, screen.Bounds
+        form.MaximizedBounds = Rectangle(area.X - bounds.X, area.Y - bounds.Y, area.Width, area.Height)
+
     def geometry(self):
         """Size and place to remember (logical pixels); the restored size even when maximised."""
+        if self._fullscreen is not None:   # tam ekranda kapanirsa onceki boyut hatirlansin
+            maximized, rect = self._fullscreen
+            scale = float(self._ui(lambda: getattr(self.window.native, '_scale', 1.0)) or 1.0)
+            return {'x': round(rect[0] / scale), 'y': round(rect[1] / scale), 'width': round(rect[2] / scale),
+                    'height': round(rect[3] / scale), 'maximized': maximized, 'bounds': rect}
+
         def read():
             from System.Windows.Forms import FormWindowState
             form = self.window.native

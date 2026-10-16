@@ -245,6 +245,16 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
     def window_state(self):
         return self._frame.state() if self._frame else {'custom': False, 'maximized': False}
 
+    def window_fullscreen(self, on):
+        """Video tam ekrani (F126): HTML ogesi tam ekrana gecince pencere de ekrani kaplar."""
+        if self._frame is not None:
+            self._frame.set_fullscreen(bool(on))
+        else:
+            window = getattr(self._dialogs, 'window', None)
+            if window is not None and bool(getattr(window.native, 'is_fullscreen', False)) != bool(on):
+                window.toggle_fullscreen()
+        return True
+
     def window_command(self, name, edge=None):
         """Kendi baslik cubugunun dugmeleri, pencereyi tasima ve boyutlandirma."""
         if self._frame is None:

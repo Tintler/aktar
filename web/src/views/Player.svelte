@@ -487,6 +487,8 @@
   });
 
   onDestroy(() => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    call('window_fullscreen', false);
     cancelAnimationFrame(rafId);
     clearTimeout(subTimer);
     offMpv();
@@ -501,7 +503,11 @@
 </script>
 
 <svelte:window onkeydown={keydown} />
-<svelte:document onfullscreenchange={() => (fullscreen = !!document.fullscreenElement)} />
+<svelte:document onfullscreenchange={() => {
+  // Ogenin tam ekrani yalnizca WebView'i doldurur; pencere de ekrani kaplasin (F126).
+  fullscreen = !!document.fullscreenElement;
+  call('window_fullscreen', fullscreen);
+}} />
 
 <section class="page">
   {#if p}
