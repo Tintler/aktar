@@ -26,6 +26,7 @@
   onDestroy(offEncoders);
 
   const locked = (key) => info?.locked.includes(key);
+  const bookLocked = (key) => info?.book_locked?.includes(key);
   const names = $derived(app.models.names ?? []);
   const chatNames = $derived(names.filter((n) => !n.toLowerCase().includes('embed')));
   // Secili deger listede yoksa (LM Studio kapali) yine de gorunsun.
@@ -81,6 +82,7 @@
 
   function reset() {
     for (const key of Object.keys(info.defaults)) if (!locked(key)) cfg[key] = info.defaults[key];
+    for (const key of Object.keys(info.book_defaults ?? {})) if (!bookLocked(key)) cfg.book[key] = info.book_defaults[key];
   }
 
   async function browse(key, folder) {
@@ -91,6 +93,15 @@
   // Tema onizlemesi: paletin birkac rengiyle kucuk bir pencere cizimi.
   const choices = $derived([{ id: 'system', name: 'Sistem', system: true }, ...app.themes]);
   const preview = (theme) => (theme.system ? resolveTheme('system', app.themes) : theme)?.palette ?? {};
+
+  // Kitap Cevir'e ozel (config.json "book" bolumu; Cevirgec ayarlari).
+  const bookNumbers = [
+    ['chunk_chars', 'Parça boyutu (karakter)', 'Bölümler bu uzunlukta parçalara bölünerek çevrilir.', 1, 1000000],
+    ['max_tokens', 'Çıktı token payı', 'Bir çeviri yanıtı için ayrılan en fazla token.', 1, 262144],
+    ['notes_max_tokens', 'Not çıktı tokenı', 'Bölüm notları yanıtı için en fazla token.', 1, 32768],
+    ['fallback_context_length', 'Yedek context', 'LM Studio context bilgisini veremezse kullanılır.', 1, 1048576],
+    ['context_safety_tokens', 'Güvenlik payı', 'Context hesabında boş bırakılan token.', 1, 65536],
+  ];
 
   const advanced = [
     ['analysis_chunk_chars', 'Analiz parça karakteri', 'Ön analizde modele tek seferde giden en fazla altyazı metni.', 1, 200000, 1],
@@ -200,6 +211,40 @@
             <input class="field n" type="number" min="1" max="200" bind:value={cfg.batch_cues} disabled={locked('batch_cues')} />
           </div>
         </section>
+
+        {#if cfg.book}
+        <section>
+          <h2>Kitap çevirisi</h2>
+          <p class="hint-line">Sunucu, model, temperature, zaman aşımı, otomatik tekrar ve katı sözlük yukarıdaki ortak ayarlardan gelir.</p>
+          {#if info.book_locked?.length}<div class="warn"><Icon name="alert" size={16} />Kitap çevirisi sürerken parça ve token ayarları değiştirilemez.</div>{/if}
+          <div class="fr">
+            <div class="l">Bitiş işareti denetimi<small>Uzun yanıtlarda modelin bitiş işaretini üretmesi gerekir; eksik sonuçlar kaydedilmez.</small></div>
+            <Toggle bind:checked={cfg.book.completion_marker_enabled} />
+          </div>
+          <div class="fr">
+            <div class="l">İşaretsiz sınır (karakter)<small>Bu uzunluk ve altındaki parçalarda bitiş işareti aranmaz.</small></div>
+            <input class="field n" type="number" min="0" max="1000000" bind:value={cfg.book.completion_marker_exempt_chars} disabled={!cfg.book.completion_marker_enabled} />
+          </div>
+          {#each bookNumbers as [key, title, hint, min, max]}
+            <div class="fr">
+              <div class="l">{title}<small>{hint}</small></div>
+              <input class="field n" type="number" {min} {max} bind:value={cfg.book[key]} disabled={bookLocked(key)} />
+            </div>
+          {/each}
+          <div class="fr">
+            <div class="l">Token tahmini<small>İstek göndermeden önce context sınırı tahmin edilerek denetlenir.</small></div>
+            <Toggle bind:checked={cfg.book.token_estimation_enabled} disabled={bookLocked('token_estimation_enabled')} />
+          </div>
+          <div class="fr">
+            <div class="l">EPUBCheck ile doğrula<small>EPUB oluşturulduktan sonra harici EPUBCheck çalıştırılır. JAR için Java gerekir.</small></div>
+            <Toggle bind:checked={cfg.book.epubcheck_enabled} />
+          </div>
+          <div class="fr">
+            <div class="l">EPUBCheck yolu<small>Boşsa PATH içindeki epubcheck kullanılır; .jar veya .exe olabilir.</small></div>
+            <input class="field w" bind:value={cfg.book.epubcheck_path} placeholder="epubcheck" />
+          </div>
+        </section>
+        {/if}
 
         <section>
           <h2>Video oynatma</h2>
@@ -361,6 +406,7 @@
   .field.n { width: 160px; }
   .pick { display: flex; align-items: center; gap: 6px; }
   .pick .field.w { width: 296px; }
+  .hint-line { color: var(--dim); font-size: 12px; margin: 2px 0 4px; }
   .warn { display: flex; gap: 8px; align-items: center; color: var(--warning); font-size: 12px; background: color-mix(in srgb, var(--warning) 10%, transparent); padding: 8px 12px; border-radius: 8px; margin: 6px 0; }
   .err { color: var(--danger); }
   .small { font-size: 12px; }

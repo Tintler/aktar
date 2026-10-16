@@ -4,11 +4,13 @@
   import TitleBar from './components/TitleBar.svelte';
   import ConfirmHost from './components/ConfirmHost.svelte';
   import ReviewModal from './components/ReviewModal.svelte';
+  import BookReviewModal from './components/BookReviewModal.svelte';
   import Collections from './components/Collections.svelte';
   import ChatPanel from './components/ChatPanel.svelte';
   import MenuHost from './components/MenuHost.svelte';
   import Library from './views/Library.svelte';
   import Translate from './views/Translate.svelte';
+  import Books from './views/Books.svelte';
   import Settings from './views/Settings.svelte';
   import Player from './views/Player.svelte';
   import VideoChat from './components/VideoChat.svelte';
@@ -30,6 +32,7 @@
     ['library', 'Kütüphane', 'library'],
     ['files', 'Dosya incele', 'fileSearch'],
     ['translate', 'Altyazı Çevir', 'languages'],
+    ['books', 'Kitap Çevir', 'book'],
     ['subscriptions', 'Abonelikler', 'creditCard'],
     ['console', 'Konsol', 'terminal'],
   ];
@@ -78,8 +81,14 @@
     dragging = true;
   }
   const dropHint = $derived(app.view === 'translate' ? 'Videoyu açmak için bırakın'
+    : app.view === 'books' ? 'EPUB ya da çeviri klasörünü açmak için bırakın'
     : app.view === 'files' ? 'İncelemek için bırakın'
     : app.view === 'subscriptions' ? 'Logo olarak eklemek için bırakın' : 'Koleksiyona eklemek için bırakın');
+
+  async function submitBookReview(values) {
+    app.books.review = null;
+    await call('book_submit_review', values);
+  }
 
   async function submitReview(values) {
     app.review = null;
@@ -138,6 +147,7 @@
       {:else if app.view === 'console'}<Console />
       {:else if app.view === 'subscriptions'}<Subscriptions />
       {:else if app.view === 'translate'}<Translate />
+      {:else if app.view === 'books'}<Books />
       {:else if app.view === 'player'}<Player />
       {:else if app.view === 'document'}<Document />
       {:else}<Settings />{/if}
@@ -154,6 +164,7 @@
 {/if}
 
 {#if app.review}<ReviewModal data={app.review} onsubmit={submitReview} />{/if}
+{#if app.books.review}<BookReviewModal data={app.books.review} onsubmit={submitBookReview} />{/if}
 <ConfirmHost />
 
 <div class="toasts">

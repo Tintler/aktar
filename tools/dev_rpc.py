@@ -31,12 +31,14 @@ def main():
     args = parser.parse_args()
 
     import app_core
+    import book_core
     if args.allow_lan:
         app_core.validate_config = lambda cfg: None
+        book_core.validate_config = lambda cfg: None
     import bridge
     if args.app_dir:
         import library, qa, search_index, series, speech, themes  # noqa: E401
-        for module in (app_core, bridge, library, qa, search_index, speech, series, themes):
+        for module in (app_core, book_core, bridge, library, qa, search_index, speech, series, themes):
             if hasattr(module, 'APP_DIR'):
                 module.APP_DIR = args.app_dir.resolve()
 

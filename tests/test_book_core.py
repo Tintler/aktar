@@ -425,12 +425,13 @@ class CoreTests(unittest.TestCase):
             path = Path(temp) / 'config.json'
             path.write_text(json.dumps({
                 'base_url': 'http://127.0.0.1:5000/v1', 'model': 'shared-model', 'temperature': 0.4,
-                'batch_cues': 8, 'analysis_chunk_chars': 999,
+                'glossary_strict': True, 'batch_cues': 8, 'analysis_chunk_chars': 999,
                 'book': {'chunk_chars': 4000, 'model': 'book-model'},
             }), encoding='utf-8')
             cfg = book_core.load_config(path)
         self.assertEqual(cfg['base_url'], 'http://127.0.0.1:5000/v1')
         self.assertEqual(cfg['temperature'], 0.4)
+        self.assertTrue(cfg['glossary_strict'])
         self.assertEqual(cfg['chunk_chars'], 4000)
         self.assertEqual(cfg['model'], 'book-model')
         self.assertNotIn('batch_cues', cfg)

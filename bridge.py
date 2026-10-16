@@ -8,7 +8,7 @@ Is mantigi app_core / library / qa modullerinde kalir; burada yalnizca arayuz ak
 Bolumler: bu dosyada genel (ayarlar, tema, pencere), bridge_translate.py'de Altyazi Cevir,
 bridge_library.py'de Kutuphane (bridge_mail.py'de e-postadan iceri aktarma), bridge_player.py'de oynatici ve videoya soru sor,
 bridge_document.py'de belge goruntuleyici, bridge_assistant.py'de genel sohbet ve tekil dosyalar,
-bridge_subscriptions.py'de abonelik takibi, bridge_voice.py'de sesle soru sorma, bridge_watch.py'de
+bridge_subscriptions.py'de abonelik takibi, bridge_book.py'de Kitap Cevir, bridge_voice.py'de sesle soru sorma, bridge_watch.py'de
 klasor izleme, bridge_subtitles.py'de altyazi araclari (zamanlama, disa aktarma, OCR) ve klip.
 """
 from __future__ import annotations
@@ -26,6 +26,7 @@ import media_server
 import themes
 from app_core import APP_DIR, DEFAULT_CONFIG, WINDOWS, Client, load_config, read, save_json, validate_config
 from bridge_assistant import AssistantMixin, FilesMixin
+from bridge_book import BookMixin
 from bridge_document import DocumentMixin
 from bridge_library import LibraryMixin
 from bridge_mail import MailMixin
@@ -54,7 +55,7 @@ def _error(error):
     return {'error': str(error)}
 
 
-class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin, AssistantMixin, FilesMixin,
+class Bridge(TranslateMixin, BookMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin, AssistantMixin, FilesMixin,
              SubscriptionsMixin, VoiceMixin, WatchMixin, SubtitleToolsMixin, NativePlayerMixin):
     def __init__(self, emit=None, dialogs=None):
         self._emit = emit or (lambda _event, _data: None)
@@ -66,6 +67,7 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
         self._models = {'state': 'probing', 'names': [], 'message': '', 'model': ''}
         self._startup_paths = []
         self._init_translate()
+        self._init_book()
         self._init_library()
         self._init_mail()
         self._init_player()
@@ -101,7 +103,8 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
         paths, self._startup_paths = self._startup_paths, []
         self._start_watch()  # F114: izlenen koleksiyonlar arka planda taranir
         return {'prefs': self.ui_prefs(), 'themes': themes.list_themes(),
-                'translate': self.translate_state(), 'library': self.library_open(), 'models': self._models,
+                'translate': self.translate_state(), 'books': self.book_snapshot(),
+                'library': self.library_open(), 'models': self._models,
                 'platform': 'windows' if WINDOWS else sys.platform, 'open': paths}
 
     def ui_prefs(self):
@@ -187,8 +190,10 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
             value.update(json.loads(read(APP_DIR / 'config.json')))
         except (OSError, ValueError):
             pass  # gecersiz config.json bu sayfadan duzeltilebilsin
-        return {'config': value, 'defaults': dict(DEFAULT_CONFIG),
-                'locked': list(LOCKED_WHILE_RUNNING) if self._running() else [],
+        value['book'], book_defaults = self._book_settings(value.get('book'))
+        return {'config': value, 'defaults': dict(DEFAULT_CONFIG), 'book_defaults': book_defaults,
+                'book_locked': self._book_locked(),
+                'locked': list(LOCKED_WHILE_RUNNING) if self._running() or self._book_running() else [],
                 'whisper_models': list(dict.fromkeys(WHISPER_MODELS + (str(value.get('whisper_model', '')),))),
                 'ocr_engines': [{'id': key, 'label': label} for key, label in OCR_ENGINES],
                 'cuda_markers': list(CUDA_MARKERS),
@@ -203,7 +208,7 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
                 pass
             current = dict(value)
             incoming = {key: item for key, item in dict(values or {}).items() if key in DEFAULT_CONFIG}
-            if self._running():
+            if self._running() or self._book_running():
                 for key in LOCKED_WHILE_RUNNING:
                     incoming.pop(key, None)
             value.update(incoming)
@@ -217,6 +222,7 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
                 elif isinstance(default, str):
                     value[key] = str(value.get(key, '')).strip()
             validate_config(value)
+            self._book_merge_settings(value, dict(values or {}).get('book'))
             save_json(APP_DIR / 'config.json', value)
         except (RuntimeError, ValueError, OSError) as error:
             return {'error': 'Ayarlar kaydedilemedi: ' + str(error)}
@@ -272,6 +278,7 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
     def request_close(self, close):
         """Pencere kapanirken cagrilir. Hemen kapanabiliyorsa True."""
         reasons = (['Çeviri sürüyor.'] if self._running() else []) + (
+            ['Kitap çevirisi sürüyor.'] if self._book_running() else []) + (
             ['Toplu hazırlık sürüyor.'] if self._queue_running() else []) + (
             ['Altyazı/klip işi sürüyor.'] if self._tool_running() else [])
         if not reasons:
@@ -285,6 +292,7 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
         close = getattr(self, '_pending_close', None)
         self._pending_close = None
         self._stop_translation_for_close()
+        self._stop_book_for_close()
         self._stop_library_for_close()
         self._stop_document_for_close()
         self._stop_player_for_close()
@@ -299,6 +307,7 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
     def shutdown(self):
         """Pencere kapandi: arka plandaki isleri birak."""
         self._stop_translation_for_close()
+        self._stop_book_for_close()
         self._stop_library_for_close()
         self._stop_document_for_close()
         self._stop_player_for_close()

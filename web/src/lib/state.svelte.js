@@ -3,7 +3,7 @@ import { applyTheme } from './theme.js';
 import { confirm, notice } from './confirm.svelte.js';
 
 export const app = $state({
-  view: 'library',            // 'chat' | 'library' | 'files' | 'translate' | 'console' | 'settings' | 'player' | 'document'
+  view: 'library',            // 'chat' | 'library' | 'files' | 'translate' | 'books' | 'console' | 'settings' | 'player' | 'document'
   sideCollapsed: false,       // sol menu daraltildi (yalnizca simgeler)
   platform: 'windows',
   themeId: 'system',
@@ -17,6 +17,13 @@ export const app = $state({
   },
   // Altyazi Cevir sayfasinin gorunum durumu (sekme degisince korunur).
   translateView: { stream: null, analysis: false },
+  // Kitap Cevir (bridge_book): acik proje, bolumler, durum ve sayfa gorunumu (sekme degisince korunur).
+  books: {
+    book: { epub: '', folder: '', project: '', title: '', author: '', cover: null, chars: 0 },
+    chapters: [], analysis: '', log: [], review: null,
+    status: { runtime: 'idle', phase: 'Başlatılmadı', current: '', last_saved: '', progress: { done: 0, total: 0, percent: 0 } },
+    tab: 'preview', selected: null, preAnalysis: false,
+  },
   // Komut satirindan ya da baska sayfadan acilmak uzere bekleyen video (Translate acilinca alir).
   pendingVideo: null,
   library: { collections: [], slug: '', title: '', folders: [], rows: [], meta: '', scanning: false, queue: null, kinds: {} },
@@ -51,7 +58,7 @@ export function setThink(value) {
   savePref({ think: app.think });
 }
 
-const VIEWS = ['chat', 'library', 'files', 'translate', 'subscriptions', 'console'];
+const VIEWS = ['chat', 'library', 'files', 'translate', 'books', 'subscriptions', 'console'];
 
 export const toasts = $state([]);
 
@@ -119,6 +126,21 @@ export async function reloadThemes() {
   applyTheme(app.themeId, app.themes);
 }
 
+export function applyBookSnapshot(snapshot) {
+  if (!snapshot) return;
+  const b = app.books;
+  b.book = snapshot.book;
+  b.chapters = snapshot.chapters;
+  b.status = snapshot.status;
+  b.analysis = snapshot.analysis;
+}
+
+function bookLog(line) {
+  const lines = app.books.log;
+  lines.push(line);
+  if (lines.length > LOG_LIMIT) lines.splice(0, lines.length - LOG_LIMIT);
+}
+
 // Pencereye birakilan dosyalari acik sayfaya gore yonlendiren isleyiciler.
 const dropHandlers = {};
 export function onDrop(view, fn) {
@@ -148,6 +170,24 @@ export async function init() {
     }
     app.translateView.stream = 'whisper';
     toast('Altyazı oluşturuldu: ' + name + ' · Çevirmek için Çevir\'e basın.', 'ok');
+  });
+  // Kitap Cevir (bridge_book): gunluk hem sayfanin kendi sekmesine hem Konsol'a gider.
+  on('book_log', ({ line, last_saved }) => {
+    bookLog(line);
+    log(line);
+    app.books.status.last_saved = last_saved;
+  });
+  on('book_status', (status) => (app.books.status = status));
+  on('book_chapters', ({ chapters }) => (app.books.chapters = chapters));
+  on('book_analysis', ({ text }) => (app.books.analysis = text));
+  on('book_review', (data) => (app.books.review = data));
+  on('book_finished', ({ outcome, message, snapshot }) => {
+    applyBookSnapshot(snapshot);
+    app.books.review = null;
+    if (outcome === 'failed') {
+      notice('Kitap çevirisi durdu', message + '\nAyrıntılar Kitap Çevir sayfasının Günlük sekmesinde.');
+      app.books.tab = 'console';
+    } else toast(message, outcome === 'done' ? 'ok' : 'info');
   });
   on('library', (state) => setLibrary(state));
   on('row', ({ row, meta }) => {
@@ -210,9 +250,11 @@ export async function init() {
   app.sideCollapsed = !!start.prefs?.sidebar_collapsed;
   app.prefs = start.prefs ?? {};
   app.think = !!app.prefs.think;
+  app.books.preAnalysis = !!app.prefs.book_pre_analysis;
   app.models = { names: [], message: '', ...start.models };
   setTranslate(start.translate);
   setLibrary(start.library);
+  applyBookSnapshot(start.books);
   call('refresh_models');
   // Komut satirindan ("Birlikte ac") gelen video Altyazi Cevir'de acilir.
   if (start.open?.length) openInTranslate(start.open[0]);

@@ -375,6 +375,13 @@ Sohbet, Koleksiyona sor, Bu videoya sor ve Bu belgeye sor kutularındaki **mikro
 
 Ses hiçbir yere gönderilmez: kayıt `work_files\qa` altına geçici bir WAV olarak yazılır, metne çevrilir ve hemen silinir. Mikrofon izni yalnızca uygulamanın kendi sayfasına verilir. Whisper kurulu değilse (bkz. 1.5) düğme soluk görünür ve üzerine gelince nedenini söyler. Linux'ta mikrofon WebKitGTK'nin GStreamer eklentileriyle alınır; mikrofon bulunamıyorsa `gstreamer1.0-pulseaudio` (PipeWire'da `gstreamer1.0-pipewire`) paketini kurun.
 
+### 3.13 Kitap Çevir (EPUB)
+Sol menüdeki **Kitap Çevir**, DRM içermeyen İngilizce EPUB kitapları Türkçeye çevirir (Çevirgeç'in çeviri motoru; kurallar ve kalite denetimleri aynen korunur). EPUB'u sayfaya sürükleyin ya da **EPUB aç** ile seçin; çalışma klasörü varsayılan olarak EPUB'un klasörüdür (yol satırına tıklayıp değiştirilebilir). **Çeviriyi başlat** önce kitabı bölümlerine ayırıp `<KitapAdı>-ceviri` klasörünü oluşturur ve ilk çalıştırmada **terim sözlüğünü** sorar (boş bırakılabilir). **Ön analiz** açıksa önce analize girecek bölümler seçilir; analiz bitince model terim önerileri sunar, onaylananlar sözlüğe eklenir.
+
+Her parça kaydedildiği için çeviri **Duraklat**, **Durdur** ya da uygulama kapanınca kaldığı yerden sürer: yarım projeyi **Projeyi sürdür** ile (ya da `-ceviri` klasörünü sayfaya bırakarak) açın. Soldaki listede bölüm durumları görünür; bir bölüme tıklayınca kaynak ve çeviri yan yana, sözlük terimleri vurgulu gösterilir, sağ tık **Bu bölümü yeniden çevir** seçeneğini açar. **Terim sözlüğü** sonradan düzenlenirse değişen terimlerin geçtiği çevrilmiş bölümlerin yeniden çevrilmesi önerilir. Bitince klasörde `TAM-CEVIRI.md` ve `<KitapAdı> TR.epub` oluşur; ayrıntılı kayıt `translation.log` dosyasında ve sayfanın **Günlük** sekmesindedir.
+
+Sunucu, model, temperature, zaman aşımı, otomatik tekrar ve katı sözlük ortak ayarlardan gelir; parça boyutu, token payları, bitiş işareti ve EPUBCheck **Ayarlar → Kitap çevirisi** bölümündedir (`config.json` içinde `"book"` anahtarı). Komut satırından aynı motor `py -3 book_cli.py --epub kitap.epub` ile çalışır.
+
 ---
 
 ## 4. Terim sözlüğü (glossary)
