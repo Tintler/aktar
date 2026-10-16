@@ -31,7 +31,7 @@ OUTPUTS = {
     'safe': {'vo': 'gpu', 'gpu_api': 'd3d11', 'd3d11_flip': 'no'},
     'next': {'vo': 'gpu-next', 'gpu_api': 'd3d11'},
 }
-FORWARD_KEYS = ('MBTN_LEFT', 'MBTN_LEFT_DBL', 'SPACE', 'LEFT', 'RIGHT', 'f', 'n', 'g', 'h', 'G', 'H', 'i', 'o', 'ESC')
+FORWARD_KEYS = ('MOUSE_MOVE', 'MBTN_LEFT', 'MBTN_LEFT_DBL', 'SPACE', 'LEFT', 'RIGHT', 'f', 'n', 'g', 'h', 'G', 'H', 'i', 'o', 'ESC')
 _mpv_module = []
 
 
@@ -90,6 +90,7 @@ class NativePlayer:
         self._lock = threading.Lock()
         self._options = None      # mpv'nin acildigi (cikis, donanim cozme) ayari
         self._reported = None     # tani satiri yazilan dosya
+        self._moved = 0.0
 
     # ------------------------------------------------------------------ UI is parcacigi
     def _ui(self, fn, wait=True):
@@ -172,6 +173,12 @@ class NativePlayer:
             pass
 
     def _key(self, state, key):
+        if key == 'MOUSE_MOVE':   # tam ekranda kontrolleri gostermek icin; seyrek bildirilir
+            now = time.monotonic()
+            if now - self._moved >= 0.3:
+                self._moved = now
+                self.emit('mpv_key', {'key': key})
+            return
         if state and state[0] in ('d', 'p'):   # basildi (birakma degil)
             self.emit('mpv_key', {'key': key})
 
@@ -230,6 +237,8 @@ class NativePlayer:
             player.volume = max(0.0, min(100.0, float(value) * 100))
         elif name == 'mute':
             player.mute = bool(value)
+        elif name == 'cursor':   # tam ekranda imlec bir sure sonra gizlenir (ms) ya da 'no'
+            player.cursor_autohide = value if value == 'no' else int(value)
         return self.state()
 
     def _apply(self, panel):

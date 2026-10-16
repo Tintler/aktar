@@ -28,8 +28,14 @@
   let audio = $state(null);          // secili ses akisi (global index)
   let time = $state(0);
   let playing = $state(false);
-  let volume = $state(0.8);
-  let muted = $state(false);
+  // Ses duzeyi ve sessiz durumu hatirlanir (tarayici deposu; yoksa varsayilan).
+  const saved = (() => { try { return JSON.parse(localStorage.getItem('aktar.volume') || '{}'); } catch { return {}; } })();
+  let volume = $state(typeof saved.volume === 'number' ? Math.max(0, Math.min(1, saved.volume)) : 0.8);
+  let muted = $state(!!saved.muted);
+  $effect(() => {
+    const value = JSON.stringify({ volume, muted });
+    try { localStorage.setItem('aktar.volume', value); } catch { /* depo yok */ }
+  });
   let loading = $state(true);
   let error = $state('');
   let pending = null;                // {time, play}: kaynak yuklenince gidilecek an
@@ -84,12 +90,12 @@
   const offKeys = on('mpv_key', ({ key }) => {
     if (!native || app.view !== 'player') return;
     const actions = {
-      MBTN_LEFT: toggle, MBTN_LEFT_DBL: toggleFullscreen, SPACE: toggle, f: toggleFullscreen, n: noteHere,
+      MOUSE_MOVE: poke, MBTN_LEFT: toggle, MBTN_LEFT_DBL: toggleFullscreen, SPACE: toggle, f: toggleFullscreen, n: noteHere,
       LEFT: () => seekTo(time - STEP), RIGHT: () => seekTo(time + STEP),
       g: () => ccKey && shiftSubtitle(-0.1), h: () => ccKey && shiftSubtitle(0.1),
       G: () => ccKey && shiftSubtitle(-1), H: () => ccKey && shiftSubtitle(1),
       i: () => markClip('start'), o: () => markClip('end'),
-      ESC: () => document.fullscreenElement && document.exitFullscreen(),
+      ESC: () => setFullscreen(false),
     };
     actions[key]?.();
   });
@@ -232,6 +238,7 @@
     else if (event.key === 'ArrowLeft') { event.preventDefault(); seekTo(time - STEP); }
     else if (event.key === 'ArrowRight') { event.preventDefault(); seekTo(time + STEP); }
     else if (event.key === 'f') toggleFullscreen();
+    else if (event.key === 'Escape' && fullscreen) setFullscreen(false);
     else if (event.key === 'n' && !event.ctrlKey && !event.metaKey) { event.preventDefault(); noteHere(); }
     else if ((event.key === 'g' || event.key === 'G' || event.key === 'h' || event.key === 'H') && ccKey && !event.ctrlKey) {
       event.preventDefault();
@@ -302,7 +309,7 @@
   function noteHere() {
     if (native) call('mpv_command', 'pause');
     else videoEl?.pause();
-    if (document.fullscreenElement) document.exitFullscreen();
+    setFullscreen(false);
     startNote(Math.round(time * 10) / 10);
   }
 
@@ -476,9 +483,26 @@
   }
 
   // --- tam ekran ---------------------------------------------------------------
+  // Tam ekran (F126/F127): tarayicinin tam ekran API'si kullanici tiklamasi ister; mpv penceresindeki
+  // cift tiklama ve tuslar arka uctan geldigi icin reddedilir. Bunun yerine oynatici CSS ile pencereyi
+  // kaplar ve pencere ekrana yayilir. Fare durunca kontroller ve imlec gizlenir.
+  let idle = $state(false);
+  let overControls = false;
+  let idleTimer;
+  function setFullscreen(on) {
+    if (on === fullscreen) return;
+    fullscreen = on;
+    call('window_fullscreen', on);
+    if (native) call('mpv_command', 'cursor', on ? 1500 : 'no');
+    poke();
+  }
   function toggleFullscreen() {
-    if (document.fullscreenElement) document.exitFullscreen();
-    else shell?.requestFullscreen?.();
+    setFullscreen(!fullscreen);
+  }
+  function poke() {
+    idle = false;
+    clearTimeout(idleTimer);
+    if (fullscreen) idleTimer = setTimeout(() => { idle = fullscreen && !overControls && !menu.current; }, 2500);
   }
 
   $effect(() => {
@@ -487,8 +511,8 @@
   });
 
   onDestroy(() => {
-    if (document.fullscreenElement) document.exitFullscreen();
-    call('window_fullscreen', false);
+    clearTimeout(idleTimer);
+    if (fullscreen) call('window_fullscreen', false);
     cancelAnimationFrame(rafId);
     clearTimeout(subTimer);
     offMpv();
@@ -503,11 +527,7 @@
 </script>
 
 <svelte:window onkeydown={keydown} />
-<svelte:document onfullscreenchange={() => {
-  // Ogenin tam ekrani yalnizca WebView'i doldurur; pencere de ekrani kaplasin (F126).
-  fullscreen = !!document.fullscreenElement;
-  call('window_fullscreen', fullscreen);
-}} />
+
 
 <section class="page">
   {#if p}
@@ -516,7 +536,7 @@
       <button class="btn sm" onclick={() => act('reveal', p.path)}><Icon name="folderOpen" size={14} />Konumu aç</button>
     </div>
     <div class="page-body body">
-      <div class="player card" class:full={fullscreen} bind:this={shell}>
+      <div class="player card" class:full={fullscreen} class:idle={fullscreen && idle} bind:this={shell} role="presentation" onmousemove={poke}>
         <div class="surface" role="presentation" bind:this={surface} onclick={toggle} ondblclick={toggleFullscreen}>
           <!-- svelte-ignore a11y_media_has_caption -->
           <video class:hidden={native} bind:this={videoEl} preload="auto" onloadedmetadata={metadata} ontimeupdate={timeupdate}
@@ -534,7 +554,7 @@
           {#if loading && !error && !native}<div class="spinner"><Icon name="loader" size={34} spin /></div>{/if}
           {#if error}<div class="error">{error}</div>{/if}
         </div>
-        <div class="controls">
+        <div class="controls" role="presentation" onmouseenter={() => (overControls = true)} onmouseleave={() => { overControls = false; poke(); }}>
           <div class="bar" bind:this={bar} role="slider" tabindex="-1" aria-valuenow={time} aria-valuemin="0" aria-valuemax={duration}
             onmousedown={barDown} onmousemove={barMove} onmouseleave={() => (hover = null)}>
             {#each segments as seg}
@@ -572,9 +592,6 @@
             {:else}<span class="badge" title={encoderLabel
               ? `Video tarayıcının çözemediği bir biçimde; ffmpeg ile anında H.264'e dönüştürülüyor (${encoderLabel}). Ayarlar → Video oynatma'dan değiştirilebilir.`
               : 'Video tarayıcının doğrudan çalamadığı bir kapta; görüntü dönüştürülmeden ffmpeg ile paketleniyor.'}>{encoderLabel ? (encoder ? 'GPU ile dönüştürülerek' : 'işlemciyle dönüştürülerek') : 'paketlenerek'}</span>{/if}
-            {#if (p.audio ?? []).length > 1}
-              <button class="icon-btn sm" title="Ses parçası" onclick={audioMenu}><Icon name="headphones" size={18} /></button>
-            {/if}
             {#if subtool.job?.path === p.path}
               <span class="badge accent job" title="Altyazı/klip işi sürüyor">{jobText(subtool.job)}</span>
             {/if}
@@ -583,6 +600,9 @@
               onclick={() => openPanel('sync')}><Icon name="timer" size={16} /></button>
             <button class="icon-btn sm" title="Bu ana not ekle (N)" onclick={noteHere}><Icon name="squarePen" size={16} /></button>
             <button class="icon-btn sm" class:on={notes.open} title="Notlar" onclick={() => (notes.open = !notes.open)}><Icon name="list" size={18} /></button>
+            {#if (p.audio ?? []).length > 1}
+              <button class="icon-btn sm" title="Ses parçası" onclick={audioMenu}><Icon name="headphones" size={18} /></button>
+            {/if}
             <button class="icon-btn sm" class:on={ccKey} title="Altyazılar" onclick={ccMenu}><Icon name="subtitles" size={18} /></button>
             <button class="icon-btn sm" title="Tam ekran (F)" onclick={toggleFullscreen}><Icon name={fullscreen ? 'shrink' : 'expand'} size={16} /></button>
           </div>
@@ -614,7 +634,9 @@
   .title { font-size: 24px !important; }
   .body { display: flex; flex-direction: column; gap: 10px; }
   .player { overflow: hidden; display: flex; flex-direction: column; flex: 1; min-height: 0; background: #000; border-color: var(--outline); }
-  .player.full { border: 0; border-radius: 0; }
+  .player.full { position: fixed; inset: 0; z-index: 45; border: 0; border-radius: 0; }
+  .player.full.idle { cursor: none; }
+  .player.full.idle .controls { display: none; }
   .surface { position: relative; flex: 1; min-height: 240px; container-type: size; display: grid; place-items: center; background: #000; cursor: pointer; overflow: hidden; }
   video { width: 100%; height: 100%; object-fit: contain; display: block; position: absolute; inset: 0; }
   .subtitle { position: absolute; left: 50%; bottom: 6%; transform: translateX(-50%); max-width: 86%; text-align: center; white-space: pre-line;
@@ -632,7 +654,8 @@
   .seg .done { background: var(--accent); }
   .knob { position: absolute; top: 3px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--accent); opacity: 0; transition: opacity .1s; }
   .bar:hover .knob { opacity: 1; }
-  .tip { position: absolute; bottom: 22px; transform: translateX(-50%); white-space: nowrap; font-size: 12px; background: var(--overlay); color: var(--text);
+  /* Ipucu cubugun altinda: ustunde kalsa gomulu video (mpv) penceresinin arkasinda kalir. */
+  .tip { position: absolute; top: 20px; transform: translateX(-50%); white-space: nowrap; font-size: 12px; background: var(--overlay); color: var(--text);
     border: 1px solid var(--outline); padding: 3px 8px; border-radius: 6px; pointer-events: none; box-shadow: 0 4px 14px var(--shadow); }
   .row { display: flex; align-items: center; gap: 6px; }
   .play { width: 36px; height: 36px; border-radius: 50%; background: var(--text); color: var(--window); display: grid; place-items: center; }
