@@ -98,7 +98,7 @@
     { id: 'models', label: 'Modeller', icon: 'cpu', keys: ['base_url', 'model', 'qa_model', 'disable_thinking'] },
     { id: 'appearance', label: 'Görünüm', icon: 'palette', keys: [] },
     { id: 'subtitles', label: 'Altyazı çevirisi', icon: 'languages', keys: ['glossary_strict', 'auto_retry_count', 'batch_cues', 'analysis_chunk_chars'] },
-    { id: 'books', label: 'Kitap çevirisi', icon: 'bookA', keys: ['glossary_strict', 'auto_retry_count', 'book.'] },
+    { id: 'books', label: 'Kitap çevirisi', icon: 'bookA', keys: ['auto_retry_count', 'book.'] },
     { id: 'library', label: 'Kütüphane ve belgeler', icon: 'library', keys: ['embedding_model', 'vision_model', 'ocr_engine', 'ocr_model', 'tesseract_path', 'tesseract_lang'] },
     { id: 'chat', label: 'Sohbet', icon: 'message', keys: ['qa_context_chars'] },
     { id: 'voice', label: 'Ses', icon: 'mic', keys: ['whisper_model', 'whisper_device', 'whisper_language', 'whisper_cuda_dir'] },
@@ -271,7 +271,7 @@
           <section>
             <h2>Altyazı çevirisi</h2>
             <div class="fr">
-              <div class="l">Katı sözlük<small>Açıkken uygulanamayan terimde çeviri durur; kapalıyken uyarı günlüğe yazılır ve çeviri sürer. Kitap çevirisiyle ortaktır.</small></div>
+              <div class="l">Katı sözlük<small>Açıkken uygulanamayan terimde çeviri durur; kapalıyken uyarı günlüğe yazılır ve çeviri sürer. Yalnızca altyazı çevirisi için.</small></div>
               <Toggle bind:checked={cfg.glossary_strict} disabled={locked('glossary_strict')} />
             </div>
             <div class="fr">
@@ -297,8 +297,8 @@
             <p class="hint-line">Sunucu ve model Modeller'den, temperature ve zaman aşımı Gelişmiş'ten gelir.</p>
             {#if info.book_locked?.length}<div class="warn"><Icon name="alert" size={16} />Kitap çevirisi sürerken parça ve token ayarları değiştirilemez.</div>{/if}
             <div class="fr">
-              <div class="l">Katı sözlük<small>Açıkken uygulanamayan terimde çeviri durur; kapalıyken uyarı günlüğe yazılır ve çeviri sürer. Altyazı çevirisiyle ortaktır.</small></div>
-              <Toggle bind:checked={cfg.glossary_strict} disabled={locked('glossary_strict')} />
+              <div class="l">Katı sözlük<small>Açıkken uygulanamayan terimde çeviri durur; kapalıyken uygulanamayan terim kitap klasöründeki glossary_fixes.log dosyasına yazılır ve çeviri sürer. Yalnızca kitap çevirisi için.</small></div>
+              <Toggle bind:checked={cfg.book.glossary_strict} />
             </div>
             <div class="fr">
               <div class="l">Otomatik tekrar sayısı<small>İlk istek hariç ek deneme: 2 seçilirse en fazla 3 istek yapılır. Altyazı çevirisiyle ortaktır.</small></div>

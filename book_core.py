@@ -44,7 +44,8 @@ DEFAULT_CONFIG = {
 }
 
 # Aktar config.json'unun ust duzeyinden alinan ortak ayarlar; digerleri "book" bolumundedir.
-SHARED_CONFIG_KEYS = ('base_url', 'model', 'temperature', 'timeout_seconds', 'auto_retry_count', 'glossary_strict')
+# glossary_strict bilerek ayri: kitap ve altyazi cevirisi kati sozlugu ayri kullanir.
+SHARED_CONFIG_KEYS = ('base_url', 'model', 'temperature', 'timeout_seconds', 'auto_retry_count')
 
 ANALYSIS_VERSION = 2
 LIVE_RESUMABLE_CONFIG_KEYS = (

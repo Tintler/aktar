@@ -207,6 +207,10 @@ class BookBridgeTests(unittest.TestCase):
         info = self.bridge.get_settings()
         self.assertEqual(info['config']['book']['chunk_chars'], info['book_defaults']['chunk_chars'])
         self.assertNotIn('model', info['book_defaults'])
+        self.assertIn('glossary_strict', info['book_defaults'])        # altyazidan ayri kati sozluk
+        with patch.object(self.bridge, 'refresh_models'):
+            saved = self.bridge.save_settings({'glossary_strict': False, 'book': {'glossary_strict': True}})
+        self.assertEqual((saved['config']['glossary_strict'], saved['config']['book']['glossary_strict']), (False, True))
         with patch.object(self.bridge, 'refresh_models'):
             self.assertIn('error', self.bridge.save_settings({'book': {'chunk_chars': 0}}))
             saved = self.bridge.save_settings({'book': {'chunk_chars': '3000', 'epubcheck_enabled': True}})

@@ -431,11 +431,15 @@ class CoreTests(unittest.TestCase):
             cfg = book_core.load_config(path)
         self.assertEqual(cfg['base_url'], 'http://127.0.0.1:5000/v1')
         self.assertEqual(cfg['temperature'], 0.4)
-        self.assertTrue(cfg['glossary_strict'])
+        self.assertFalse(cfg['glossary_strict'])     # altyazinin kati sozlugu kitaba gecmez
         self.assertEqual(cfg['chunk_chars'], 4000)
         self.assertEqual(cfg['model'], 'book-model')
         self.assertNotIn('batch_cues', cfg)
         self.assertEqual(cfg['max_tokens'], DEFAULT_CONFIG['max_tokens'])
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'config.json'
+            path.write_text(json.dumps({'glossary_strict': False, 'book': {'glossary_strict': True}}), encoding='utf-8')
+            self.assertTrue(book_core.load_config(path)['glossary_strict'])
 
     def test_retry_count_cannot_be_disabled_or_set_below_one(self):
         cfg = dict(DEFAULT_CONFIG); cfg['auto_retry_count'] = 1
