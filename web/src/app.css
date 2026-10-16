@@ -7,6 +7,7 @@
   --dim: #6e7784; --accent: #c8ff00; --accent-hover: #d6ff3d; --on-accent: #0a1200;
   --danger: #f5717f; --warning: #f2b85c; --overlay: #22272e; --shadow: #0000008c; --ok: #4ade80;
   --sans: 'Inter Variable', Inter, 'Segoe UI', system-ui, sans-serif;
+  --serif: Literata, Georgia, serif;
   --mono: ui-monospace, 'Cascadia Mono', 'JetBrains Mono', Consolas, monospace;
   --radius: 8px;
   /* Giris alanlarinin kenari ve odak halkasi: her temada zeminden ayrilsin. */

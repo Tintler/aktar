@@ -27,3 +27,6 @@ web/dist/
 ui.json
 /themes/
 .claude/
+
+# Okuma sayfasi kitapligi (kullanici verisi)
+book_library.json

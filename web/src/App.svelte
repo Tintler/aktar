@@ -11,6 +11,7 @@
   import Library from './views/Library.svelte';
   import Translate from './views/Translate.svelte';
   import Books from './views/Books.svelte';
+  import Reading from './views/Reading.svelte';
   import Settings from './views/Settings.svelte';
   import Player from './views/Player.svelte';
   import VideoChat from './components/VideoChat.svelte';
@@ -32,7 +33,8 @@
     ['library', 'Kütüphane', 'library'],
     ['files', 'Dosya incele', 'fileSearch'],
     ['translate', 'Altyazı Çevir', 'languages'],
-    ['books', 'Kitap Çevir', 'book'],
+    ['books', 'Kitap Çevir', 'bookA'],
+    ['reading', 'Okuma', 'book'],
     ['subscriptions', 'Abonelikler', 'creditCard'],
     ['console', 'Konsol', 'terminal'],
   ];
@@ -82,6 +84,7 @@
   }
   const dropHint = $derived(app.view === 'translate' ? 'Videoyu açmak için bırakın'
     : app.view === 'books' ? 'EPUB ya da çeviri klasörünü açmak için bırakın'
+    : app.view === 'reading' ? 'Kitaplığa eklemek için bırakın'
     : app.view === 'files' ? 'İncelemek için bırakın'
     : app.view === 'subscriptions' ? 'Logo olarak eklemek için bırakın' : 'Koleksiyona eklemek için bırakın');
 
@@ -148,6 +151,7 @@
       {:else if app.view === 'subscriptions'}<Subscriptions />
       {:else if app.view === 'translate'}<Translate />
       {:else if app.view === 'books'}<Books />
+      {:else if app.view === 'reading'}<Reading />
       {:else if app.view === 'player'}<Player />
       {:else if app.view === 'document'}<Document />
       {:else}<Settings />{/if}

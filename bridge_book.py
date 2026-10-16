@@ -191,6 +191,9 @@ class BookMixin:
             card['author'] = author.group(1).strip() if author else ''
         if self._bk_book:
             card['chars'] = sum(len(read(path)) for path in (self._bk_book / 'source').glob('*.md'))
+            # Uretilen Turkce EPUB (epub_output.output_path: "<ad> TR.epub", varsa "<ad> TR 2.epub"...)
+            outputs = sorted(self._bk_book.glob('*.epub'), key=lambda path: path.stat().st_mtime)
+            card['output'] = str(outputs[-1]) if outputs else ''
         return card
 
     def _book_detach(self):

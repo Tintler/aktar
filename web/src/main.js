@@ -1,5 +1,8 @@
 import { mount } from 'svelte';
 import '@fontsource-variable/inter';
+import '@fontsource/literata/400.css';
+import '@fontsource/literata/600.css';
+import '@fontsource/literata/400-italic.css';
 import './app.css';
 import App from './App.svelte';
 

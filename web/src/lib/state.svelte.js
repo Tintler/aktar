@@ -19,11 +19,15 @@ export const app = $state({
   translateView: { stream: null, analysis: false },
   // Kitap Cevir (bridge_book): acik proje, bolumler, durum ve sayfa gorunumu (sekme degisince korunur).
   books: {
-    book: { epub: '', folder: '', project: '', title: '', author: '', cover: null, chars: 0 },
+    book: { epub: '', folder: '', project: '', title: '', author: '', cover: null, chars: 0, output: '' },
     chapters: [], analysis: '', log: [], review: null,
     status: { runtime: 'idle', phase: 'Başlatılmadı', current: '', last_saved: '', progress: { done: 0, total: 0, percent: 0 } },
     tab: 'preview', selected: null, preAnalysis: false,
   },
+  // Okuma (bridge_reader): kitaplik, acik kitap ve okuyucu gorunumu (ui.json 'reader').
+  shelf: [],
+  reading: { book: null, section: 0, offset: 0, percent: 0 },
+  reader: { size: 19, font: 'serif', leading: 1.75, width: 680, paper: 'theme' },
   // Komut satirindan ya da baska sayfadan acilmak uzere bekleyen video (Translate acilinca alir).
   pendingVideo: null,
   library: { collections: [], slug: '', title: '', folders: [], rows: [], meta: '', scanning: false, queue: null, kinds: {} },
@@ -58,7 +62,24 @@ export function setThink(value) {
   savePref({ think: app.think });
 }
 
-const VIEWS = ['chat', 'library', 'files', 'translate', 'books', 'subscriptions', 'console'];
+const VIEWS = ['chat', 'library', 'files', 'translate', 'books', 'reading', 'subscriptions', 'console'];
+
+export const READER_DEFAULTS = { size: 19, font: 'serif', leading: 1.75, width: 680, paper: 'theme' };
+
+// EPUB'u kitapliga ekleyip Okuma sayfasinda acar (Kitap Cevir'in urettigi Turkce EPUB icin).
+export async function openInReader(path) {
+  const result = await act('shelf_add', [path]);
+  if (!result?.added?.length) return;
+  app.shelf = result.books;
+  const data = await act('reader_open', result.added[0]);
+  if (!data) return;
+  app.reading = { book: data, section: data.position.section, offset: data.position.offset, percent: data.percent };
+  go('reading');
+}
+
+export function saveReaderPrefs() {
+  savePref({ reader: $state.snapshot(app.reader) });
+}
 
 export const toasts = $state([]);
 
@@ -189,6 +210,11 @@ export async function init() {
       app.books.tab = 'console';
     } else toast(message, outcome === 'done' ? 'ok' : 'info');
   });
+  on('shelf', ({ books, added, errors }) => {
+    app.shelf = books;
+    if (added?.length) toast(added.length === 1 ? 'Kitap kitaplığa eklendi.' : `${added.length} kitap kitaplığa eklendi.`, 'ok');
+    for (const message of errors ?? []) toast(message, 'error');
+  });
   on('library', (state) => setLibrary(state));
   on('row', ({ row, meta }) => {
     const index = app.library.rows.findIndex((r) => r.key === row.key);
@@ -251,10 +277,12 @@ export async function init() {
   app.prefs = start.prefs ?? {};
   app.think = !!app.prefs.think;
   app.books.preAnalysis = !!app.prefs.book_pre_analysis;
+  app.reader = { ...READER_DEFAULTS, ...(app.prefs.reader ?? {}) };
   app.models = { names: [], message: '', ...start.models };
   setTranslate(start.translate);
   setLibrary(start.library);
   applyBookSnapshot(start.books);
+  call('shelf_list').then((books) => { if (Array.isArray(books)) app.shelf = books; });
   call('refresh_models');
   // Komut satirindan ("Birlikte ac") gelen video Altyazi Cevir'de acilir.
   if (start.open?.length) openInTranslate(start.open[0]);

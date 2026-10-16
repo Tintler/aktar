@@ -8,7 +8,7 @@ Is mantigi app_core / library / qa modullerinde kalir; burada yalnizca arayuz ak
 Bolumler: bu dosyada genel (ayarlar, tema, pencere), bridge_translate.py'de Altyazi Cevir,
 bridge_library.py'de Kutuphane (bridge_mail.py'de e-postadan iceri aktarma), bridge_player.py'de oynatici ve videoya soru sor,
 bridge_document.py'de belge goruntuleyici, bridge_assistant.py'de genel sohbet ve tekil dosyalar,
-bridge_subscriptions.py'de abonelik takibi, bridge_book.py'de Kitap Cevir, bridge_voice.py'de sesle soru sorma, bridge_watch.py'de
+bridge_subscriptions.py'de abonelik takibi, bridge_book.py'de Kitap Cevir, bridge_reader.py'de Okuma (EPUB kitapligi), bridge_voice.py'de sesle soru sorma, bridge_watch.py'de
 klasor izleme, bridge_subtitles.py'de altyazi araclari (zamanlama, disa aktarma, OCR) ve klip.
 """
 from __future__ import annotations
@@ -27,6 +27,7 @@ import themes
 from app_core import APP_DIR, DEFAULT_CONFIG, WINDOWS, Client, load_config, read, save_json, validate_config
 from bridge_assistant import AssistantMixin, FilesMixin
 from bridge_book import BookMixin
+from bridge_reader import ReaderMixin
 from bridge_document import DocumentMixin
 from bridge_library import LibraryMixin
 from bridge_mail import MailMixin
@@ -55,7 +56,7 @@ def _error(error):
     return {'error': str(error)}
 
 
-class Bridge(TranslateMixin, BookMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin, AssistantMixin, FilesMixin,
+class Bridge(TranslateMixin, BookMixin, ReaderMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin, AssistantMixin, FilesMixin,
              SubscriptionsMixin, VoiceMixin, WatchMixin, SubtitleToolsMixin, NativePlayerMixin):
     def __init__(self, emit=None, dialogs=None):
         self._emit = emit or (lambda _event, _data: None)

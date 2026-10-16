@@ -382,6 +382,11 @@ Her parça kaydedildiği için çeviri **Duraklat**, **Durdur** ya da uygulama k
 
 Sunucu, model, temperature, zaman aşımı, otomatik tekrar ve katı sözlük ortak ayarlardan gelir; parça boyutu, token payları, bitiş işareti ve EPUBCheck **Ayarlar → Kitap çevirisi** bölümündedir (`config.json` içinde `"book"` anahtarı). Komut satırından aynı motor `py -3 book_cli.py --epub kitap.epub` ile çalışır.
 
+### 3.14 Okuma (EPUB kitaplığı)
+Sol menüdeki **Okuma**, EPUB kitaplarınızı uygulama içinde okumanızı sağlar (Çevirgeç'in okuyucusu). **Kitap ekle** ile ya da EPUB'ları sayfaya sürükleyerek kitaplığa ekleyin; dosyalar taşınmaz, yalnızca yolları `book_library.json` dosyasına yazılır. DRM'li EPUB'lar açılmaz. Kitap Çevir sayfasında çeviri bitince **Türkçe EPUB'u oku** çıktıyı kitaplığa ekleyip doğrudan açar.
+
+Okurken üstteki liste düğmesi **İçindekiler** ve **Yer imleri** panelini açar; yer imi düğmesi bulunduğunuz yeri işaretler. Bölüm sonunda **Sonraki bölüm**'e basın ya da kaydırmaya devam edin; **Alt+←/→** bölümler arasında geçer. **Aa** düğmesi yazı boyutu, yazı tipi (Literata serif / Inter), satır aralığı, sütun genişliği ve sayfa rengini (tema, koyu, sepya, açık) değiştirir; seçimler `ui.json`'da saklanır. Okuma konumu kendiliğinden kaydedilir ve kitaplıkta ilerleme yüzdesi olarak görünür. Kitaptaki web bağlantıları sistem tarayıcısında açılır; betikler, stiller ve dış kaynaklar kitaptan hiç yüklenmez.
+
 ---
 
 ## 4. Terim sözlüğü (glossary)

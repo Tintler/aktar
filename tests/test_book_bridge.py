@@ -133,6 +133,7 @@ class BookBridgeTests(unittest.TestCase):
         chapters = [c for c in finished['snapshot']['chapters'] if c['type'] == 'chapter']
         self.assertTrue(all(c['kind'] == 'done' for c in chapters), chapters)
         self.assertEqual(finished['snapshot']['status']['progress']['percent'], 100)
+        self.assertTrue(finished['snapshot']['book']['output'].endswith('book TR.epub'))
         self.assertTrue(any(name == 'book_status' for name, _ in self.events.events))
         self.assertTrue(any(name == 'book_log' for name, _ in self.events.events))
         preview = self.bridge.book_preview(chapters[0]['filename'])

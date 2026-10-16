@@ -5,7 +5,7 @@
   import Toggle from '../components/Toggle.svelte';
   import BookGlossaryModal from '../components/BookGlossaryModal.svelte';
   import BookAnalysisModal from '../components/BookAnalysisModal.svelte';
-  import { app, act, applyBookSnapshot, onDrop, savePref, toast } from '../lib/state.svelte.js';
+  import { app, act, applyBookSnapshot, onDrop, openInReader, savePref, toast } from '../lib/state.svelte.js';
   import { call } from '../lib/api.js';
   import { confirm, notice } from '../lib/confirm.svelte.js';
 
@@ -216,6 +216,10 @@
               <Icon name="file" size={14} /><span class="selectable">{ui.book.epub || '—'}</span></button>
             <button class="path" disabled={!idle} onclick={chooseFolder} title="Çalışma klasörünü değiştir">
               <Icon name="folder" size={14} /><span class="selectable">{ui.book.folder || 'Çalışma klasörü seçin'}</span></button>
+            {#if ui.book.output}
+              <button class="path" onclick={() => openInReader(ui.book.output)} title={ui.book.output}>
+                <Icon name="book" size={14} /><span>Türkçe EPUB'u oku</span></button>
+            {/if}
             {#if ui.book.project}
               <button class="path" onclick={() => act('reveal', ui.book.project)} title="Çeviri klasörünü dosya yöneticisinde aç">
                 <Icon name="folderOpen" size={14} /><span>Çeviri klasörünü aç</span></button>
