@@ -4,7 +4,7 @@
   // akis `offset` anindan baslar, gosterilen zaman offset + video.currentTime'dir.
   import { onDestroy } from 'svelte';
   import Icon from '../lib/Icon.svelte';
-  import { app, act, toast } from '../lib/state.svelte.js';
+  import { app, act, toast, savePref } from '../lib/state.svelte.js';
   import { call, on } from '../lib/api.js';
   import { openMenu, menu } from '../lib/menu.svelte.js';
   import { pending as dialog } from '../lib/confirm.svelte.js';
@@ -391,7 +391,7 @@
   let cues = $state([]);
   let cueStarts = [];
   const ccLabel = $derived(ccKey === 'whisper' ? (p?.whisper || 'Whisper') : (p?.subtitles?.find((s) => s.key === ccKey)?.label ?? ''));
-  let wordHighlight = $state((() => { try { return localStorage.getItem('aktar.karaoke') !== '0'; } catch { return true; } })());
+  let wordHighlight = $state(app.prefs.karaoke !== false);
   // Ekrandaki satirlar; zamanlama duzeltmesi icin video zamani altyazinin kendi zamanina cevrilir.
   // Kelime zamanli (Whisper) satirlarda soylenmis kelimeler vurgulanir.
   const subtitle = $derived.by(() => {
@@ -474,7 +474,7 @@
       if (cues.some((c) => c.words?.length)) {
         items.push({ label: 'Söylenen kelimeyi vurgula', icon: wordHighlight ? 'check' : null, action: () => {
           wordHighlight = !wordHighlight;
-          try { localStorage.setItem('aktar.karaoke', wordHighlight ? '1' : '0'); } catch { /* depo yok */ }
+          savePref({ karaoke: wordHighlight });
         } });
       }
     }

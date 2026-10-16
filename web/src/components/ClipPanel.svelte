@@ -3,21 +3,23 @@
   // bicim / kesim / kalite / cozunurluk / altyazi secenekleri. Kayit arka planda FFmpeg ile yapilir.
   import { onDestroy } from 'svelte';
   import Icon from '../lib/Icon.svelte';
-  import { act } from '../lib/state.svelte.js';
+  import { act, app, savePref } from '../lib/state.svelte.js';
   import { subtool, onSubtool, jobText, jobPercent, cancelJob, timingText, isIdentity, clockTenths, parseClock } from '../lib/subtools.svelte.js';
 
   // clip: {start, end} (bindable); cues: secili altyazinin ozgun zamanli satirlari (words: Whisper)
   let { path, time = 0, duration = 0, clip = $bindable(), source = null, sourceLabel = '', cues = [],
     timing = { scale: 1, offset: 0 }, audio = null, onpreview, onseek, onclose } = $props();
 
-  const KEY = 'aktar.clip';
-  const saved = (() => { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { return {}; } })();
+  const saved = app.prefs.clip ?? {};   // son klip secenekleri (ui.json)
   let opts = $state({ format: 'mp4', mode: 'precise', quality: 'high', height: 0, subtitles: 'none', font_size: 64, ...saved.opts });
   let subFormat = $state(saved.subFormat ?? 'source');
   let style = $state({ color: '#FFD400', base: '#FFFFFF', size: 64, mode: 'kf', ...saved.style });
+  let saveTimer;
   $effect(() => {
-    const value = JSON.stringify({ opts, subFormat, style });
-    try { localStorage.setItem(KEY, value); } catch { /* depo yok */ }
+    const value = $state.snapshot({ opts, subFormat, style });
+    if (JSON.stringify(value) === JSON.stringify(app.prefs.clip ?? null)) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => savePref({ clip: value }), 500);
   });
 
   // Altyazi kaynaginin bicimleri (Whisper'da karaoke / kelime vurgulu da var).

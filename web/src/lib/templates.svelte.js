@@ -1,16 +1,10 @@
 // Sohbet sablonlari (F104): Ayarlar'da duzenlenen ek talimatlar (chat_templates.py).
 // Koleksiyon sohbeti koleksiyonun sablonunu kullanir (koleksiyon dosyasinda); genel, belge ve
-// video sohbetinde secim tarayici deposunda hatirlanir.
+// video sohbetinde secim ui.json'da hatirlanir (app.prefs.template_choice).
 import { call } from './api.js';
-import { act } from './state.svelte.js';
+import { act, app, savePref } from './state.svelte.js';
 
-const KEY = 'aktar.templates';
-
-export const templates = $state({ items: [], loaded: false, choice: readChoice() });
-
-function readChoice() {
-  try { return JSON.parse(localStorage.getItem(KEY) ?? '{}') || {}; } catch { return {}; }
-}
+export const templates = $state({ items: [], loaded: false });
 
 export async function loadTemplates() {
   const result = await call('templates_list');
@@ -28,11 +22,10 @@ export const templateName = (id) => templates.items.find((item) => item.id === i
 
 // kind: 'assistant' | 'doc' | 'video'. Silinmis sablon secili kaldiysa '' doner.
 export function templateFor(kind) {
-  const id = templates.choice[kind] ?? '';
+  const id = app.prefs.template_choice?.[kind] ?? '';
   return templateName(id) ? id : '';
 }
 
 export function setTemplateFor(kind, id) {
-  templates.choice = { ...templates.choice, [kind]: id || '' };
-  try { localStorage.setItem(KEY, JSON.stringify(templates.choice)); } catch { /* depo yok */ }
+  savePref({ template_choice: { ...(app.prefs.template_choice ?? {}), [kind]: id || '' } });
 }

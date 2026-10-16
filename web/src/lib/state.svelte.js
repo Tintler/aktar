@@ -36,16 +36,19 @@ export const app = $state({
   busy: '',                   // dolu iken tum pencereyi kaplayan bekleme katmani (video/belge aciliyor)
   assistant: null,            // genel sohbet: acik sohbetin durumu (bridge_assistant)
   conversations: [],          // genel sohbet listesi [{id, title, updated}]
-  think: readThink(),         // sohbetlerde dusunme (reasoning) acik mi (F99; tarayici deposunda kalir)
+  think: false,               // sohbetlerde dusunme (reasoning) acik mi (F99; ui.json'da kalir)
 });
 
-function readThink() {
-  try { return localStorage.getItem('aktar.think') === '1'; } catch { return false; }
+// Kalici arayuz tercihi: ui.json'a yazilir. pywebview'in tarayici deposu (localStorage) uygulama
+// kapaninca silindigi icin hatirlanmasi gereken her secim buradan kaydedilir (F130).
+export function savePref(values) {
+  Object.assign(app.prefs, values);
+  call('save_ui_prefs', $state.snapshot(values));
 }
 
 export function setThink(value) {
   app.think = !!value;
-  try { localStorage.setItem('aktar.think', app.think ? '1' : '0'); } catch { /* depo yok */ }
+  savePref({ think: app.think });
 }
 
 const VIEWS = ['chat', 'library', 'files', 'translate', 'subscriptions', 'console'];
@@ -206,6 +209,7 @@ export async function init() {
   if (start.prefs?.view && VIEWS.includes(start.prefs.view)) app.view = start.prefs.view;
   app.sideCollapsed = !!start.prefs?.sidebar_collapsed;
   app.prefs = start.prefs ?? {};
+  app.think = !!app.prefs.think;
   app.models = { names: [], message: '', ...start.models };
   setTranslate(start.translate);
   setLibrary(start.library);
