@@ -135,6 +135,7 @@
       }
       audio = audioIndex;
       const state = await act('mpv_open', p.path, at, play);
+      lastRect = '';   // panel bu acilista olusmus olabilir: konum yeniden bildirilsin
       if (state) { time = at; codec = (state.codec || '').split(' ')[0].toLowerCase(); }
       return;
     }

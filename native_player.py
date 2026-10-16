@@ -80,6 +80,10 @@ class NativePlayer:
         self.emit = emit
         self.log = log
         self.panel = None
+        # Son bildirilen dikdortgen (x, y, genislik, yukseklik, gorunur). Panel henuz yokken gelen
+        # konum da saklanir: panel ilk acilista dogrudan burada ve gorunur olusturulur (yoksa mpv
+        # gizli 200x100 bir pencereye cizer ve ilk acilista goruntu siyah kalir).
+        self._rect = None
         self.player = None
         self.path = None
         self._last = 0.0
@@ -124,7 +128,7 @@ class NativePlayer:
             from System.Windows.Forms import Panel
             panel = Panel()
             panel.BackColor = Color.Black
-            panel.Visible = False
+            self._apply(panel)
             self.window.native.Controls.Add(panel)
             panel.BringToFront()
             return int(panel.Handle.ToInt64()), panel
@@ -228,17 +232,24 @@ class NativePlayer:
             player.mute = bool(value)
         return self.state()
 
+    def _apply(self, panel):
+        """Saklanan dikdortgeni panele uygular (UI is parcaciginda)."""
+        if self._rect is None:
+            panel.Visible = False
+            return
+        x, y, width, height, visible = self._rect
+        panel.SetBounds(int(x), int(y), max(1, int(width)), max(1, int(height)))
+        panel.Visible = bool(visible) and width > 2 and height > 2
+        if panel.Visible:
+            panel.BringToFront()
+
     def place(self, x, y, width, height, visible=True):
-        """Paneli pencere istemci alanindaki fiziksel piksel dikdortgenine tasir."""
+        """Paneli pencere istemci alanindaki fiziksel piksel dikdortgenine tasir. Panel henuz
+        yoksa dikdortgen saklanir ve panel olusturulurken uygulanir."""
+        self._rect = (x, y, width, height, visible)
         if self.panel is None:
             return
-
-        def move():
-            self.panel.SetBounds(int(x), int(y), max(1, int(width)), max(1, int(height)))
-            self.panel.Visible = bool(visible) and width > 2 and height > 2
-            if self.panel.Visible:
-                self.panel.BringToFront()
-        self._ui(move, wait=False)
+        self._ui(lambda: self._apply(self.panel), wait=False)
 
     def subtitle(self, path):
         """Gosterilen altyaziyi degistirir: `path` (dosya) ya da None (kapali). Oncekiler kaldirilir."""

@@ -240,6 +240,16 @@ class ExportTests(unittest.TestCase):
             host.mpv_subtitle('v.mkv', None)
             host._native.subtitle.assert_called_with(None)
 
+    def test_native_panel_keeps_rect_before_creation(self):
+        import native_player
+        player = native_player.NativePlayer(window=None, emit=lambda *_: None)
+        player.place(10, 20, 640, 360, True)   # panel henuz yok: konum saklanmali (F125)
+        self.assertEqual(player._rect, (10, 20, 640, 360, True))
+        panel = mock.Mock()
+        player._apply(panel)
+        panel.SetBounds.assert_called_once_with(10, 20, 640, 360)
+        self.assertTrue(panel.Visible)
+
     def test_style_sanitised(self):
         style = subtitle_export.style_of({'color': 'red', 'size': 999, 'mode': 'x', 'font': 'A,B'})
         self.assertEqual((style['color'], style['size'], style['mode'], style['font']), ('#FFD400', 160, 'kf', 'A B'))
