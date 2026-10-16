@@ -31,9 +31,8 @@ OUTPUTS = {
     'safe': {'vo': 'gpu', 'gpu_api': 'd3d11', 'd3d11_flip': 'no'},
     'next': {'vo': 'gpu-next', 'gpu_api': 'd3d11'},
 }
-# Cift tiklama mpv'nin MBTN_LEFT_DBL'ine birakilmaz (bazi bilgisayarlarda gelmiyor): iki tek tiklamanin
-# arasindan burada algilanir. Fare hareketi de tam ekranda imlec konumundan izlenir (watch_cursor).
-DOUBLE_CLICK = 0.4
+# Fare hareketi tam ekranda imlec konumundan izlenir (watch_cursor); video penceresi her bilgisayarda
+# fare olaylarini iletmiyor. Cift tiklamayla tam ekran yok (guvenilir calismadi, F129).
 FORWARD_KEYS = ('MOUSE_MOVE', 'MBTN_LEFT', 'SPACE', 'LEFT', 'RIGHT', 'f', 'n', 'g', 'h', 'G', 'H', 'i', 'o', 'ESC')
 _mpv_module = []
 
@@ -94,7 +93,6 @@ class NativePlayer:
         self._options = None      # mpv'nin acildigi (cikis, donanim cozme) ayari
         self._reported = None     # tani satiri yazilan dosya
         self._moved = 0.0
-        self._clicked = 0.0
         self._watching = None     # tam ekranda imlec izleyen is parcacigi (threading.Event)
 
     # ------------------------------------------------------------------ UI is parcacigi
@@ -187,13 +185,6 @@ class NativePlayer:
         if not state or state[0] not in ('d', 'p'):   # yalnizca basma (birakma degil)
             return
         self.emit('mpv_key', {'key': key})
-        if key == 'MBTN_LEFT':
-            now = time.monotonic()
-            if now - self._clicked <= DOUBLE_CLICK:
-                self._clicked = 0.0
-                self.emit('mpv_key', {'key': 'MBTN_LEFT_DBL'})
-            else:
-                self._clicked = now
 
     def watch_cursor(self, on):
         """Tam ekranda imlec konumunu izler; kipirdayinca 'MOUSE_MOVE' bildirir (kontroller geri gelsin).
@@ -243,10 +234,15 @@ class NativePlayer:
             return {'ready': False}
 
     # ------------------------------------------------------------------ komutlar
-    def open(self, path, start=0.0, play=False):
+    def open(self, path, start=0.0, play=False, volume=None, mute=None):
         with self._lock:
             self._ensure()
             self.path = str(path)
+            # Ses duzeyi her acilista verilir: arayuzun onceden gonderdigi komut mpv yokken bosa gidiyordu.
+            if volume is not None:
+                self.player.volume = max(0.0, min(100.0, float(volume) * 100))
+            if mute is not None:
+                self.player.mute = bool(mute)
             self.player.pause = not play
             self.player.sid = 'no'   # gomulu altyazi kendiliginden acilmaz; CC menusu secer
             self.player.loadfile(self.path, start=f'{max(0.0, float(start)):.3f}', sid='no')

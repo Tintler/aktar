@@ -28,13 +28,16 @@
   let audio = $state(null);          // secili ses akisi (global index)
   let time = $state(0);
   let playing = $state(false);
-  // Ses duzeyi ve sessiz durumu hatirlanir (tarayici deposu; yoksa varsayilan).
-  const saved = (() => { try { return JSON.parse(localStorage.getItem('aktar.volume') || '{}'); } catch { return {}; } })();
-  let volume = $state(typeof saved.volume === 'number' ? Math.max(0, Math.min(1, saved.volume)) : 0.8);
-  let muted = $state(!!saved.muted);
+  // Ses duzeyi ve sessiz durumu tum videolar ve oturumlar icin hatirlanir: ui.json'a yazilir
+  // (tarayici deposu pywebview'de uygulama kapaninca silinir).
+  let volume = $state(typeof app.prefs.player_volume === 'number' ? Math.max(0, Math.min(1, app.prefs.player_volume)) : 0.8);
+  let muted = $state(!!app.prefs.player_muted);
+  let volumeTimer;
   $effect(() => {
-    const value = JSON.stringify({ volume, muted });
-    try { localStorage.setItem('aktar.volume', value); } catch { /* depo yok */ }
+    const value = { player_volume: volume, player_muted: muted };
+    if (value.player_volume === app.prefs.player_volume && value.player_muted === !!app.prefs.player_muted) return;
+    clearTimeout(volumeTimer);
+    volumeTimer = setTimeout(() => { Object.assign(app.prefs, value); call('save_ui_prefs', value); }, 400);
   });
   let loading = $state(true);
   let error = $state('');
@@ -90,9 +93,8 @@
   const offKeys = on('mpv_key', ({ key }) => {
     if (!native || app.view !== 'player') return;
     poke();   // her etkilesim (tiklama, tus, fare) tam ekranda kontrolleri geri getirir
-    if (key === 'MBTN_LEFT_DBL' && justOpened()) return;
     const actions = {
-      MOUSE_MOVE: poke, MBTN_LEFT: toggle, MBTN_LEFT_DBL: toggleFullscreen, SPACE: toggle, f: toggleFullscreen, n: noteHere,
+      MOUSE_MOVE: poke, MBTN_LEFT: toggle, SPACE: toggle, f: toggleFullscreen, n: noteHere,
       LEFT: () => seekTo(time - STEP), RIGHT: () => seekTo(time + STEP),
       g: () => ccKey && shiftSubtitle(-0.1), h: () => ccKey && shiftSubtitle(0.1),
       G: () => ccKey && shiftSubtitle(-1), H: () => ccKey && shiftSubtitle(1),
@@ -143,7 +145,7 @@
       }
       audio = audioIndex;
       app.busy = 'Video açılıyor…';   // ilk acilista libmpv yuklenir; ikinci tiklama olmasin
-      const state = await act('mpv_open', p.path, at, play).finally(() => (app.busy = ''));
+      const state = await act('mpv_open', p.path, at, play, volume, muted).finally(() => (app.busy = ''));
       lastRect = '';   // panel bu acilista olusmus olabilir: konum yeniden bildirilsin
       if (state) { time = at; codec = (state.codec || '').split(' ')[0].toLowerCase(); }
       return;
@@ -180,7 +182,6 @@
     const path = p?.path;
     if (!path || path === opened) return;
     opened = path;
-    openedAt = performance.now();
     transcode = false;
     software = false;
     timings = {};          // zamanlama ve klip videoya ozeldir
@@ -499,16 +500,12 @@
     call('window_fullscreen', on);
     if (native) call('mpv_command', 'cursor', on ? 1500 : 'no');
     if (on) {
-      const hint = 'Tam ekrandan çıkmak için Esc tuşuna basın ya da videoya çift tıklayın';
+      const hint = 'Tam ekrandan çıkmak için Esc tuşuna basın';
       if (native) call('mpv_osd', hint);
       else flash(hint);
     }
     poke();
   }
-  // Dosya incele listesi tek tiklamayla acar: cift tiklamanin ikinci tiklamasi acilan videoya
-  // denk gelip tam ekrani tetiklemesin.
-  let openedAt = 0;
-  const justOpened = () => performance.now() - openedAt < 1200;
   function toggleFullscreen() {
     setFullscreen(!fullscreen);
   }
@@ -550,7 +547,7 @@
     </div>
     <div class="page-body body">
       <div class="player card" class:full={fullscreen} class:idle={fullscreen && idle} bind:this={shell} role="presentation" onmousemove={poke}>
-        <div class="surface" role="presentation" bind:this={surface} onclick={toggle} ondblclick={() => !justOpened() && toggleFullscreen()}>
+        <div class="surface" role="presentation" bind:this={surface} onclick={toggle} >
           <!-- svelte-ignore a11y_media_has_caption -->
           <video class:hidden={native} bind:this={videoEl} preload="auto" onloadedmetadata={metadata} ontimeupdate={timeupdate}
             onplay={() => (playing = true)} onpause={() => (playing = false)} onwaiting={stalled}

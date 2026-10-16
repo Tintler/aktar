@@ -250,17 +250,24 @@ class ExportTests(unittest.TestCase):
         panel.SetBounds.assert_called_once_with(10, 20, 640, 360)
         self.assertTrue(panel.Visible)
 
-    def test_native_double_click_from_single_clicks(self):
+    def test_native_clicks_are_forwarded_once(self):
         import native_player
         events = []
         player = native_player.NativePlayer(window=None, emit=lambda name, data: events.append(data['key']))
         player._key('d-', 'MBTN_LEFT')
         player._key('u-', 'MBTN_LEFT')     # birakma sayilmaz
         player._key('d-', 'MBTN_LEFT')
-        self.assertEqual(events, ['MBTN_LEFT', 'MBTN_LEFT', 'MBTN_LEFT_DBL'])
-        player._clicked -= 1.0              # uzun aradan sonraki tiklama tek sayilir
-        player._key('d-', 'MBTN_LEFT')
-        self.assertEqual(events[-1], 'MBTN_LEFT')
+        self.assertEqual(events, ['MBTN_LEFT', 'MBTN_LEFT'])   # cift tiklamayla tam ekran yok (F129)
+
+    def test_native_open_applies_volume(self):
+        import native_player
+        player = native_player.NativePlayer(window=None, emit=lambda *_: None)
+        player.player = mock.Mock(track_list=[])
+        player._options = player._settings()
+        with mock.patch.object(player, '_ensure'):
+            player.open('v.mkv', 0, False, 0.3, True)
+        self.assertAlmostEqual(player.player.volume, 30.0)
+        self.assertTrue(player.player.mute)
 
     def test_style_sanitised(self):
         style = subtitle_export.style_of({'color': 'red', 'size': 999, 'mode': 'x', 'font': 'A,B'})

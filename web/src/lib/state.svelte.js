@@ -32,6 +32,7 @@ export const app = $state({
   docSeek: null,              // {page}: belge goruntuleyicinin gidecegi sayfa
   fileOrigin: 'library',      // acik video/belge nereden acildi: 'library' | 'files' (menude vurgu)
   files: [],                  // Dosya incele: son incelenen dosyalar
+  prefs: {},                  // ui.json (arayuz tercihleri; ses duzeyi gibi kalici degerler)
   busy: '',                   // dolu iken tum pencereyi kaplayan bekleme katmani (video/belge aciliyor)
   assistant: null,            // genel sohbet: acik sohbetin durumu (bridge_assistant)
   conversations: [],          // genel sohbet listesi [{id, title, updated}]
@@ -204,6 +205,7 @@ export async function init() {
   setTheme(start.prefs?.theme ?? 'system', false);
   if (start.prefs?.view && VIEWS.includes(start.prefs.view)) app.view = start.prefs.view;
   app.sideCollapsed = !!start.prefs?.sidebar_collapsed;
+  app.prefs = start.prefs ?? {};
   app.models = { names: [], message: '', ...start.models };
   setTranslate(start.translate);
   setLibrary(start.library);

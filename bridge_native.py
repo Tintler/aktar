@@ -34,9 +34,9 @@ class NativePlayerMixin:
             raise RuntimeError('Gömülü oynatıcı (mpv) kullanılamıyor.')
         return self._native
 
-    def mpv_open(self, path, start=0.0, play=False):
+    def mpv_open(self, path, start=0.0, play=False, volume=None, mute=None):
         try:
-            return self._need_native().open(Path(str(path)), float(start or 0.0), bool(play))
+            return self._need_native().open(Path(str(path)), float(start or 0.0), bool(play), volume, mute)
         except (RuntimeError, OSError) as error:
             self._log('[mpv] ' + str(error))
             return {'error': 'Video açılamadı: ' + str(error)}

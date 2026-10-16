@@ -330,7 +330,7 @@ ASS altyazılarda stil ve konum gösterilmez, yalnızca metin görünür. Ekrand
 - **Altyazı:** *Yok*, *Ayrı dosya* (klibin yanına, klibe göre zamanlanmış), *Gömülü* (oynatıcıda açılıp kapanır; MP4'te düz metin, karaoke için MKV) ya da *Görüntüye yak* (her oynatıcıda görünür; karaoke renkleri de yakılır). Altyazı CC menüsünde seçili olandır ve zamanlama düzeltmesi uygulanır.
 - Klip arka planda kaydedilir; ilerleme kontrol çubuğunda görünür. Uygulama kapanırken iş durdurulur, yarım dosya silinir.
 
-**Oynatıcı kısayolları:** Boşluk oynat/duraklat, ←/→ 5 saniye, **F** ya da videoya çift tıklama tam ekran, **N** not, **G / H** altyazı ±0,1 sn, **I / O** klip başlangıcı / bitişi. Arama çubuğunun üzerine gelince zaman ve bölüm adı görünür. Sayfadan çıkıp aynı videoya dönünce kaldığı yerden açılır.
+**Oynatıcı kısayolları:** Boşluk oynat/duraklat, ←/→ 5 saniye, **F** tam ekran (**Esc** çıkar; tam ekranda fare durunca kontroller gizlenir, kıpırdayınca geri gelir), **N** not, **G / H** altyazı ±0,1 sn, **I / O** klip başlangıcı / bitişi. Arama çubuğunun üzerine gelince zaman ve bölüm adı görünür. Sayfadan çıkıp aynı videoya dönünce kaldığı yerden açılır.
 
 **Belgeler:** PDF sayfaları uygulama içinde gösterilir (sayfa gezinme, yakınlaştırma); diğer belgeler sayfa başlıklarıyla düz metin olarak açılır. Sağdaki **Bu belgeye sor** cevaplarındaki `s.N` atfı belgeyi o sayfaya götürür. **Varsayılan uygulamada aç** dosyayı bilgisayarınızdaki programla açar.
 
