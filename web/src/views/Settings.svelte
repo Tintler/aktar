@@ -205,7 +205,7 @@
           <h2>Video oynatma</h2>
           {#if info.mpv}
             <div class="fr">
-              <div class="l">Oynatıcı motoru<small>mpv: her biçim (HEVC, 10 bit, MKV, AC3/DTS) dönüştürmeden, ekran kartıyla çözülerek oynatılır; ASS ve karaoke altyazılar gerçek haliyle görünür. WebView: uygulama içi tarayıcı; çözemediği videolar ffmpeg ile dönüştürülür (aşağıdaki ayarlar yalnızca bunun için).</small></div>
+              <div class="l">Oynatıcı motoru<small>mpv: her biçim (HEVC, 10 bit, MKV, AC3/DTS) dönüştürmeden, ekran kartıyla çözülerek oynatılır; ASS ve karaoke altyazılar gerçek haliyle görünür. WebView: uygulama içi tarayıcı; çözemediği videolar ffmpeg ile dönüştürülür.</small></div>
               <select class="field w" bind:value={cfg.player_engine}>
                 <option value="mpv">mpv (gömülü, önerilen)</option>
                 <option value="web">WebView</option>
@@ -215,8 +215,8 @@
               <div class="fr">
                 <div class="l">mpv görüntü çıkışı<small>Ses gelip görüntü siyah kalıyorsa diğer seçenekleri deneyin. Seçim bir sonraki videoda uygulanır; Konsol'daki "[mpv] Çıkış:" satırı kullanılan çıkışı gösterir.</small></div>
                 <select class="field w" bind:value={cfg.mpv_output}>
-                  <option value="safe">Uyumlu (Direct3D 11)</option>
-                  <option value="next">gpu-next (Direct3D 11, yeni)</option>
+                  <option value="next">gpu-next (Direct3D 11, önerilen)</option>
+                  <option value="safe">Uyumlu (Direct3D 11, eski sunum)</option>
                 </select>
               </div>
               <div class="fr">
@@ -225,6 +225,7 @@
               </div>
             {/if}
           {/if}
+          {#if !info.mpv || cfg.player_engine !== 'mpv'}
           <div class="fr">
             <div class="l">Dönüştürmede donanım hızlandırma<small>Oynatıcı bir videoyu çözemezse (örn. HEVC/x265) anında H.264'e dönüştürür. GPU kodlayıcısı işlemciyi rahatlatır ve takılmayı azaltır; çalışmazsa oynatıcı kendiliğinden işlemciye geçer.
               {#if info.video_encoders?.length}<br />Bu bilgisayarda: {info.video_encoders.some((e) => e.works === null) ? 'denetleniyor…'
@@ -239,6 +240,7 @@
             <div class="l">HEVC'yi WebView ile doğrudan oynat<small>Açıkken HEVC/x265 videoyu WebView kendisi çözer (bilgisayarda HEVC çözücüsü varsa). Bu videolar takılıyorsa kapatın: HEVC her zaman yukarıdaki kodlayıcıyla H.264'e dönüştürülür.</small></div>
             <Toggle bind:checked={cfg.video_direct_hevc} />
           </div>
+          {/if}
         </section>
 
         <section>

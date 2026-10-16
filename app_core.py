@@ -66,8 +66,9 @@ DEFAULT_CONFIG = {
     # Oynatici motoru (F122): 'mpv' gomulu libmpv (her bicim, donanim cozme; Windows'ta libmpv-2.dll
     # varsa), 'web' WebView <video> + ffmpeg donusturme.
     'player_engine': 'mpv',
-    # mpv goruntu cikisi: 'safe' (D3D11 blit, gomulu pencerede gorunur) ya da 'next' (gpu-next)
-    'mpv_output': 'safe',
+    # mpv goruntu cikisi: 'next' (gpu-next; gercek ekran kartlarinda gomulu pencerede gorunur) ya da
+    # 'safe' (vo=gpu, D3D11 blit; bazi ekran kartlarinda siyah kalabiliyor)
+    'mpv_output': 'next',
     'mpv_hwdec': True,
     # Kutuphane indeksi (F57): LM Studio'daki embedding modeli (bos: indeksleme kapali).
     # Sablonlar EmbeddingGemma bicimindedir; baska model icin config.json'da degistirilir.
@@ -229,7 +230,7 @@ def validate_config(cfg):
         raise ValueError('qa_context_chars en az 1000 olmalı.')
     if not str(cfg.get('whisper_model', DEFAULT_CONFIG['whisper_model'])).strip():
         raise ValueError('whisper_model boş olamaz.')
-    if cfg.get('mpv_output', 'safe') not in ('safe', 'next'):
+    if cfg.get('mpv_output', 'next') not in ('safe', 'next'):
         raise ValueError('mpv_output safe veya next olmalı.')
     if cfg.get('player_engine', 'mpv') not in ('mpv', 'web'):
         raise ValueError('player_engine mpv veya web olmalı.')

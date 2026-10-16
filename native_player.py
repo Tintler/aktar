@@ -24,9 +24,9 @@ from app_core import APP_DIR, ROOT, WINDOWS
 
 DLL_NAME = 'libmpv-2.dll'
 # mpv tuslari -> arayuzde ayni kisayol (Player.svelte keydown ile ayni anlam)
-# Goruntu cikisi (Ayarlar 'mpv_output'). Gomulu pencerede D3D11 "flip" sunumu (mpv varsayilani)
-# WebView2'nin DirectComposition'i altinda gorunmez kalabiliyor (ses var, goruntu siyah): 'safe'
-# eski blit sunumunu kullanir.
+# Goruntu cikisi (Ayarlar 'mpv_output'). 'next' (gpu-next) gercek ekran kartinda gomulu pencerede
+# gorunur; vo=gpu bazi ekran kartlarinda WebView2 altinda siyah kalabiliyor (ses var, goruntu yok).
+# 'safe' yedek olarak kalir (eski blit sunumu).
 OUTPUTS = {
     'safe': {'vo': 'gpu', 'gpu_api': 'd3d11', 'd3d11_flip': 'no'},
     'next': {'vo': 'gpu-next', 'gpu_api': 'd3d11'},
@@ -104,8 +104,8 @@ class NativePlayer:
             cfg = load_config()
         except (OSError, ValueError):
             cfg = {}
-        output = cfg.get('mpv_output', 'safe')
-        return (output if output in OUTPUTS else 'safe', 'auto-safe' if cfg.get('mpv_hwdec', True) else 'no')
+        output = cfg.get('mpv_output', 'next')
+        return (output if output in OUTPUTS else 'next', 'auto-safe' if cfg.get('mpv_hwdec', True) else 'no')
 
     def _ensure(self):
         options = self._settings()
