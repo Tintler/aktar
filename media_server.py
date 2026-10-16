@@ -68,17 +68,27 @@ def probe(path):
                       for item in audio]}
 
 
-def plan(path, info, audio_index=None, transcode=False):
+def hevc_ok(video, extra):
+    """Arayuzun bildirdigi `extra` kodlarla (WebView'in kendi cozebildikleri) HEVC calinabilir mi:
+    'hevc' 8 bit Main, 'hevc10' 10 bit Main 10 icindir (donanim cozucusu varsa)."""
+    if video is None or video['codec'] != 'hevc':
+        return False
+    return ('hevc10' if '10' in video.get('pix_fmt', '') else 'hevc') in set(extra or ())
+
+
+def plan(path, info, audio_index=None, transcode=False, extra=()):
     """Nasil oynatilacak: {'mode': 'direct'|'stream', 'video': 'copy'|'x264'|None, 'audio': index}.
 
     Ilk ses parcasi disinda bir parca secildiyse ya da kap/codec tarayiciya uygun degilse
     ffmpeg akisi kullanilir. Tarayici kopyalanan goruntuyu cozemezse (H.264 4:4:4 / 10 bit
-    gibi) arayuz `transcode` ile yeniden ister: goruntu x264 ile yeniden kodlanir."""
+    gibi) arayuz `transcode` ile yeniden ister: goruntu x264 ile yeniden kodlanir. `extra`:
+    arayuzun bu bilgisayarda cozebildigini bildirdigi ek kodlar (bkz. hevc_ok)."""
     audio = info['audio']
     if audio_index is None and audio:
         audio_index = audio[0]['index']
     video = info['video']
-    video_mode = None if video is None else ('copy' if video['codec'] in BROWSER_VIDEO and not transcode else 'x264')
+    video_mode = None if video is None else ('copy' if (video['codec'] in BROWSER_VIDEO or hevc_ok(video, extra)) and not transcode
+                                       else 'x264')
     first = audio[0]['index'] if audio else None
     chosen = next((item for item in audio if item['index'] == audio_index), None)
     direct = (Path(path).suffix.lower() in BROWSER_CONTAINERS and video_mode != 'x264'
@@ -103,6 +113,10 @@ def stream_mime(info, plan_value):
             profile = H264_PROFILES.get(video['profile'].lower())
             level = video['level'] if 0 < video['level'] < 256 else 0x28
             codecs.append(f'avc1.{profile:02X}00{level:02X}' if profile in (0x42, 0x4D, 0x64) else 'avc1.640028')
+        elif video['codec'] == 'hevc':
+            ten = '10' in video.get('pix_fmt', '')
+            level = video['level'] if 0 < video['level'] < 256 else 120
+            codecs.append(f'hvc1.{2 if ten else 1}.{4 if ten else 6}.L{level}.B0')
         elif video['codec'] == 'vp9':
             codecs.append('vp09.00.10.08')
         elif video['codec'] == 'vp8':
@@ -140,7 +154,7 @@ def keyframe_before(path, seconds, video_index):
     return best if best is not None else seconds
 
 
-def stream_command(path, start, video_index, video_mode, audio_index, height=0):
+def stream_command(path, start, video_index, video_mode, audio_index, height=0, codec=''):
     """Parcali MP4 ureten ffmpeg komutu (stdout'a)."""
     command = [media.ffmpeg_path(), '-hide_banner', '-loglevel', 'error', '-nostdin']
     if start > 0:
@@ -153,6 +167,8 @@ def stream_command(path, start, video_index, video_mode, audio_index, height=0):
     command += ['-sn', '-dn']
     if video_mode == 'copy':
         command += ['-c:v', 'copy']
+        if codec == 'hevc':
+            command += ['-tag:v', 'hvc1']   # MSE/WebView 'hev1' etiketli HEVC'yi kabul etmez
     elif video_mode == 'x264':
         command += ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p']
         if height > 1080:
@@ -274,7 +290,8 @@ class _Handler(BaseHTTPRequestHandler):
         if video_mode not in ('copy', 'x264', 'none'):
             return self._send_error(400)
         command = stream_command(path, start, None if video_mode == 'none' else number('vi'),
-                                 None if video_mode == 'none' else video_mode, number('a'), number('h', 0))
+                                 None if video_mode == 'none' else video_mode, number('a'), number('h', 0),
+                                 query.get('c', [''])[0])
         try:
             process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                        stdin=subprocess.DEVNULL, creationflags=_creationflags())
@@ -358,7 +375,7 @@ class MediaServer:
         mode = plan_value['video'] or 'none'
         query = f't={start:.3f}&v={mode}'
         if video is not None:
-            query += f'&vi={video["index"]}&h={video.get("height") or 0}'
+            query += f'&vi={video["index"]}&h={video.get("height") or 0}&c={video["codec"]}'
         if plan_value['audio'] is not None:
             query += f'&a={plan_value["audio"]}'
         return f'{self.start().base}/s/{self.register(path)}?{query}'

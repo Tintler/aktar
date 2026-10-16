@@ -38,6 +38,16 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(media_server.plan('a.avi', info('mpeg4'))['video'], 'x264')
         self.assertEqual(media_server.plan('a.mkv', info('hevc'))['video'], 'x264')
 
+    def test_hevc_is_copied_when_webview_can_decode_it(self):
+        self.assertEqual(media_server.plan('a.mp4', info('hevc'), extra=['hevc'])['mode'], 'direct')
+        self.assertEqual(media_server.plan('a.mkv', info('hevc'), extra=['hevc'])['video'], 'copy')
+        ten = info('hevc', pix_fmt='yuv420p10le', level=120)
+        self.assertEqual(media_server.plan('a.mp4', ten, extra=['hevc'])['video'], 'x264')
+        self.assertEqual(media_server.plan('a.mp4', ten, extra=['hevc10'])['mode'], 'direct')
+        chosen = media_server.plan('a.mkv', ten, extra=['hevc10'])
+        self.assertIn('hvc1.2.4.L120.B0', media_server.stream_mime(ten, chosen))
+        self.assertEqual(media_server.plan('a.mkv', ten, extra=['hevc10'], transcode=True)['video'], 'x264')
+
     def test_second_audio_track_forces_stream_and_transcode_flag(self):
         value = media_server.plan('a.mp4', info(audio=('aac', 'aac')), audio_index=2)
         self.assertEqual((value['mode'], value['audio']), ('stream', 2))
@@ -67,6 +77,8 @@ class PlanTests(unittest.TestCase):
         self.assertIn('libx264', scaled)
         self.assertIn('scale=-2:1080', scaled)
         self.assertNotIn('-ss', scaled)
+        self.assertIn('-tag:v hvc1', ' '.join(media_server.stream_command('a.mkv', 0, 0, 'copy', 1, codec='hevc')))
+        self.assertNotIn('-tag:v', joined)
 
 
 class ServerTests(unittest.TestCase):

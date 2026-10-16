@@ -168,16 +168,18 @@ class PlayerMixin:
         self._start_prepare(video)
         return self._player_state()
 
-    def player_source(self, audio_index=None, start=0.0, force_stream=False, transcode=False):
+    def player_source(self, audio_index=None, start=0.0, force_stream=False, transcode=False, codecs=None):
         """Oynaticinin kaynagi: {'url', 'offset', 'mode'}. Akista `offset`ten itibaren baslar.
 
         `force_stream`: tarayici dosyayi dogrudan calamadiysa ffmpeg akisi; `transcode`: akistaki
-        kopyalanmis goruntuyu de cozemediyse goruntu x264 ile yeniden kodlanir."""
+        kopyalanmis goruntuyu de cozemediyse goruntu x264 ile yeniden kodlanir. `codecs`: WebView'in
+        bu bilgisayarda cozebildigi ek kodlar (['hevc', 'hevc10']); varsa HEVC donusturulmeden calinir."""
         video = self._player_video
         if video is None:
             return {'error': 'Açık video yok.'}
         info = video.info
-        chosen = media_server.plan(video.path, info, audio_index, transcode=bool(transcode))
+        chosen = media_server.plan(video.path, info, audio_index, transcode=bool(transcode),
+                                   extra=[str(item) for item in codecs or []])
         if force_stream or transcode:
             chosen['mode'] = 'stream'
         if chosen['mode'] == 'direct':

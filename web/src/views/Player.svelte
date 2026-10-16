@@ -38,8 +38,12 @@
   };
 
   let transcode = false;             // kopyalanan goruntu cozulemedi: x264 ile yeniden kodlanir
+  // WebView'in kendi cozebildigi ek kodlar (HEVC yalnizca donanim cozucusu/eklentisi varsa):
+  // varsa arka uc o goruntuyu donusturmeden (dogrudan ya da yalnizca paketleyerek) verir.
+  const hevcType = (c) => document.createElement('video').canPlayType(`video/mp4; codecs="${c}"`) !== '' || mseSupported(`video/mp4; codecs="${c}"`);
+  const codecs = [['hevc', 'hvc1.1.6.L120.B0'], ['hevc10', 'hvc1.2.4.L120.B0']].filter(([, c]) => hevcType(c)).map(([name]) => name);
   async function load(audioIndex, at, play, force = false) {
-    const result = await act('player_source', audioIndex, at, force || transcode, transcode);
+    const result = await act('player_source', audioIndex, at, force || transcode, transcode, codecs);
     if (!result || !videoEl) return;
     error = '';
     loading = true;
