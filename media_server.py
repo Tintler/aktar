@@ -3,7 +3,9 @@
 Web arayuzu videoyu HTML5 <video> ile oynatir. Tarayicinin dogrudan calabildigi dosyalar
 (MP4/WebM; H.264/VP9/AV1 + AAC/MP3/Opus) oldugu gibi, Range istekleriyle sunulur. Digerleri
 (MKV, AVI, AC3/DTS ses, ikinci ses parcasi) ffmpeg ile ANINDA parcali MP4'e paketlenir:
-goruntu mumkunse kopyalanir (yeniden kodlanmaz), ses AAC'ye cevrilir. Bu akista sarma,
+goruntu mumkunse kopyalanir (yeniden kodlanmaz), ses AAC'ye cevrilir. Goruntu yeniden
+kodlanacaksa (orn. tarayicinin cozemedigi HEVC) calisan bir GPU kodlayicisi kullanilir (F120),
+yoksa libx264. Bu akista sarma,
 ffmpeg'i istenen andan yeniden baslatarak yapilir; arayuz `offset` kadar kaydirarak gosterir.
 
 Her dosya rastgele bir anahtarla kaydedilir; sunucu kayitli olmayan dosyayi vermez.
@@ -29,6 +31,23 @@ BROWSER_VIDEO = {'h264', 'vp8', 'vp9', 'av1'}
 BROWSER_AUDIO = {'aac', 'mp3', 'opus', 'vorbis', 'flac'}
 CHUNK = 256 * 1024
 KEYFRAME_WINDOW = 30.0   # sarma: bu kadar geriye kadar anahtar kare aranir
+FRAGMENT_US = 1_000_000  # akis parcasi en fazla 1 sn: tarayiciya veri duzenli akar
+GOP = 60                 # yeniden kodlamada anahtar kare araligi (kare)
+
+# GPU H.264 kodlayicilari (F120): ad -> (etiket, ffmpeg kodlayici secenekleri, piksel bicimi).
+# Kalite ~CRF 23; B-kare yok (akista gecikme ve parca boyu kucuk kalir).
+HW_ENCODERS = {
+    'nvenc': ('NVIDIA NVENC', ['-c:v', 'h264_nvenc', '-preset', 'p2', '-tune', 'll', '-rc', 'vbr', '-cq', '23',
+                                '-b:v', '0', '-bf', '0'], 'yuv420p'),
+    'qsv': ('Intel Quick Sync', ['-c:v', 'h264_qsv', '-preset', 'veryfast', '-global_quality', '23', '-bf', '0'], 'nv12'),
+    'amf': ('AMD AMF', ['-c:v', 'h264_amf', '-quality', 'speed', '-rc', 'cqp', '-qp_i', '22', '-qp_p', '24',
+                        '-bf', '0'], 'nv12'),
+    'mf': ('Windows Media Foundation', ['-c:v', 'h264_mf', '-hw_encoding', '1', '-rate_control', 'quality',
+                                        '-quality', '70'], 'nv12'),
+}
+HW_ORDER = ('nvenc', 'qsv', 'amf', 'mf') if os.name == 'nt' else ('nvenc', 'qsv')
+_hw_lock = threading.Lock()
+_hw_works = {}   # ad -> bu bilgisayarda calisiyor mu (bir kez denenir)
 
 
 def _creationflags():
@@ -128,6 +147,39 @@ def stream_mime(info, plan_value):
     return 'video/mp4; codecs="' + ', '.join(codecs) + '"'
 
 
+def hw_works(name):
+    """GPU kodlayicisi bu bilgisayarda calisiyor mu: yarim saniyelik deneme kodlamasi (sonuc saklanir)."""
+    if name not in HW_ENCODERS:
+        return False
+    with _hw_lock:
+        if name not in _hw_works:
+            _, args, pix_fmt = HW_ENCODERS[name]
+            command = [media.ffmpeg_path(), '-hide_banner', '-v', 'error', '-nostdin', '-f', 'lavfi',
+                       '-i', 'testsrc2=s=640x360:r=30:d=0.5', '-pix_fmt', pix_fmt, *args, '-f', 'null', '-']
+            try:
+                result = subprocess.run(command, capture_output=True, timeout=20, creationflags=_creationflags())
+                _hw_works[name] = result.returncode == 0
+            except (OSError, subprocess.TimeoutExpired):
+                _hw_works[name] = False
+        return _hw_works[name]
+
+
+def hw_encoder(choice='auto'):
+    """Ayara gore kullanilacak GPU kodlayicisi ('nvenc' ...) ya da None (islemci: libx264)."""
+    if choice == 'off':
+        return None
+    try:
+        if choice in HW_ENCODERS:
+            return choice if hw_works(choice) else None
+        return next((name for name in HW_ORDER if hw_works(name)), None)
+    except RuntimeError:   # ffmpeg yok
+        return None
+
+
+def encoder_label(name):
+    return HW_ENCODERS[name][0] if name in HW_ENCODERS else 'işlemci (x264)'
+
+
 def keyframe_before(path, seconds, video_index):
     """`seconds` anindan onceki son anahtar karenin zamani (bulunamazsa `seconds`)."""
     if seconds <= 0.5:
@@ -154,9 +206,13 @@ def keyframe_before(path, seconds, video_index):
     return best if best is not None else seconds
 
 
-def stream_command(path, start, video_index, video_mode, audio_index, height=0, codec=''):
-    """Parcali MP4 ureten ffmpeg komutu (stdout'a)."""
+def stream_command(path, start, video_index, video_mode, audio_index, height=0, codec='', encoder=None):
+    """Parcali MP4 ureten ffmpeg komutu (stdout'a). `encoder`: yeniden kodlamada GPU kodlayicisi
+    (HW_ENCODERS adi); verilirse kaynak da donanimda cozulur (-hwaccel auto; olmazsa islemciye duser)."""
     command = [media.ffmpeg_path(), '-hide_banner', '-loglevel', 'error', '-nostdin']
+    encoder = encoder if video_mode == 'x264' and encoder in HW_ENCODERS else None
+    if encoder:
+        command += ['-hwaccel', 'auto']
     if start > 0:
         command += ['-ss', f'{start:.3f}']
     command += ['-i', str(path)]
@@ -170,12 +226,19 @@ def stream_command(path, start, video_index, video_mode, audio_index, height=0, 
         if codec == 'hevc':
             command += ['-tag:v', 'hvc1']   # MSE/WebView 'hev1' etiketli HEVC'yi kabul etmez
     elif video_mode == 'x264':
-        command += ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p']
+        if encoder:
+            _, args, pix_fmt = HW_ENCODERS[encoder]
+            command += [*args, '-pix_fmt', pix_fmt]
+        else:
+            command += ['-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency', '-crf', '23',
+                        '-pix_fmt', 'yuv420p']
+        command += ['-g', str(GOP)]
         if height > 1080:
             command += ['-vf', 'scale=-2:1080']
     if audio_index is not None:
         command += ['-c:a', 'aac', '-b:a', '192k', '-ac', '2']
-    command += ['-movflags', 'frag_keyframe+empty_moov+default_base_moof', '-f', 'mp4', 'pipe:1']
+    command += ['-movflags', 'frag_keyframe+empty_moov+default_base_moof', '-frag_duration', str(FRAGMENT_US),
+                '-f', 'mp4', 'pipe:1']
     return command
 
 
@@ -291,7 +354,7 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send_error(400)
         command = stream_command(path, start, None if video_mode == 'none' else number('vi'),
                                  None if video_mode == 'none' else video_mode, number('a'), number('h', 0),
-                                 query.get('c', [''])[0])
+                                 query.get('c', [''])[0], query.get('e', [''])[0] or None)
         try:
             process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                        stdin=subprocess.DEVNULL, creationflags=_creationflags())
@@ -378,6 +441,8 @@ class MediaServer:
             query += f'&vi={video["index"]}&h={video.get("height") or 0}&c={video["codec"]}'
         if plan_value['audio'] is not None:
             query += f'&a={plan_value["audio"]}'
+        if plan_value.get('encoder'):
+            query += f'&e={plan_value["encoder"]}'
         return f'{self.start().base}/s/{self.register(path)}?{query}'
 
     def track(self, process):

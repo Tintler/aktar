@@ -57,6 +57,9 @@ DEFAULT_CONFIG = {
     'whisper_language': '',
     # Baska programlarla ortak cuBLAS 12 / cuDNN 9 DLL klasoru (bos: pip/paket icinden).
     'whisper_cuda_dir': '',
+    # Oynaticida donusturme gereken videolar (F120): 'auto' calisan ilk GPU kodlayicisi
+    # (NVIDIA, Intel, AMD, Windows MF), ya da 'nvenc' | 'qsv' | 'amf' | 'mf' | 'off' (yalniz islemci).
+    'video_hw': 'auto',
     # Kutuphane indeksi (F57): LM Studio'daki embedding modeli (bos: indeksleme kapali).
     # Sablonlar EmbeddingGemma bicimindedir; baska model icin config.json'da degistirilir.
     'embedding_model': '',
@@ -217,6 +220,8 @@ def validate_config(cfg):
         raise ValueError('qa_context_chars en az 1000 olmalı.')
     if not str(cfg.get('whisper_model', DEFAULT_CONFIG['whisper_model'])).strip():
         raise ValueError('whisper_model boş olamaz.')
+    if cfg.get('video_hw', 'auto') not in ('auto', 'nvenc', 'qsv', 'amf', 'mf', 'off'):
+        raise ValueError('video_hw auto, nvenc, qsv, amf, mf veya off olmalı.')
     if cfg.get('whisper_device', 'auto') not in ('auto', 'cuda', 'cpu'):
         raise ValueError('whisper_device auto, cuda veya cpu olmalı.')
     if not re.fullmatch(r'[a-z]{0,3}', str(cfg.get('whisper_language', '')).strip().lower()):

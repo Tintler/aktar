@@ -70,13 +70,17 @@ export class StreamFeed {
     try {
       const response = await fetch(url, { signal: controller.signal });
       const reader = response.body.getReader();
+      let received = 0;
       for (;;) {
         while (this.ahead() > this.limit && token === this.token) await sleep(400);
         if (token !== this.token) break;
         const { done, value } = await reader.read();
         if (done || token !== this.token) break;
+        received += value.byteLength;
         await this.append(buffer, value, token);
       }
+      // ffmpeg hic veri vermeden bittiyse (GPU kodlayicisi acilamadi gibi) yedek zincire haber verilir.
+      if (token === this.token && !received) throw new Error('akış boş geldi');
       if (token === this.token && source.readyState === 'open') {
         while (buffer.updating) await once(buffer, 'updateend');
         source.endOfStream();

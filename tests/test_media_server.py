@@ -79,6 +79,36 @@ class PlanTests(unittest.TestCase):
         self.assertNotIn('-ss', scaled)
         self.assertIn('-tag:v hvc1', ' '.join(media_server.stream_command('a.mkv', 0, 0, 'copy', 1, codec='hevc')))
         self.assertNotIn('-tag:v', joined)
+        self.assertIn('-frag_duration 1000000', joined)   # veri kucuk parcalarla akar
+        self.assertIn('-g 60', scaled)
+
+    @mock.patch.object(media_server.media, 'ffmpeg_path', return_value='ffmpeg')
+    def test_gpu_encoder_in_stream_command(self, _ffmpeg):
+        gpu = ' '.join(media_server.stream_command('a.mkv', 5, 0, 'x264', 1, encoder='nvenc'))
+        self.assertTrue(gpu.startswith('ffmpeg -hide_banner -loglevel error -nostdin -hwaccel auto -ss 5.000 -i a.mkv'))
+        self.assertIn('-c:v h264_nvenc', gpu)
+        self.assertNotIn('libx264', gpu)
+        # Kopyalanan goruntude ve bilinmeyen kodlayicida GPU kullanilmaz.
+        self.assertNotIn('-hwaccel', ' '.join(media_server.stream_command('a.mkv', 0, 0, 'copy', 1, encoder='nvenc')))
+        self.assertIn('libx264', ' '.join(media_server.stream_command('a.mkv', 0, 0, 'x264', 1, encoder='bogus')))
+
+    def test_hw_encoder_choice(self):
+        works = {'nvenc': False, 'qsv': True, 'amf': True, 'mf': True}
+        with mock.patch.object(media_server, 'hw_works', side_effect=lambda name: works.get(name, False)):
+            self.assertEqual(media_server.hw_encoder('auto'), 'qsv')
+            self.assertIsNone(media_server.hw_encoder('off'))
+            self.assertIsNone(media_server.hw_encoder('nvenc'))
+            self.assertEqual(media_server.hw_encoder('amf'), 'amf')
+        self.assertEqual(media_server.encoder_label(None), 'işlemci (x264)')
+
+    def test_stream_url_carries_encoder(self):
+        server = media_server.MediaServer()
+        server.start()
+        try:
+            plan_value = dict(media_server.plan('a.mkv', info('hevc')), encoder='qsv')
+            self.assertIn('&e=qsv', server.stream_url(Path('a.mkv'), 0, plan_value, info('hevc')))
+        finally:
+            server.shutdown()
 
 
 class ServerTests(unittest.TestCase):

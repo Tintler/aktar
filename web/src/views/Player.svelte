@@ -41,14 +41,19 @@
     return h ? `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}` : `${m}:${String(r).padStart(2, '0')}`;
   };
 
-  let transcode = false;             // kopyalanan goruntu cozulemedi: x264 ile yeniden kodlanir
+  let transcode = false;             // kopyalanan goruntu cozulemedi: H.264'e yeniden kodlanir
+  let software = false;              // GPU kodlamasi basarisiz: islemci (x264) kullanilir (F120)
+  let encoder = '';                  // akisin GPU kodlayicisi ('' islemci)
+  let encoderLabel = $state('');
   // WebView'in kendi cozebildigi ek kodlar (HEVC yalnizca donanim cozucusu/eklentisi varsa):
   // varsa arka uc o goruntuyu donusturmeden (dogrudan ya da yalnizca paketleyerek) verir.
   const hevcType = (c) => document.createElement('video').canPlayType(`video/mp4; codecs="${c}"`) !== '' || mseSupported(`video/mp4; codecs="${c}"`);
   const codecs = [['hevc', 'hvc1.1.6.L120.B0'], ['hevc10', 'hvc1.2.4.L120.B0']].filter(([, c]) => hevcType(c)).map(([name]) => name);
   async function load(audioIndex, at, play, force = false) {
-    const result = await act('player_source', audioIndex, at, force || transcode, transcode, codecs);
+    const result = await act('player_source', audioIndex, at, force || transcode, transcode, codecs, software);
     if (!result || !videoEl) return;
+    encoder = result.encoder ?? '';
+    encoderLabel = result.encoder_label ?? '';
     error = '';
     loading = true;
     audio = result.audio;
@@ -77,6 +82,7 @@
     if (!path || path === opened) return;
     opened = path;
     transcode = false;
+    software = false;
     timings = {};          // zamanlama ve klip videoya ozeldir
     clipRange = null;
     panel = '';
@@ -207,12 +213,17 @@
     if (code) fail('Video oynatılamadı.');
   }
 
-  // Yedek zinciri: dogrudan -> goruntuyu kopyalayan akis -> x264 ile yeniden kodlanan akis.
+  // Yedek zinciri: dogrudan -> goruntuyu kopyalayan akis -> GPU ile yeniden kodlanan akis ->
+  // islemciyle (x264) yeniden kodlanan akis.
   function fail(message) {
     loading = false;
     if (mode === 'direct') return load(audio, time, playing, true);
     if (!transcode) {
       transcode = true;
+      return load(audio, time, playing, true);
+    }
+    if (encoder && !software) {
+      software = true;
       return load(audio, time, playing, true);
     }
     error = message;
@@ -432,7 +443,9 @@
             <span class="mono time">{fmt(time)} / {fmt(duration)}</span>
             {#if chapterAt(time)}<span class="chapter ellipsis">{chapterAt(time)} ›</span>{/if}
             <span class="grow"></span>
-            {#if mode !== 'direct'}<span class="badge" title="Video tarayıcının doğrudan çalamadığı bir biçimde; ffmpeg ile anında dönüştürülüyor.">dönüştürülerek</span>{/if}
+            {#if mode !== 'direct'}<span class="badge" title={encoderLabel
+              ? `Video tarayıcının çözemediği bir biçimde; ffmpeg ile anında H.264'e dönüştürülüyor (${encoderLabel}). Ayarlar → Video oynatma'dan değiştirilebilir.`
+              : 'Video tarayıcının doğrudan çalamadığı bir kapta; görüntü dönüştürülmeden ffmpeg ile paketleniyor.'}>{encoderLabel ? (encoder ? 'GPU ile dönüştürülerek' : 'işlemciyle dönüştürülerek') : 'paketlenerek'}</span>{/if}
             {#if (p.audio ?? []).length > 1}
               <button class="icon-btn sm" title="Ses parçası" onclick={audioMenu}><Icon name="headphones" size={18} /></button>
             {/if}

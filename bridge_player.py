@@ -179,12 +179,15 @@ class PlayerMixin:
         self._start_prepare(video)
         return self._player_state()
 
-    def player_source(self, audio_index=None, start=0.0, force_stream=False, transcode=False, codecs=None):
+    def player_source(self, audio_index=None, start=0.0, force_stream=False, transcode=False, codecs=None,
+                      software=False):
         """Oynaticinin kaynagi: {'url', 'offset', 'mode'}. Akista `offset`ten itibaren baslar.
 
         `force_stream`: tarayici dosyayi dogrudan calamadiysa ffmpeg akisi; `transcode`: akistaki
-        kopyalanmis goruntuyu de cozemediyse goruntu x264 ile yeniden kodlanir. `codecs`: WebView'in
-        bu bilgisayarda cozebildigi ek kodlar (['hevc', 'hevc10']); varsa HEVC donusturulmeden calinir."""
+        kopyalanmis goruntuyu de cozemediyse goruntu H.264'e yeniden kodlanir (Ayarlar'daki GPU
+        kodlayicisiyla, F120). `software`: GPU kodlamasi basarisiz oldu, islemci (libx264) kullanilir.
+        `codecs`: WebView'in bu bilgisayarda cozebildigi ek kodlar (['hevc', 'hevc10']); varsa HEVC
+        donusturulmeden calinir."""
         video = self._player_video
         if video is None:
             return {'error': 'Açık video yok.'}
@@ -199,8 +202,19 @@ class PlayerMixin:
         if chosen['video'] == 'copy' and info['video'] is not None:
             # Goruntu kopyalaninca akis anahtar kareden baslar; arayuz farki kendisi sarar.
             start = media_server.keyframe_before(video.path, start, info['video']['index'])
+        if chosen['video'] == 'x264':
+            choice = 'off' if software else str(load_config().get('video_hw', 'auto'))
+            chosen['encoder'] = media_server.hw_encoder(choice)
+            note = (video.path, chosen['encoder'])
+            if getattr(video, 'encoder_note', None) != note:   # her sarmada degil, degisince yazilir
+                video.encoder_note = note
+                source = (info['video'] or {}).get('codec', '?').upper()
+                self._log(f'[Oynatıcı] {source} → H.264 dönüştürülüyor: {media_server.encoder_label(chosen["encoder"])}'
+                          + (' (GPU kodlaması başarısız oldu)' if software else ''))
         return {'url': self._media.stream_url(video.path, start, chosen, info), 'offset': start,
                 'mode': 'stream', 'audio': chosen['audio'], 'transcode': chosen['video'] == 'x264',
+                'encoder': chosen.get('encoder') or '', 'encoder_label': media_server.encoder_label(chosen.get('encoder'))
+                if chosen['video'] == 'x264' else '',
                 'mime': media_server.stream_mime(info, chosen), 'duration': info['duration']}
 
     def player_close(self):

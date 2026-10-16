@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 import documents
+import media_server
 import themes
 from app_core import APP_DIR, DEFAULT_CONFIG, WINDOWS, Client, load_config, read, save_json, validate_config
 from bridge_assistant import AssistantMixin, FilesMixin
@@ -179,7 +180,10 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
                 'locked': list(LOCKED_WHILE_RUNNING) if self._running() else [],
                 'whisper_models': list(dict.fromkeys(WHISPER_MODELS + (str(value.get('whisper_model', '')),))),
                 'ocr_engines': [{'id': key, 'label': label} for key, label in OCR_ENGINES],
-                'cuda_markers': list(CUDA_MARKERS)}
+                'cuda_markers': list(CUDA_MARKERS),
+                'video_encoders': [{'id': name, 'label': label, 'works': media_server.hw_works(name)}
+                                   for name, (label, _, _) in media_server.HW_ENCODERS.items()
+                                   if name in media_server.HW_ORDER]}
 
     def save_settings(self, values):
         try:

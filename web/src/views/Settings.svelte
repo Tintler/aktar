@@ -198,6 +198,19 @@
         </section>
 
         <section>
+          <h2>Video oynatma</h2>
+          <div class="fr">
+            <div class="l">Dönüştürmede donanım hızlandırma<small>Oynatıcı bir videoyu çözemezse (örn. HEVC/x265) anında H.264'e dönüştürür. GPU kodlayıcısı işlemciyi rahatlatır ve takılmayı azaltır; çalışmazsa oynatıcı kendiliğinden işlemciye geçer.
+              {#if info.video_encoders?.length}<br />Bu bilgisayarda: {info.video_encoders.filter((e) => e.works).map((e) => e.label).join(', ') || 'çalışan GPU kodlayıcısı bulunamadı'}{/if}</small></div>
+            <select class="field w" bind:value={cfg.video_hw}>
+              <option value="auto">Otomatik (GPU varsa)</option>
+              {#each info.video_encoders ?? [] as e}<option value={e.id}>{e.label}{e.works ? '' : ' (çalışmıyor)'}</option>{/each}
+              <option value="off">Yalnız işlemci</option>
+            </select>
+          </div>
+        </section>
+
+        <section>
           <h2>Konuşmadan metin (Whisper)</h2>
           <div class="fr">
             <div class="l">Whisper modeli<small>İlk kullanımda models/whisper altına indirilir (large-v3-turbo ~1,6 GB).</small></div>
