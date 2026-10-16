@@ -31,7 +31,10 @@ OUTPUTS = {
     'safe': {'vo': 'gpu', 'gpu_api': 'd3d11', 'd3d11_flip': 'no'},
     'next': {'vo': 'gpu-next', 'gpu_api': 'd3d11'},
 }
-FORWARD_KEYS = ('MOUSE_MOVE', 'MBTN_LEFT', 'MBTN_LEFT_DBL', 'SPACE', 'LEFT', 'RIGHT', 'f', 'n', 'g', 'h', 'G', 'H', 'i', 'o', 'ESC')
+# Cift tiklama mpv'nin MBTN_LEFT_DBL'ine birakilmaz (bazi bilgisayarlarda gelmiyor): iki tek tiklamanin
+# arasindan burada algilanir. Fare hareketi de tam ekranda imlec konumundan izlenir (watch_cursor).
+DOUBLE_CLICK = 0.4
+FORWARD_KEYS = ('MOUSE_MOVE', 'MBTN_LEFT', 'SPACE', 'LEFT', 'RIGHT', 'f', 'n', 'g', 'h', 'G', 'H', 'i', 'o', 'ESC')
 _mpv_module = []
 
 
@@ -91,6 +94,8 @@ class NativePlayer:
         self._options = None      # mpv'nin acildigi (cikis, donanim cozme) ayari
         self._reported = None     # tani satiri yazilan dosya
         self._moved = 0.0
+        self._clicked = 0.0
+        self._watching = None     # tam ekranda imlec izleyen is parcacigi (threading.Event)
 
     # ------------------------------------------------------------------ UI is parcacigi
     def _ui(self, fn, wait=True):
@@ -179,8 +184,39 @@ class NativePlayer:
                 self._moved = now
                 self.emit('mpv_key', {'key': key})
             return
-        if state and state[0] in ('d', 'p'):   # basildi (birakma degil)
-            self.emit('mpv_key', {'key': key})
+        if not state or state[0] not in ('d', 'p'):   # yalnizca basma (birakma degil)
+            return
+        self.emit('mpv_key', {'key': key})
+        if key == 'MBTN_LEFT':
+            now = time.monotonic()
+            if now - self._clicked <= DOUBLE_CLICK:
+                self._clicked = 0.0
+                self.emit('mpv_key', {'key': 'MBTN_LEFT_DBL'})
+            else:
+                self._clicked = now
+
+    def watch_cursor(self, on):
+        """Tam ekranda imlec konumunu izler; kipirdayinca 'MOUSE_MOVE' bildirir (kontroller geri gelsin).
+        Video penceresi fare hareketini her bilgisayarda iletmiyor; konum Windows'tan okunur."""
+        if self._watching is not None:
+            self._watching.set()
+            self._watching = None
+        if not on or not WINDOWS:
+            return
+        import ctypes
+        from ctypes import wintypes
+        stop = self._watching = threading.Event()
+
+        def run():
+            point, last = wintypes.POINT(), None
+            while not stop.wait(0.15):
+                if not ctypes.windll.user32.GetCursorPos(ctypes.byref(point)):
+                    continue
+                now = (point.x, point.y)
+                if last is not None and now != last:
+                    self.emit('mpv_key', {'key': 'MOUSE_MOVE'})
+                last = now
+        threading.Thread(target=run, name='aktar-cursor', daemon=True).start()
 
     def _mpv_log(self, level, prefix, text):
         if level in ('error', 'fatal'):
@@ -287,6 +323,7 @@ class NativePlayer:
             self.player.pause = True
 
     def close(self):
+        self.watch_cursor(False)
         player, self.player = self.player, None
         self._reported = None
         if player is not None:

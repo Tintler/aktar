@@ -148,6 +148,11 @@
 <TitleBar />
 <MenuHost />
 
+{#if app.busy}
+  <!-- Video/belge acilirken: tiklamalar engellenir, ne olup bittigi gorunur. -->
+  <div class="busy" role="status" aria-live="polite"><div class="card"><Icon name="loader" size={30} spin /><b>{app.busy}</b></div></div>
+{/if}
+
 {#if app.review}<ReviewModal data={app.review} onsubmit={submitReview} />{/if}
 <ConfirmHost />
 
@@ -206,6 +211,9 @@
   .dropzone { position: fixed; inset: 0; z-index: 70; background: rgba(0, 0, 0, .55); display: grid; place-items: center; pointer-events: none; }
   .dropzone div { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 40px 56px; border: 2px dashed var(--accent);
     border-radius: 20px; color: var(--accent); background: var(--panel); font-size: 16px; }
+  .busy { position: fixed; inset: 0; z-index: 85; display: grid; place-items: center; background: rgba(0, 0, 0, .45); cursor: progress; }
+  .busy .card { display: flex; align-items: center; gap: 14px; padding: 20px 28px; color: var(--accent); }
+  .busy b { color: var(--text); font-size: 15px; }
   .toasts { position: fixed; right: 20px; bottom: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 60; max-width: 440px; }
   .toast { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; background: var(--overlay); border: 1px solid var(--outline); box-shadow: 0 8px 28px var(--shadow); font-size: 13px; }
   .toast > span { flex: 1; overflow-wrap: anywhere; }

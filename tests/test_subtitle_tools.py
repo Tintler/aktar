@@ -250,6 +250,18 @@ class ExportTests(unittest.TestCase):
         panel.SetBounds.assert_called_once_with(10, 20, 640, 360)
         self.assertTrue(panel.Visible)
 
+    def test_native_double_click_from_single_clicks(self):
+        import native_player
+        events = []
+        player = native_player.NativePlayer(window=None, emit=lambda name, data: events.append(data['key']))
+        player._key('d-', 'MBTN_LEFT')
+        player._key('u-', 'MBTN_LEFT')     # birakma sayilmaz
+        player._key('d-', 'MBTN_LEFT')
+        self.assertEqual(events, ['MBTN_LEFT', 'MBTN_LEFT', 'MBTN_LEFT_DBL'])
+        player._clicked -= 1.0              # uzun aradan sonraki tiklama tek sayilir
+        player._key('d-', 'MBTN_LEFT')
+        self.assertEqual(events[-1], 'MBTN_LEFT')
+
     def test_style_sanitised(self):
         style = subtitle_export.style_of({'color': 'red', 'size': 999, 'mode': 'x', 'font': 'A,B'})
         self.assertEqual((style['color'], style['size'], style['mode'], style['font']), ('#FFD400', 160, 'kf', 'A B'))

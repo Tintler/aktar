@@ -28,6 +28,9 @@ GWL_STYLE = -16
 WS_SYSMENU, WS_MINIMIZEBOX, WS_MAXIMIZEBOX = 0x00080000, 0x00020000, 0x00010000
 SWP_NOSIZE, SWP_NOMOVE, SWP_NOZORDER, SWP_FRAMECHANGED = 0x0001, 0x0002, 0x0004, 0x0020
 DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND = 33, 2
+DWMWCP_DONOTROUND = 1
+DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_COLOR_DEFAULT = 34, 0xFFFFFFFE, 0xFFFFFFFF
+WS_THICKFRAME, WS_CAPTION = 0x00040000, 0x00C00000
 
 SUPPORTED = sys.platform == 'win32'
 
@@ -196,8 +199,41 @@ class WindowFrame:
                     self._fit_maximized_now(form)
                     form.WindowState = FormWindowState.Maximized
         self._ui(apply)
+        self._fullscreen_frame(on)
         if not on:
             self._sync()
+
+    def _fullscreen_frame(self, on):
+        """Windows 11'in kose yuvarlatmasi ve 1 px kenarligi tam ekranda kapatilir; yeniden boyutlandirma
+        kenari da kaldirilir. Boylece pencere ekrani kenarsiz kaplar (siyah sahnelerde cerceve gorunmez)."""
+        hwnd = self._hwnd
+        if not hwnd:
+            return
+        style = self._user32.GetWindowLongPtrW(hwnd, GWL_STYLE)
+        if on:
+            self._fullscreen_style = style
+            style &= ~(WS_THICKFRAME | WS_CAPTION)
+        else:
+            style = getattr(self, '_fullscreen_style', style)
+        self._user32.SetWindowLongPtrW(hwnd, GWL_STYLE, style)
+        try:
+            corner = ctypes.c_int(DWMWCP_DONOTROUND if on else DWMWCP_ROUND)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(wintypes.HWND(hwnd), DWMWA_WINDOW_CORNER_PREFERENCE,
+                                                       ctypes.byref(corner), ctypes.sizeof(corner))
+            color = wintypes.DWORD(DWMWA_COLOR_NONE if on else DWMWA_COLOR_DEFAULT)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(wintypes.HWND(hwnd), DWMWA_BORDER_COLOR,
+                                                       ctypes.byref(color), ctypes.sizeof(color))
+        except (AttributeError, OSError):
+            pass   # Windows 10'da bu ozellikler yok
+        if on:
+            def cover():
+                from System.Windows.Forms import Screen
+                screen = Screen.FromHandle(self.window.native.Handle).Bounds
+                return screen.X, screen.Y, screen.Width, screen.Height
+            x, y, width, height = self._ui(cover)
+            self._user32.SetWindowPos(hwnd, None, x, y, width, height, SWP_NOZORDER | SWP_FRAMECHANGED)
+        else:
+            self._user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED)
 
     def _fit_maximized_now(self, form):
         from System.Drawing import Rectangle

@@ -32,6 +32,7 @@ export const app = $state({
   docSeek: null,              // {page}: belge goruntuleyicinin gidecegi sayfa
   fileOrigin: 'library',      // acik video/belge nereden acildi: 'library' | 'files' (menude vurgu)
   files: [],                  // Dosya incele: son incelenen dosyalar
+  busy: '',                   // dolu iken tum pencereyi kaplayan bekleme katmani (video/belge aciliyor)
   assistant: null,            // genel sohbet: acik sohbetin durumu (bridge_assistant)
   conversations: [],          // genel sohbet listesi [{id, title, updated}]
   think: readThink(),         // sohbetlerde dusunme (reasoning) acik mi (F99; tarayici deposunda kalir)
@@ -260,10 +261,12 @@ export function seekPlayer(time, play = true) {
 // `origin`: 'files' ise Dosya incele sayfasindan acildi (menude o vurgulanir).
 export async function openFile(row, at = null, origin = 'library') {
   if (row.missing) return toast('Dosya bulunamadı: ' + row.path, 'error');
+  if (app.busy) return;   // acilis surerken ikinci tiklama yok sayilir
   app.fileOrigin = origin;
   if (!VIDEO_EXT.test(row.path)) {
     if (app.document?.path !== row.path) {
-      const state = await act('doc_open', row.path);
+      app.busy = 'Belge açılıyor…';
+      const state = await act('doc_open', row.path).finally(() => (app.busy = ''));
       if (!state) return;
       app.document = state;
     }
@@ -272,7 +275,8 @@ export async function openFile(row, at = null, origin = 'library') {
     return;
   }
   if (app.player?.path !== row.path) {
-    const state = await act('player_open', row.path);
+    app.busy = 'Video açılıyor…';
+    const state = await act('player_open', row.path).finally(() => (app.busy = ''));
     if (!state) return;
     app.player = state;
   }

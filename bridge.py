@@ -247,6 +247,8 @@ class Bridge(TranslateMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin
 
     def window_fullscreen(self, on):
         """Video tam ekrani (F126): HTML ogesi tam ekrana gecince pencere de ekrani kaplar."""
+        if getattr(self, '_native', None) is not None:
+            self._native.watch_cursor(bool(on))   # mpv videosu fare hareketini iletmeyebilir
         if self._frame is not None:
             self._frame.set_fullscreen(bool(on))
         else:

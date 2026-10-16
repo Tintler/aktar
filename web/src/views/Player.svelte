@@ -89,6 +89,8 @@
   });
   const offKeys = on('mpv_key', ({ key }) => {
     if (!native || app.view !== 'player') return;
+    poke();   // her etkilesim (tiklama, tus, fare) tam ekranda kontrolleri geri getirir
+    if (key === 'MBTN_LEFT_DBL' && justOpened()) return;
     const actions = {
       MOUSE_MOVE: poke, MBTN_LEFT: toggle, MBTN_LEFT_DBL: toggleFullscreen, SPACE: toggle, f: toggleFullscreen, n: noteHere,
       LEFT: () => seekTo(time - STEP), RIGHT: () => seekTo(time + STEP),
@@ -140,7 +142,8 @@
         return;
       }
       audio = audioIndex;
-      const state = await act('mpv_open', p.path, at, play);
+      app.busy = 'Video açılıyor…';   // ilk acilista libmpv yuklenir; ikinci tiklama olmasin
+      const state = await act('mpv_open', p.path, at, play).finally(() => (app.busy = ''));
       lastRect = '';   // panel bu acilista olusmus olabilir: konum yeniden bildirilsin
       if (state) { time = at; codec = (state.codec || '').split(' ')[0].toLowerCase(); }
       return;
@@ -177,6 +180,7 @@
     const path = p?.path;
     if (!path || path === opened) return;
     opened = path;
+    openedAt = performance.now();
     transcode = false;
     software = false;
     timings = {};          // zamanlama ve klip videoya ozeldir
@@ -494,8 +498,17 @@
     fullscreen = on;
     call('window_fullscreen', on);
     if (native) call('mpv_command', 'cursor', on ? 1500 : 'no');
+    if (on) {
+      const hint = 'Tam ekrandan çıkmak için Esc tuşuna basın ya da videoya çift tıklayın';
+      if (native) call('mpv_osd', hint);
+      else flash(hint);
+    }
     poke();
   }
+  // Dosya incele listesi tek tiklamayla acar: cift tiklamanin ikinci tiklamasi acilan videoya
+  // denk gelip tam ekrani tetiklemesin.
+  let openedAt = 0;
+  const justOpened = () => performance.now() - openedAt < 1200;
   function toggleFullscreen() {
     setFullscreen(!fullscreen);
   }
@@ -537,7 +550,7 @@
     </div>
     <div class="page-body body">
       <div class="player card" class:full={fullscreen} class:idle={fullscreen && idle} bind:this={shell} role="presentation" onmousemove={poke}>
-        <div class="surface" role="presentation" bind:this={surface} onclick={toggle} ondblclick={toggleFullscreen}>
+        <div class="surface" role="presentation" bind:this={surface} onclick={toggle} ondblclick={() => !justOpened() && toggleFullscreen()}>
           <!-- svelte-ignore a11y_media_has_caption -->
           <video class:hidden={native} bind:this={videoEl} preload="auto" onloadedmetadata={metadata} ontimeupdate={timeupdate}
             onplay={() => (playing = true)} onpause={() => (playing = false)} onwaiting={stalled}
