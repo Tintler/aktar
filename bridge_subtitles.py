@@ -162,7 +162,7 @@ class SubtitleToolsMixin:
         ext = source.extension(fmt)
         names = {'srt': 'SubRip', 'ass': 'Advanced SubStation', 'ssa': 'SubStation', 'vtt': 'WebVTT', 'json': 'JSON'}
         target = self._dialog('save_file', 'Altyazıyı kaydet', self._default_subtitle_name(path, source, fmt),
-                              (f'{names.get(ext, ext.upper())} (*.{ext})',))
+                              (f'{names.get(ext, ext.upper())} (*.{ext})',), str(path.parent))
         if not target:
             return None
         target = Path(target)
@@ -175,7 +175,7 @@ class SubtitleToolsMixin:
         except OSError as error:
             return {'error': 'Kaydedilemedi: ' + str(error)}
         self._log(f'Altyazı kaydedildi: {target}')
-        return {'path': str(target), 'name': target.name}
+        return {'path': str(target), 'name': target.name, 'folder': str(target.parent)}
 
     # ------------------------------------------------------------------ arka plan isleri
     def subtool_state(self):
@@ -216,9 +216,10 @@ class SubtitleToolsMixin:
 
         thread = threading.Thread(target=run, name='aktar-subtool-' + kind, daemon=True)
         self._tool = {'kind': kind, 'path': path, 'thread': thread, 'cancel': cancel}
-        thread.start()
+        # 'running' isten once gider: is cok cabuk biterse 'done' ondan sonra gelmeli.
         self._emit('subtool', {'kind': kind, 'path': str(path), 'state': 'running', 'stage': '',
                                'progress': {'done': 0, 'total': 0}})
+        thread.start()
         return {'started': True}
 
     def _transcribe(self, path, cancel, progress, need_words=False, audio_track=None):
@@ -229,7 +230,7 @@ class SubtitleToolsMixin:
                                    audio_track=audio_track, need_words=need_words)
         player = getattr(self, '_player_video', None)
         if player is not None and player.path == path and (
-                not player.whisper or player.whisper.get('audio_track') == audio_track):
+                need_words or not player.whisper or player.whisper.get('audio_track') == audio_track):
             player.whisper = result
             self._push_player(player)
         if getattr(self, '_video', None) == path and audio_track is None:
@@ -275,6 +276,11 @@ class SubtitleToolsMixin:
 
         def work(cancel, progress):
             result = self._transcribe(path, cancel, progress, need_words=True, audio_track=track)
+            if not speech.has_words(result):
+                # Eski aktar-whisper paketi kelime zamanlarini dondurmez; is sessizce "bitmesin".
+                raise RuntimeError('Whisper kelime zamanlarını döndürmedi. Aktar\'ın yanındaki "aktar-whisper" '
+                                   'klasörü bu sürümden eski olabilir: yeni derlenen dist\\aktar-whisper '
+                                   'klasörünü Aktar ile aynı yere kopyalayın.')
             return {'segments': len(result['segments']), 'words': speech.has_words(result)}
         return self._start_tool('whisper', path, work)
 
@@ -335,6 +341,14 @@ class SubtitleToolsMixin:
                             'need_words': True}
                 timing = subtitle_sync.Timing.of(timing)
                 window = subtitle_sync.Timing(timing.scale, timing.offset - start)
+                style = dict(style or {})
+                if options['subtitles'] == 'burn':
+                    if options['font_size']:
+                        style['size'] = options['font_size']
+                    # Duz altyazi yakilirken secilen boyut ve renkle ASS'ye cevrilir (kaynagin ASS stilleri
+                    # 'Kaynagin bicimi' secilirse korunur); kelime vurgulu SRT boyutu force_style ile alir.
+                    if fmt in ('srt', 'vtt') or (fmt == 'source' and (source.whisper or source.kind not in ('ass', 'ssa'))):
+                        fmt = 'ass'
                 text = source.render(fmt, window, end - start, style)
                 ext = source.extension(fmt)
             except (RuntimeError, ValueError, OSError) as error:
@@ -342,7 +356,8 @@ class SubtitleToolsMixin:
             if ext == 'json':
                 return {'error': 'JSON klibe eklenemez; bir altyazı biçimi seçin.'}
         name = clip.default_name(path, start, end, options['format'])
-        target = self._dialog('save_file', 'Klibi kaydet', name, (f'{options["format"].upper()} (*.{options["format"]})',))
+        target = self._dialog('save_file', 'Klibi kaydet', name, (f'{options["format"].upper()} (*.{options["format"]})',),
+                              str(path.parent))
         if not target:
             return None
         target = Path(target)

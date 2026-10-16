@@ -52,8 +52,12 @@ def options_of(values):
         subtitles = 'burn'
     if fmt in ('gif', 'm4a') or subtitles == 'burn' or height:
         mode = 'precise'   # goruntu degisiyorsa kopyalanamaz
+    try:
+        font_size = max(16, min(200, int(values.get('font_size') or 0))) if values.get('font_size') else 0
+    except (TypeError, ValueError):
+        font_size = 0
     return {'format': fmt, 'mode': mode, 'quality': quality, 'height': height,
-            'audio': audio, 'subtitles': subtitles}
+            'audio': audio, 'subtitles': subtitles, 'font_size': font_size}
 
 
 def clock(seconds):
@@ -83,7 +87,11 @@ def build_command(video, start, end, output, options, info=None, subtitle_name=N
     audio_map = f'0:{options["audio"]}' if options['audio'] is not None else '0:a:0?'
     filters = []
     if options['subtitles'] == 'burn' and subtitle_name and fmt != 'm4a':
-        filters.append(f'subtitles={subtitle_name}')
+        burn = f'subtitles={subtitle_name}'
+        if options['font_size'] and subtitle_codec not in ('ass', 'ssa'):
+            # SRT'yi libass 288 satirlik tuvale cizer; boyut 1080p olcegindeki pikselden cevrilir.
+            burn += f":force_style='Fontsize={max(6, round(options['font_size'] * 288 / 1080))}'"
+        filters.append(burn)
     if fmt == 'gif':
         height = options['height'] or 360
         filters.append(f'fps={GIF_FPS},scale=-2:{height}:flags=lanczos')

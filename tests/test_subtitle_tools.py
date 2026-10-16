@@ -338,6 +338,12 @@ class ClipTests(unittest.TestCase):
                                        'clip.ass', 'ass')
             self.assertEqual(embed[embed.index('-c:s') + 1], 'ass')
             self.assertIn('0:3', embed)
+            sized = clip.build_command('in.mkv', 0, 5, 'out.mp4', {'subtitles': 'burn', 'font_size': 108}, info,
+                                       'clip.srt', 'srt')
+            self.assertEqual(sized[sized.index('-vf') + 1], "subtitles=clip.srt:force_style='Fontsize=29'")
+            styled = clip.build_command('in.mkv', 0, 5, 'out.mp4', {'subtitles': 'burn', 'font_size': 108}, info,
+                                        'clip.ass', 'ass')
+            self.assertEqual(styled[styled.index('-vf') + 1], 'subtitles=clip.ass')
             gif = clip.build_command('in.mkv', 0, 5, 'out.gif', {'format': 'gif'}, info)
             self.assertIn('palettegen', gif[gif.index('-vf') + 1])
             audio = clip.build_command('in.mkv', 0, 5, 'out.m4a', {'format': 'm4a'}, info)
@@ -407,6 +413,45 @@ class BridgeToolTests(unittest.TestCase):
             info = host.subtitle_info('v.mkv', 'whisper')
             self.assertFalse(info['words'])
             self.assertIn('karaoke', [item['id'] for item in info['formats']])
+
+    def test_word_extraction_reports_old_helper(self):
+        host = self.Host('x')
+        old = {'segments': [{'start': 0.0, 'end': 1.0, 'text': 'hi'}], 'language': 'en'}
+        with mock.patch.object(speech, 'available', return_value=(True, '')), \
+                mock.patch.object(host, '_transcribe', return_value=old):
+            host.whisper_words('v.mkv')
+            host._tool['thread'].join(5)
+        final = host.events[-1][1]
+        self.assertEqual(final['state'], 'error')
+        self.assertIn('aktar-whisper', final['message'])
+
+    def test_save_dialog_opens_in_video_folder(self):
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            video, sub = folder / 'Film.mkv', folder / 'Film.srt'
+            video.write_bytes(b'')
+            sub.write_text(SRT, encoding='utf-8')
+            host = self.Host(folder / 'out')
+            with mock.patch.object(host, '_dialog', wraps=host._dialog) as dialog:
+                host.subtitle_export(str(video), 'file:' + str(sub), 'srt')
+            self.assertEqual(dialog.call_args.args[-1], str(folder))
+
+    def test_burned_plain_subtitle_uses_chosen_size_and_colour(self):
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            video, sub = folder / 'Film.mkv', folder / 'Film.srt'
+            video.write_bytes(b'')
+            sub.write_text(SRT, encoding='utf-8')
+            host = self.Host(folder / 'clip.mp4')
+            with mock.patch.object(clip, 'save', return_value={'output': 'x', 'subtitle': ''}) as save, \
+                    mock.patch.object(bridge_subtitles.media_server, 'probe', return_value={}):
+                host.clip_save(str(video), 0.5, 6, {'subtitles': 'burn', 'font_size': 90}, 'file:' + str(sub),
+                               None, 'srt', {'base': '#00FF00'})
+                host._tool['thread'].join(5)
+            text, ext = save.call_args.args[6], save.call_args.args[7]
+            self.assertEqual(ext, 'ass')
+            self.assertIn('Style: Default,Arial,90,&H0000FF00', text)
+            self.assertIn('Dialogue: 0,0:00:00.50,0:00:03.00', text)
 
     def test_clip_requires_subtitle_choice(self):
         host = self.Host('x')

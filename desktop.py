@@ -39,9 +39,10 @@ class Dialogs:
                                                 file_types=tuple(file_types))
         return list(result) if result else None
 
-    def save_file(self, title, filename, file_types=()):
-        result = self.window.create_file_dialog(webview.FileDialog.SAVE, save_filename=filename,
-                                                file_types=tuple(file_types))
+    def save_file(self, title, filename, file_types=(), directory=''):
+        # directory verilmezse pencere kullanici klasorunde acilir (pywebview varsayilani).
+        result = self.window.create_file_dialog(webview.FileDialog.SAVE, directory=str(directory or ''),
+                                                save_filename=filename, file_types=tuple(file_types))
         if isinstance(result, (list, tuple)):
             result = result[0] if result else None
         return result or None

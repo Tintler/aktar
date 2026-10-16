@@ -3,7 +3,8 @@
   // zamanli bicimler), karaoke stili ve uygulanacak zamanlama duzeltmesi. Oynatici ve Altyazi Cevir paylasir.
   import Modal from './Modal.svelte';
   import Icon from '../lib/Icon.svelte';
-  import { act, toast } from '../lib/state.svelte.js';
+  import { act } from '../lib/state.svelte.js';
+  import { confirm } from '../lib/confirm.svelte.js';
   import { subtool, onSubtool, jobText, jobPercent, cancelJob, timingText, isIdentity } from '../lib/subtools.svelte.js';
   import { onDestroy } from 'svelte';
 
@@ -54,8 +55,8 @@
     const result = await act('subtitle_export', path, source, fmt, timing, style);
     saving = false;
     if (result?.path) {
-      toast('Altyazı kaydedildi: ' + result.name, 'ok');
       onclose();
+      if (await confirm({ title: 'Altyazı kaydedildi', message: result.path, ok: 'Konumu aç', cancel: 'Kapat' })) act('reveal', result.path);
     }
   }
 </script>

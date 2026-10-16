@@ -540,7 +540,7 @@ class LibraryMixin:
         """Tek dosyanin transkripti: kayit penceresinde secilen uzantiya gore txt/srt/md."""
         video = Path(path)
         target = self._dialog('save_file', 'Transkripti dışa aktar', video.with_suffix('.txt').name,
-                              ('Metin (*.txt)', 'Altyazı (*.srt)', 'Markdown (*.md)'))
+                              ('Metin (*.txt)', 'Altyazı (*.srt)', 'Markdown (*.md)'), str(video.parent))
         if not target:
             return None
         suffix = Path(target).suffix.lower().lstrip('.')

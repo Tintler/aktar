@@ -51,7 +51,7 @@ def main():
         def __getattr__(self, _name):
             return lambda *_args: None
 
-        def save_file(self, _title, filename, _types=()):
+        def save_file(self, _title, filename, _types=(), _directory=''):
             if not args.save_dir:
                 return None
             args.save_dir.mkdir(parents=True, exist_ok=True)

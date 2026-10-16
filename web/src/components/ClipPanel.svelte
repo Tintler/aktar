@@ -12,7 +12,7 @@
 
   const KEY = 'aktar.clip';
   const saved = (() => { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { return {}; } })();
-  let opts = $state({ format: 'mp4', mode: 'precise', quality: 'high', height: 0, subtitles: 'none', ...saved.opts });
+  let opts = $state({ format: 'mp4', mode: 'precise', quality: 'high', height: 0, subtitles: 'none', font_size: 64, ...saved.opts });
   let subFormat = $state(saved.subFormat ?? 'source');
   let style = $state({ color: '#FFD400', base: '#FFFFFF', size: 64, mode: 'kf', ...saved.style });
   $effect(() => {
@@ -185,6 +185,21 @@
             <input type="color" bind:value={style.color} title="Vurgu rengi" />
           {/if}
         </div>
+        {#if opts.subtitles === 'burn'}
+          <div class="opt">
+            <span class="label"></span>
+            <label class="size" title="1080p görüntüdeki piksel yüksekliği; klip küçültülürse orantılı küçülür">Yazı boyutu
+              <input type="range" min="24" max="140" step="2" bind:value={opts.font_size} />
+              <span class="mono">{opts.font_size}</span></label>
+            {#if subFormat !== 'highlight'}
+              <label class="size" title={subFormat === 'karaoke' ? 'Henüz söylenmeyen kelimelerin rengi' : 'Yazı rengi'}>Yazı rengi
+                <input type="color" bind:value={style.base} /></label>
+            {/if}
+          </div>
+          {#if subFormat === 'source' && /(\.|· )(ass|ssa)$/i.test(sourceLabel)}
+            <p class="note">Kaynağın biçimi seçiliyse ASS dosyasının kendi stili kullanılır; boyut için “ASS”i seçin.</p>
+          {/if}
+        {/if}
         <p class="note">
           {#if !isIdentity(timing)}Zamanlama düzeltmesi ({timingText(timing)}) klibe de uygulanır. {/if}
           {#if opts.subtitles === 'embed' && opts.format === 'mp4'}MP4'te gömülü altyazı düz metindir; karaoke renkleri için MKV seçin ya da görüntüye yakın.{/if}
@@ -236,6 +251,9 @@
   input[type='color'] { width: 40px; height: 28px; border: 1px solid var(--field-border); border-radius: 8px; background: var(--surface); padding: 2px; cursor: pointer; }
   .note { font-size: 11.5px; color: var(--dim); line-height: 1.5; margin: 0 0 0 72px; }
   .note:empty { display: none; }
+  .size { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--secondary); }
+  .size input[type='range'] { width: 120px; accent-color: var(--accent); }
+  .size .mono { width: 28px; color: var(--text); }
   .note.inline { margin: 0; }
   .foot { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--outline); font-size: 12px; }
 </style>

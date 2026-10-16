@@ -127,7 +127,9 @@ def render_document(kind, payload, fmt='source', timing=None, length=None, style
         return subtitle.render_vtt([subtitle.Cue(item['text'].split('\n'), start=vtt_time(item['start']),
                                                  end=vtt_time(item['end'])) for item in items])
     if fmt == 'ass':
-        lines = ass_header(style) + ['']
+        plain = style_of(style)
+        plain['color'] = plain['base']   # duz altyazida yazi rengi; vurgu rengi yalniz karaokede
+        lines = ass_header(plain) + ['']
         cues = [subtitle.Cue([r'\N'.join(_ass_text(line) for line in item['text'].split('\n'))],
                              prefix=['0', ass_time(item['start']), ass_time(item['end']), 'Default', '', '0', '0', '0', ''])
                 for item in items]
