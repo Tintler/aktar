@@ -32,6 +32,7 @@
 
   function choose(language, value) {
     app.ttsPrefs.voices = { ...(app.ttsPrefs.voices ?? {}), [language]: value };
+    app.ttsPrefs.active_preset = '';   // F137: elle secilen ses okuyucudaki kayitli sesin yerine gecer
     saveTtsPrefs();
   }
 
@@ -49,6 +50,7 @@
     const all = { ...(app.ttsPrefs.options ?? {}) };
     all[value] = { ...(all[value] ?? {}), [key]: text };
     app.ttsPrefs.options = all;
+    app.ttsPrefs.active_preset = '';
     saveTtsPrefs();
   }
 

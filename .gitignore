@@ -36,3 +36,6 @@ ses-motorlari/
 ses-onbellegi/
 build-engines/
 dist-engines/
+
+# Sesli okuma onayarlari (resimler, klon kayitlari)
+ses-presetleri/

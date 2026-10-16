@@ -392,6 +392,8 @@ Okuma sayfasında alttaki **oynat** düğmesi bölümü cümle cümle sesli okur
 
 Ses, bilgisayarınızda çalışan ayrı bir ses motoruyla üretilir (Çevirgeç'in motorları): **EMA Lightning** (küçük ve hızlı Türkçe ses) ve **VoxCPM** (Trendyol-TTS anlatıcı, tarifle tasarlanan ya da bir kayıttan klonlanan ses; NVIDIA ekran kartı önerilir). Kaynak koddan çalışırken `py -3 -m pip install -r requirements-tts.txt` ile paketler kuruluysa motorlar doğrudan kullanılır. `.exe` için motor paketini proje klasöründe `DERLE_SES.cmd` ile oluşturun (`dist-enginesktar-ses-<motor>-win64.zip`) ve **Ayarlar → Sesli okuma → Dosyadan kur** ile kurun; motorlar `ses-motorlari` klasörüne açılır, modeller ilk kullanımda iner. Çevirgeç için derlenmiş paketler de kurulabilir. Ses, işlemci (CPU/GPU), varsayılan hız, cümle ve paragraf sonu duraklamaları ve tırnak içini bölmeme aynı bölümden ayarlanır (`ui.json` → `tts`).
 
+**Okuyan ses:** Okuyucunun sağ altındaki ses düğmesi kayıtlı sesleri resimleriyle listeler; birine tıklayınca okuma o sesle, kaldığı cümleden sürer. **Yeni ses** ile ad, resim (Resim seç, Ctrl+V ya da pencereye bırakma) ve motor sesi seçilir: EMA Lightning, VoxCPM Trendyol-TTS, tarifle tasarlanan ses (ses tarifi yazılır) ya da kayıttan klonlanan ses (kayıt ve isteğe bağlı metni). Klon kaydı sesin içine kopyalanır; asıl dosya taşınsa da ses çalışır. Sesler `ses-presetleri` klasöründe durur; düzenlemek için listede kalem simgesine basın. **Ayarlardaki ses** seçilirse Ayarlar → Ses bölümündeki ses kullanılır.
+
 Motor yalnızca okurken çalışan bir alt süreçtir; Aktar kapanınca (çökse bile) kendiliğinden kapanır.
 
 ---

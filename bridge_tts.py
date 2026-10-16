@@ -11,6 +11,7 @@ import re
 import threading
 from pathlib import Path
 
+import voice_presets
 from app_core import APP_DIR, ROOT
 from tts import Engines
 
@@ -138,6 +139,81 @@ class TtsMixin:
 
         threading.Thread(target=work, name='aktar-tts-export', daemon=True).start()
         return {'started': True, 'path': str(path)}
+
+    # ------------------------------------------------------------------ ses onayarlari (F137)
+    def _voice_specs(self):
+        """Kullanilabilir motorlarin sesleri: '<motor>/<ses>' -> motor.json ses kaydi (motor adiyla)."""
+        specs = {}
+        for engine in self._engines().engines():
+            if not engine['mode']:
+                continue
+            for voice in engine['voices']:
+                specs[f'{engine["id"]}/{voice["id"]}'] = dict(voice, engine_name=engine['name'])
+        return specs
+
+    def tts_presets(self):
+        """{'presets', 'active'}: okuyucudaki ses secicinin listesi ve secili onayar."""
+        try:
+            items = voice_presets.list_presets(APP_DIR)
+        except OSError as error:
+            return _error(error)
+        return {'presets': items, 'active': self.ui_prefs().get('tts', {}).get('active_preset', '')}
+
+    def tts_preset_save(self, values):
+        try:
+            saved = voice_presets.save(APP_DIR, values, self._voice_specs())
+        except (ValueError, OSError) as error:
+            return _error(error)
+        if self.ui_prefs().get('tts', {}).get('active_preset') == saved['id']:
+            self._apply_preset(saved)       # duzenlenen secili ses hemen gecerli olur
+        return dict(self.tts_presets(), saved=saved)
+
+    def tts_preset_delete(self, ident):
+        try:
+            voice_presets.remove(APP_DIR, str(ident or ''))
+        except (ValueError, OSError) as error:
+            return _error(error)
+        tts = dict(self.ui_prefs().get('tts', {}))
+        if tts.get('active_preset') == ident:
+            tts['active_preset'] = ''
+            self.save_ui_prefs({'tts': tts})
+        return self.tts_presets()
+
+    def tts_preset_image(self, path=None):
+        """Ses resmi: yol verilmezse dosya penceresi acilir. {'image': data URL}; vazgecilirse None."""
+        path = path or self._dialog('open_file', 'Ses resmi seç', ('Görseller (' + ';'.join(voice_presets.IMAGE_TYPES) + ')',))
+        if not path:
+            return None
+        try:
+            return {'image': voice_presets.image_from_file(path)}
+        except ValueError as error:
+            return _error(error)
+        except OSError as error:
+            return {'error': f'Görsel açılamadı: {path} ({error.strerror or error})'}
+
+    def tts_preset_apply(self, ident):
+        """Onayari secili ses yapar (ui.json 'tts'); ident bos ise secim kalkar, Ayarlar'daki ses gecerli olur.
+        Guncel tts tercihlerini dondurur; okuyucu motoru tts_load ile yeniden hazirlar."""
+        if not ident:
+            tts = dict(self.ui_prefs().get('tts', {}), active_preset='')
+            self.save_ui_prefs({'tts': tts})
+            return {'tts': tts}
+        preset = voice_presets.get(APP_DIR, str(ident))
+        if preset is None:
+            return {'error': 'Ses kaydı bulunamadı.'}
+        if preset['voice'] not in self._voice_specs():
+            return {'error': 'Bu sesin motoru kurulu değil; Ayarlar → Sesli okuma bölümünden kurun.'}
+        return {'tts': self._apply_preset(preset)}
+
+    def _apply_preset(self, preset):
+        spec = self._voice_specs().get(preset['voice'], {})
+        language = spec.get('language', 'tr')
+        tts = dict(self.ui_prefs().get('tts', {}))
+        tts['voices'] = dict(tts.get('voices') or {}, **{language: preset['voice']})
+        tts['options'] = dict(tts.get('options') or {}, **{preset['voice']: dict(preset.get('options') or {})})
+        tts['active_preset'] = preset['id']
+        self.save_ui_prefs({'tts': tts})
+        return tts
 
     def _stop_tts_for_close(self):
         """Pencere kapaninca: hazirlama durur, motor sureci kapatilir."""

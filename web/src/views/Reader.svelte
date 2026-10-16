@@ -8,6 +8,7 @@
   import { segment, QUOTE_DEFAULTS } from '../lib/sentences.js';
   import { player, play, pause, resume, stop, step, setSpeed, setSentences, setHooks, setPauses } from '../lib/player.svelte.js';
   import { resolvePauses, pauseAfter } from '../lib/pauses.js';
+  import VoicePicker from '../components/VoicePicker.svelte';
 
   let { onclose } = $props();
 
@@ -148,6 +149,16 @@
     if (!(await ensureEngine())) return;
     setSpeed(app.ttsPrefs.speed);
     play(firstVisibleSentence());
+  }
+
+  // F137: okuyan ses degisti. Okuyorsa motor yeni sesle hazirlanir ve ayni cumleden surer.
+  async function voiceChanged() {
+    const index = player.active ? player.index : null;
+    if (player.active) stop();
+    await refreshCached();
+    if (index === null || !(await ensureEngine())) return;
+    setSpeed(app.ttsPrefs.speed);
+    play(index);
   }
 
   function cycleSpeed() {
@@ -431,6 +442,7 @@
         {#if player.active}<button class="icon-btn" title="Okumayı bitir" onclick={() => { stop(); highlight(-1); }}><Icon name="stop" /></button>{/if}
       </div>
       <div class="right">
+        <VoicePicker onchange={voiceChanged} />
         <button class="chip acc" title="Okuma hızı" onclick={cycleSpeed}>{app.ttsPrefs.speed.toLocaleString('tr-TR')}×</button>
         {#if app.ttsPrepare?.book === book.id}
           <button class="chip acc" title="Hazırlamayı durdur" onclick={cancelPrepare}>
@@ -531,6 +543,10 @@
   .page :global(.s.now) { background: color-mix(in srgb, var(--accent) 26%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent); }
 
   .player { position: relative; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; padding: 10px 16px; border-top: 1px solid var(--outline); background: var(--panel); }
+  /* Dar pencerede sag taraftaki dugmeler (ses secici, hiz, Hazirla, Kaydet) ortadaki oynaticinin ustune binmesin. */
+  @media (max-width: 1360px) {
+    .player { grid-template-columns: minmax(0, 1fr) auto auto; }
+  }
   .player .book { position: absolute; left: 0; right: 0; top: -1px; height: 2px; border-radius: 0; background: transparent; }
   .left, .right { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .right { justify-content: flex-end; }
