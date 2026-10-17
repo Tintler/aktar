@@ -44,6 +44,11 @@
   let error = $state('');
   let pending = null;                // {time, play}: kaynak yuklenince gidilecek an
   let fullscreen = $state(false);
+  // Video oynatmaya hazir (mpv dosyayi acti ya da WebView ust veriyi okudu) ve akislar okundu mu:
+  // hazir olmadan alttaki menuler (ses, altyazi, klip...) kapali; yoksa bos ya da yarim acilirlar.
+  let mediaReady = $state(false);
+  const ready = $derived(mediaReady && p?.subtitles != null);
+  const waitTitle = 'Video yükleniyor…';
 
   const duration = $derived(p?.duration || 0);
   const fmt = (s) => {
@@ -86,6 +91,7 @@
     playing = !s.paused;
     loading = s.buffering;
     hwdec = s.hwdec;
+    if (s.loaded) mediaReady = true;
     if (previewEnd !== null && time >= previewEnd) {
       previewEnd = null;
       call('mpv_command', 'pause');
@@ -139,18 +145,23 @@
     if (native) {
       mode = 'native';
       error = '';
-      if (audioIndex !== null && audioIndex !== undefined && audio !== null && opened === p.path && audioIndex !== audio) {
+      // Ayni videoda parca degisimi: dosya yeniden acilmaz, mpv'de ses parcasi secilir. Ilk acilista
+      // `audio` bos kalir (varsayilan parca); ilk degisim de buradan gecmeli, yoksa dosya bastan acilir.
+      if (audioIndex !== null && audioIndex !== undefined && opened === p.path && mediaReady) {
+        if (audioIndex === (audio ?? p.audio?.[0]?.index)) return;
         audio = audioIndex;
         await act('mpv_command', 'audio', audioIndex);
         return;
       }
       audio = audioIndex;
+      mediaReady = false;
       app.busy = 'Video açılıyor…';   // ilk acilista libmpv yuklenir; ikinci tiklama olmasin
       const state = await act('mpv_open', p.path, at, play, volume, muted).finally(() => (app.busy = ''));
       lastRect = '';   // panel bu acilista olusmus olabilir: konum yeniden bildirilsin
       if (state) { time = at; codec = (state.codec || '').split(' ')[0].toLowerCase(); }
       return;
     }
+    mediaReady = false;
     const result = await act('player_source', audioIndex, at, force || transcode, transcode, codecs, software);
     if (!result || !videoEl) return;
     encoder = result.encoder ?? '';
@@ -204,6 +215,7 @@
 
   function metadata() {
     loading = false;
+    mediaReady = true;
     if (pending) {
       // Duz akista sarilamaz (akis zaten o andan baslar); dogrudan ve MSE'de tam ana gidilir.
       const target = Math.max(0, pending.time - offset);
@@ -609,15 +621,15 @@
             {#if subtool.job?.path === p.path}
               <span class="badge accent job" title="Altyazı/klip işi sürüyor">{jobText(subtool.job)}</span>
             {/if}
-            <button class="icon-btn sm" class:on={panel === 'clip'} title="Klip (I / O: başlangıç / bitiş)" onclick={() => openPanel('clip')}><Icon name="scissors" size={16} /></button>
-            <button class="icon-btn sm" class:on={panel === 'sync'} disabled={!ccKey} title={ccKey ? 'Altyazı zamanlaması ve dışa aktarma (G / H: ±0,1 sn)' : 'Önce bir altyazı seçin'}
+            <button class="icon-btn sm" class:on={panel === 'clip'} disabled={!ready} title={ready ? 'Klip (I / O: başlangıç / bitiş)' : waitTitle} onclick={() => openPanel('clip')}><Icon name="scissors" size={16} /></button>
+            <button class="icon-btn sm" class:on={panel === 'sync'} disabled={!ready || !ccKey} title={!ready ? waitTitle : ccKey ? 'Altyazı zamanlaması ve dışa aktarma (G / H: ±0,1 sn)' : 'Önce bir altyazı seçin'}
               onclick={() => openPanel('sync')}><Icon name="timer" size={16} /></button>
-            <button class="icon-btn sm" title="Bu ana not ekle (N)" onclick={noteHere}><Icon name="squarePen" size={16} /></button>
-            <button class="icon-btn sm" class:on={notes.open} title="Notlar" onclick={() => (notes.open = !notes.open)}><Icon name="list" size={18} /></button>
+            <button class="icon-btn sm" disabled={!ready} title={ready ? 'Bu ana not ekle (N)' : waitTitle} onclick={noteHere}><Icon name="squarePen" size={16} /></button>
+            <button class="icon-btn sm" class:on={notes.open} disabled={!ready} title={ready ? 'Notlar' : waitTitle} onclick={() => (notes.open = !notes.open)}><Icon name="list" size={18} /></button>
             {#if (p.audio ?? []).length > 1}
-              <button class="icon-btn sm" title="Ses parçası" onclick={audioMenu}><Icon name="headphones" size={18} /></button>
+              <button class="icon-btn sm" disabled={!ready} title={ready ? 'Ses parçası' : waitTitle} onclick={audioMenu}><Icon name="headphones" size={18} /></button>
             {/if}
-            <button class="icon-btn sm" class:on={ccKey} title="Altyazılar" onclick={ccMenu}><Icon name="subtitles" size={18} /></button>
+            <button class="icon-btn sm" class:on={ccKey} disabled={!ready} title={ready ? 'Altyazılar' : waitTitle} onclick={ccMenu}><Icon name="subtitles" size={18} /></button>
             <button class="icon-btn sm" title="Tam ekran (F)" onclick={toggleFullscreen}><Icon name={fullscreen ? 'shrink' : 'expand'} size={16} /></button>
           </div>
         </div>

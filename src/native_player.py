@@ -226,8 +226,10 @@ class NativePlayer:
         if player is None:
             return {'ready': False}
         try:
-            return {'ready': True, 'path': self.path, 'time': player.time_pos or 0.0,
-                    'duration': player.duration or 0.0, 'paused': bool(player.pause),
+            duration = player.duration or 0.0
+            # loaded: dosya acildi, parca listesi hazir (sure ancak o zaman bilinir); arayuz menuleri acar
+            return {'ready': True, 'loaded': duration > 0, 'path': self.path, 'time': player.time_pos or 0.0,
+                    'duration': duration, 'paused': bool(player.pause),
                     'eof': bool(player.eof_reached), 'hwdec': player.hwdec_current or 'no',
                     'codec': player.video_codec or '', 'buffering': bool(player.paused_for_cache)}
         except Exception:  # mpv kapanirken
