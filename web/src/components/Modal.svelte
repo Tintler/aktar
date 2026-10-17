@@ -23,7 +23,7 @@
 <style>
   .backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); display: grid; place-items: center; z-index: 50; padding: 24px; }
   .modal {
-    max-width: 100%; max-height: 100%; display: flex; flex-direction: column; background: var(--panel);
+    max-width: 100%; max-height: calc(100vh - 48px); display: flex; flex-direction: column; background: var(--panel);
     border: 1px solid var(--outline); border-radius: 16px; box-shadow: var(--shadow);
   }
   header { display: flex; align-items: center; gap: 12px; padding: 16px 16px 8px 22px; }

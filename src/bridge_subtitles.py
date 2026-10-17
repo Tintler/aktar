@@ -428,13 +428,12 @@ class SubtitleToolsMixin:
             if options['separate'] and has_audio:
                 stems = voice_split.separate(path, options['audio'], log=self._log, progress=progress,
                                              cancelled=cancel.is_set)
-            progress(0, 0, 'engine')
-            self._wait_voice(engines, language, device, override, cancel)
             self._log(f'Dublaj başlıyor: {path.name} ({len(segments)} satır) -> {target.name}')
             result = dub.build(engines, path, segments, target, options, timing, language, override,
                                duration=probed.get('duration') or 0.0, has_audio=has_audio,
                                can_speed=can_speed, progress=progress, cancelled=cancel.is_set, log=self._log,
                                plan=plan, voices=specs, stems=stems, load_voice=load_voice(cancel, progress))
+            # motor her ses grubu icin build icinde (load_voice) hazirlanir
             self._log('Dublaj kaydedildi: ' + result['output'])
             return dict(result, name=target.name)
         return self._start_tool('dub', path, work)

@@ -119,6 +119,15 @@ class ReaderMixin:
     def reader_remove_bookmark(self, book_id, bookmark_id):
         return self._reading(self._shelf().remove_bookmark, book_id, bookmark_id)
 
+    def reader_search(self, book_id, query):
+        """F147: kitap ici arama (tum bolumler): {'results', 'total', 'more'}."""
+        import book_search
+        try:
+            _entry, book = self._shelf()._book(book_id)
+            return book_search.search(book, query)
+        except (ValueError, OSError, KeyError, zipfile.BadZipFile) as error:
+            return _error(error)
+
     def reader_open_link(self, url):
         """Kitaptaki http(s)/mailto baglantisini sistem tarayicisinda acar."""
         if not re.match(r'^(?:https?://|mailto:)', str(url), re.I):
@@ -168,13 +177,15 @@ class ReaderMixin:
             text = text[:TOC_CHARS].rsplit('\n', 1)[0] + '\n…'
         return text
 
-    def reader_chat_ask(self, question, think=None, template=None, until=None):
-        """Kitaba soru. `until`: okunan son bolum (0'dan; None: tum kitap) -- sonrasi baglama girmez."""
+    def reader_chat_ask(self, question, think=None, template=None, until=None, fraction=None):
+        """Kitaba soru. `until`: okunan son bolum (0'dan; None: tum kitap) -- sonrasi baglama girmez;
+        `fraction` (F147): o bolumun okunan orani (0-1; None: tamami)."""
         doc = getattr(self, '_book_chat', None)
         if doc is None:
             return None
         book_id = self._book_chat_id
         until = None if until in (None, '') else max(0, int(until))
+        fraction = 1.0 if fraction in (None, '') else min(1.0, max(0.0, float(fraction)))
         toc = self._book_toc(book_id, until)
         extra = ('This document is a book; call it "kitap" (never video or document). Each page s.N is section N '
                  'of the book in reading order; cite with s.N as usual. When the user names a chapter ("chapter 3", "3. bölüm"), find it by its title in the '
@@ -182,8 +193,9 @@ class ReaderMixin:
         if toc:
             extra += '\nTABLE OF CONTENTS:\n' + toc
         if until is not None:
-            extra += (f'\nThe user has read up to s.{until + 1}. Never reveal or hint at anything that happens '
-                      'after that point; if the answer is only later in the book, say so without details.')
+            where = f's.{until + 1}' if fraction >= 1.0 else f'about {round(fraction * 100)}% of s.{until + 1}'
+            extra += (f'\nThe user has read up to {where}; the excerpts end there. Never reveal or hint at anything '
+                      'that happens after that point; if the answer is only later in the book, say so without details.')
 
         try:
             focus = focus_sections(question, self._shelf()._book(book_id)[1].toc)
@@ -192,6 +204,7 @@ class ReaderMixin:
 
         def limit():
             doc.session.page_limit = None if until is None else until + 1
+            doc.session.page_fraction = fraction
             doc.session.focus_pages = [section + 1 for section in focus]
         return self._ask_document(doc, question, think, template, self._push_book_chat, extra, limit)
 

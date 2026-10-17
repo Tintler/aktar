@@ -214,6 +214,17 @@ class DubEndToEndTests(unittest.TestCase):
         self.assertEqual(len(audio), 2)
         self.assertEqual(audio[0]['disposition']['default'], 1)
 
+    def test_single_speaker_voice_is_loaded_even_without_main_lines(self):
+        # Hata: tum satirlar konusmacilara atanip tek grup kalinca motor ana seste kaliyordu ("Ses motoru hazir degil").
+        video = self.folder / 'film.mkv'
+        subprocess.run([FFMPEG, '-v', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2',
+                        '-c:a', 'aac', str(video)], check=True)
+        loaded = []
+        specs = {'klon': {'override': {'voice': 'klon'}, 'language': 'tr', 'can_speed': False}}
+        dub.build(Engines(), video, [{'start': 0.2, 'end': 0.8, 'text': 'bir'}], self.folder / 'o.m4a', {'format': 'm4a'},
+                  plan=['klon'], voices=specs, load_voice=lambda override, language: loaded.append(override['voice']))
+        self.assertEqual(loaded, ['klon'])
+
 
 @unittest.skipUnless(SHERPA and FFMPEG, 'sherpa-onnx ya da modelleri yok')
 class SherpaTests(unittest.TestCase):

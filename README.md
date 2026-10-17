@@ -40,7 +40,8 @@ Videolarınızı, belgelerinizi ve kitaplarınızı **yerel bir yapay zeka model
 
 - **Kitap Çevir:** DRM'siz İngilizce EPUB'ları bölüm bölüm Türkçeye çevirir; terim sözlüğü, kalite denetimleri, kaldığı yerden sürme ve Türkçe EPUB çıktısı.
 - **Okuma:** EPUB kitaplığı; içindekiler, yer imleri, yazı ve sayfa ayarları, okuma konumu.
-- **Kitaba sor:** Okurken kitaba soru sorun ("3. bölümde ne oldu?"); cevaptaki bölüm atfı kitabı o bölüme götürür. **Okuduğum yere kadar** seçiliyse sonraki bölümler modele hiç gitmez.
+- **Kitapta ara:** Ctrl+F ile kelime ya da cümle tüm kitapta aranır; sonuca tıklayınca bölüm açılıp eşleşme vurgulanır.
+- **Kitaba sor:** Okurken kitaba soru sorun ("3. bölümde ne oldu?"); cevaptaki bölüm atfı kitabı o bölüme götürür. **Okuduğum yere kadar** seçiliyse okuduğunuz yerden (bölüm içindeki konum dahil) sonrası modele hiç gitmez.
 - **Sesli okuma ve sesli kitap:** Kitaplar yerel ses motorlarıyla (EMA Lightning, VoxCPM) cümle cümle okunur; tarifle tasarlanan ya da kayıttan klonlanan sesler kullanılabilir. Kitabın tamamı bölüm işaretli M4B ya da bölüm başına MP3 olarak kaydedilir.
 - **PDF'den kitap:** Taranmış PDF'ler OCR ile okunur, üst/alt bilgilerden ve bölünmüş kelimelerden temizlenir, bölümlere ayrılır ve EPUB'a dönüştürülür; sonuç **Gözden geçir** ekranında sayfa görüntüsünün yanında düzeltilir.
 

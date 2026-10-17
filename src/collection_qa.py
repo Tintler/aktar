@@ -155,6 +155,20 @@ def today():
     return date.today().isoformat()
 
 
+def read_lines(lines, page, fraction=1.0):
+    """F147: `page`. sayfaya kadarki satirlar; `page` sayfasinin yalnizca ilk `fraction` kadari (karakterce):
+    okuma noktasindan once baslayan satirlar girer."""
+    fraction = min(1.0, max(0.0, float(fraction)))
+    last = [line for line in lines if line['start'] == page]
+    total = sum(len(line['text']) for line in last)
+    limit, seen, kept = fraction * total, 0, set()
+    for line in last:
+        if seen < limit or fraction >= 1.0:
+            kept.add(id(line))
+        seen += len(line['text'])
+    return [line for line in lines if line['start'] < page or id(line) in kept]
+
+
 class CollectionQA:
     """Bir koleksiyonun indeksli videolari uzerinde cok turlu soru-cevap."""
 
@@ -176,14 +190,16 @@ class CollectionQA:
         self.labels = video_labels(self.videos)
         self.history = []
         self._lines = {}  # (video anahtari, sayfa siniri) -> (baslik, satirlar, sure)
-        # F146: kitapla sohbette "okudugum yere kadar": bu sayfadan sonrasi baglama girmez (None: sinir yok)
+        # F146: kitapla sohbette "okudugum yere kadar": bu sayfadan sonrasi baglama girmez (None: sinir yok);
+        # F147: son sayfanin da yalnizca bu orani (karakterce, 0-1) -- uzun bolumlerde ilerleme bazli sinir
         self.page_limit = None
+        self.page_fraction = 1.0
         # F146: sorunun adini verdigi bolumler (kitap): bu sayfalarin basi aramadan once baglama girer
         self.focus_pages = []
 
     # yardimcilar
     def _video_lines(self, video):
-        key = (_key(video), self.page_limit)
+        key = (_key(video), self.page_limit, self.page_fraction)
         if key not in self._lines:
             session = search_index.primary_session(video, self.base)
             if session is None:
@@ -191,7 +207,7 @@ class CollectionQA:
             else:
                 lines = qa.lines_of(session)
                 if self.page_limit is not None and qa.is_document(session):
-                    lines = [line for line in lines if line['start'] <= self.page_limit]
+                    lines = read_lines(lines, self.page_limit, self.page_fraction)
                 self._lines[key] = (session.get('title') or Path(video).stem,
                                     lines,
                                     float(session.get('duration') or 0.0),

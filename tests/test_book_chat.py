@@ -83,6 +83,17 @@ class EpubPagesTests(unittest.TestCase):
         self.assertEqual(pages[0], '')                      # kapak bos sayfa olarak sirada kalir
         self.assertTrue(pages[2].startswith('İkinci\n\nFırtına koptu.'))
 
+    def test_search_finds_words_across_sections_ignoring_case(self):
+        import book_search
+        book = book_reader.EpubBook(self.epub)
+        result = book_search.search(book, 'fırtına  KOPTU')
+        self.assertEqual(result['total'], 1)
+        self.assertEqual((result['results'][0]['section'], result['results'][0]['index']), (2, 0))
+        self.assertEqual(result['results'][0]['match'], 'Fırtına koptu')
+        self.assertEqual(book_search.search(book, 'ALİ')['total'], 1)       # İ/i farki yok
+        self.assertEqual(book_search.search(book, '   ')['total'], 0)
+        self.assertEqual(len(book_search.fold('İIıi')), 4)
+
     def test_epub_cache_key_changed(self):
         self.assertEqual(qa.source_key({'kind': 'epub'}), 'document:epub:2')
 
@@ -96,7 +107,7 @@ class Fake(collection_qa.CollectionQA):
         self._summaries = []
 
     def _video_lines(self, video):
-        lines = [line for line in self.raw if self.page_limit is None or line['start'] <= self.page_limit]
+        lines = self.raw if self.page_limit is None else collection_qa.read_lines(self.raw, self.page_limit, self.page_fraction)
         return ('Kitap', lines, 3.0, 'epub')
 
     def notes_text(self, cfg):
@@ -123,6 +134,14 @@ class ContextTests(unittest.TestCase):
         session.page_limit = 2
         text, _videos = session.build_context([{'video': 'kitap.epub', 'start': 3, 'end': 3, 'text': 'Son bölüm sırrı.'}], self.cfg)
         self.assertNotIn('sırrı', text)
+
+    def test_fraction_keeps_only_read_part_of_last_page(self):
+        lines = [{'start': 1, 'end': 1, 'text': 'a' * 10}] + [{'start': 2, 'end': 2, 'text': str(i) * 10} for i in range(10)] \
+            + [{'start': 3, 'end': 3, 'text': 'sır'}]
+        kept = collection_qa.read_lines(lines, 2, 0.3)
+        self.assertEqual([line['text'][0] for line in kept], ['a', '0', '1', '2'])
+        self.assertEqual(len(collection_qa.read_lines(lines, 2, 1.0)), 11)
+        self.assertEqual(len(collection_qa.read_lines(lines, 2, 0.0)), 1)
 
     def test_focus_hits_take_the_start_of_named_pages(self):
         session = Fake(self.lines)

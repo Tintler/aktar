@@ -249,7 +249,7 @@ def build(engines, video, segments, output, options=None, timing=None, language=
     try:
         for key in order:
             spec = (voices or {}).get(key) or main if key is not None else main
-            if load_voice and len(order) > 1:
+            if load_voice:   # tek grup da olsa: ana ses hic kullanilmayabilir (tum satirlar konusmacilara atanmis)
                 load_voice(spec['override'], spec['language'])
             for index in [i for i, item in enumerate(plan) if item == key]:
                 line = lines[index]

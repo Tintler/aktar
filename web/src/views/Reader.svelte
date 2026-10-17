@@ -10,15 +10,22 @@
   import { resolvePauses, pauseAfter } from '../lib/pauses.js';
   import VoicePicker from '../components/VoicePicker.svelte';
   import BookChat from '../components/BookChat.svelte';
+  import { findRanges, highlight as markMatches, clearHighlight } from '../lib/booksearch.js';
 
   let { onclose } = $props();
 
   const book = $derived(app.reading.book);
   let html = $state('');
   let loading = $state(false);
-  let panel = $state('toc');          // 'toc' | 'bookmarks' | null
+  let panel = $state('toc');          // 'toc' | 'bookmarks' | 'search' | null
   let showAa = $state(false);
   let chatOpen = $state(false);       // F146: Kitaba sor paneli
+  // F147: kitap ici arama (Ctrl+F): {query, results, total, more} ve secili sonuc
+  let searchQuery = $state('');
+  let search = $state(null);
+  let searchAt = $state(-1);
+  let searching = $state(false);
+  let searchInput = $state();
   let pageWrap = $state();
   let article = $state();
   let saveTimer = null;
@@ -58,6 +65,7 @@
     if (target) target.scrollIntoView({ block: 'start' });
     else pageWrap.scrollTop = offset * Math.max(0, pageWrap.scrollHeight - pageWrap.clientHeight);
     ({ sentences, breaks } = segment(article, splitOptions()));
+    showMatches();
     setSentences(sentences, { book: book.id, language: book.language || 'tr', breaks });
     refreshCached();
     savePosition(true);
@@ -256,6 +264,13 @@
     if (result?.started) app.ttsExport = { done: 0, total: sentences.length };
   }
 
+  // F147: bolumun okunan orani (ekranin alt kenarina kadar) -- kitap sohbetinin "okudugum yere kadar" siniri
+  let readFraction = $state(0);
+  function bottomFraction() {
+    if (!pageWrap || !pageWrap.scrollHeight) return 0;
+    return Math.min(1, (pageWrap.scrollTop + pageWrap.clientHeight) / pageWrap.scrollHeight);
+  }
+
   function currentOffset() {
     const max = pageWrap ? pageWrap.scrollHeight - pageWrap.clientHeight : 0;
     return max > 0 ? Math.min(1, pageWrap.scrollTop / max) : 0;
@@ -265,6 +280,7 @@
     if (!book || !pageWrap || !html) return;
     clearTimeout(saveTimer);
     app.reading.offset = currentOffset();
+    readFraction = bottomFraction();
     const run = async () => {
       const percent = await call('reader_save_position', book.id, app.reading.section, app.reading.offset);
       if (typeof percent === 'number') {
@@ -354,7 +370,60 @@
     saveReaderPrefs();
   }
 
+  // ---- kitap ici arama (F147)
+  async function openSearch() {
+    panel = 'search';
+    await tick();
+    searchInput?.focus();
+    searchInput?.select();
+  }
+
+  async function runSearch() {
+    const query = searchQuery.trim();
+    if (!query) return;
+    if (search?.query === query && search.results.length) return go(searchAt + 1 < search.results.length ? searchAt + 1 : 0);
+    searching = true;
+    const result = await act('reader_search', book.id, query);
+    searching = false;
+    if (!result) return;
+    search = { ...result, query };
+    searchAt = -1;
+    if (search.results.length) go(0);
+    else clearHighlight();
+  }
+
+  function showMatches(current = -1) {
+    if (!search?.query || panel !== 'search') return clearHighlight();
+    markMatches(findRanges(article, search.query), current);
+  }
+
+  async function go(index) {
+    const item = search?.results[index];
+    if (!item) return;
+    searchAt = index;
+    if (item.section !== section) await load(item.section);
+    const ranges = findRanges(article, search.query);
+    markMatches(ranges, Math.min(item.index, ranges.length - 1));
+  }
+
+  function searchKey(event) {
+    if (event.key === 'Enter' && event.shiftKey && search?.results.length) {
+      event.preventDefault();
+      go(searchAt > 0 ? searchAt - 1 : search.results.length - 1);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      runSearch();
+    } else if (event.key === 'Escape') {
+      panel = 'toc';
+      clearHighlight();
+    }
+  }
+
+  $effect(() => { if (panel !== 'search') untrack(() => clearHighlight()); });
+  $effect(() => () => clearHighlight());
+
   function keydown(event) {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); openSearch(); return; }
     if (event.target.closest('input, textarea, select')) return;
     if (event.key === 'Escape') { showAa = false; }
     if (event.code === 'Space' && player.active && !event.target.closest('button')) { event.preventDefault(); togglePlay(); }
@@ -432,12 +501,32 @@
           <div class="tabs">
             <button class="tab" class:on={panel === 'toc'} onclick={() => (panel = 'toc')}>İçindekiler</button>
             <button class="tab" class:on={panel === 'bookmarks'} onclick={() => (panel = 'bookmarks')}>Yer imleri {book.bookmarks.length || ''}</button>
+            <button class="tab" class:on={panel === 'search'} title="Kitapta ara (Ctrl+F)" onclick={openSearch}>Ara</button>
           </div>
+          {#if panel === 'search'}
+            <div class="search">
+              <input class="field" bind:this={searchInput} bind:value={searchQuery} onkeydown={searchKey}
+                placeholder="Kelime ya da cümle…" title="Enter: ara / sonraki · Shift+Enter: önceki · Esc: kapat" />
+              <span class="dim count">
+                {#if searching}Aranıyor…{:else if search && search.query === searchQuery.trim()}
+                  {search.total ? `${searchAt + 1} / ${search.total} eşleşme${search.more ? ` (ilk ${search.results.length} listelendi)` : ''}` : 'Eşleşme yok'}
+                {/if}
+              </span>
+            </div>
+          {/if}
           <div class="list">
             {#if panel === 'toc'}
               {#each book.toc as entry, i}
                 <button class="entry" class:on={i === currentToc} style:padding-left="{12 + entry.depth * 14}px"
                   onclick={() => load(entry.section, { anchor: entry.anchor })}>{entry.title}</button>
+              {/each}
+            {:else if panel === 'search'}
+              {#each search?.results ?? [] as item, i}
+                {#if i === 0 || search.results[i - 1].section !== item.section}
+                  <div class="group">{item.title || `Bölüm ${item.section + 1}`}</div>
+                {/if}
+                <button class="entry hit" class:on={i === searchAt} onclick={() => go(i)}>
+                  {item.before} <mark>{item.match}</mark> {item.after}</button>
               {/each}
             {:else}
               {#each book.bookmarks as mark (mark.id)}
@@ -474,7 +563,7 @@
           {/if}
         </article>
       </div>
-      {#if chatOpen}<BookChat {book} {section} ongo={(n) => load(n)} onclose={() => (chatOpen = false)} />{/if}
+      {#if chatOpen}<BookChat {book} {section} fraction={readFraction} ongo={(n) => load(n)} onclose={() => (chatOpen = false)} />{/if}
     </div>
 
     <div class="player">
@@ -570,6 +659,13 @@
   .entry:hover { background: var(--surface-hover); color: var(--text); }
   .entry.on { color: var(--accent); background: var(--surface); font-weight: 600; }
   .entry small { display: block; color: var(--dim); font-size: 11px; }
+  .search { display: flex; flex-direction: column; gap: 4px; padding: 0 10px 8px; }
+  .search .count { font-size: 11.5px; min-height: 15px; }
+  .group { font-size: 11px; font-weight: 600; color: var(--dim); padding: 10px 12px 2px; text-transform: uppercase; letter-spacing: .04em; }
+  .hit { font-size: 12.5px; line-height: 1.45; }
+  .hit mark { background: color-mix(in srgb, var(--accent) 35%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+  :global(::highlight(book-search)) { background-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+  :global(::highlight(book-search-now)) { background-color: var(--accent); color: var(--on-accent); }
   .mark { display: flex; align-items: center; }
   .mark .entry { flex: 1; min-width: 0; }
   .del { width: 28px; height: 28px; opacity: 0; }

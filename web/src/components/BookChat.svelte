@@ -11,7 +11,8 @@
   import { app, act, savePref } from '../lib/state.svelte.js';
   import { confirm } from '../lib/confirm.svelte.js';
 
-  let { book, section = 0, ongo, onclose } = $props();
+  // fraction: acik bolumun okunan orani (ekranin alt kenarina kadar, 0-1) -- uzun bolumlerde ilerleme bazli sinir
+  let { book, section = 0, fraction = 1, ongo, onclose } = $props();
 
   const chat = $derived(app.bookChat?.book === book.id ? app.bookChat.chat : null);
   let question = $state('');
@@ -37,7 +38,7 @@
     const value = text.trim();
     if (!value || !chat?.enabled) return;
     question = '';
-    const state = await act('reader_chat_ask', value, think, templateFor('doc'), spoilers ? section : null);
+    const state = await act('reader_chat_ask', value, think, templateFor('doc'), spoilers ? section : null, spoilers ? fraction : null);
     if (state && app.bookChat?.book === book.id) app.bookChat.chat = state;
   }
 
@@ -58,8 +59,8 @@
     <button class="icon-btn sm" title="Sohbeti temizle" disabled={!chat || chat.asking || !chat.entries.some((e) => e.kind === 'user')} onclick={clear}><Icon name="trash" size={15} /></button>
     <button class="icon-btn sm" title="Kapat" onclick={onclose}><Icon name="x" size={15} /></button>
   </div>
-  <div class="scope" title="Açıkken yalnızca okuduğunuz bölüme kadarki kısım modele gider; sonrası hiç gösterilmez.">
-    <Toggle bind:checked={spoilers} onchange={setSpoilers} label={`Okuduğum yere kadar (${section + 1}. bölüm)`} />
+  <div class="scope" title="Açıkken yalnızca okuduğunuz yere (açık bölümde ekranın alt kenarına) kadarki kısım modele gider; sonrası hiç gösterilmez.">
+    <Toggle bind:checked={spoilers} onchange={setSpoilers} label={`Okuduğum yere kadar (${section + 1}. bölüm, %${Math.round(fraction * 100)})`} />
   </div>
   {#if chat}
     <div class="messages" bind:this={scroller}>
