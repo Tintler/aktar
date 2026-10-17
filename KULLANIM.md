@@ -403,6 +403,11 @@ Okunan her sayfa PDF'nin yanındaki `<PDF adı>-pdf\ocr` klasörüne yazılır; 
 
 Türkçe Tesseract dil dosyası kurulumda yoksa ve Program Files'a yazma izniniz yoksa `tur.traineddata` dosyasını Aktar'ın yanındaki `models\tessdata` klasörüne koyun; Aktar oradaki dilleri kullanır.
 
+**Gözden geçir:** Kitap hazır olunca (ya da sayfaları daha önce okunmuş bir PDF'yi yeniden bırakınca) **Gözden geçir** ekranı açılır. Solda bölümler: adı doğrudan düzeltilir, ok düğmeleriyle bölüm bir kısmın altına alınır ya da üst düzeye çıkarılır, yukarı ok bölümü öncekiyle birleştirir; sayfa numarasına tıklayınca o sayfaya gidilir. Ortada sayfanın görüntüsü, sağda metni durur: metin düzeltilip **Sayfayı kaydet** ile saklanır (OCR çıktısı bozulmaz, düzeltmeler `<PDF adı>-pdf\duzeltme` altında tutulur; **OCR'a dön** düzeltmeyi siler). Sağ altta sayfadaki paragraflar listelenir; **Bölüm başlat** o paragraftan yeni bölüm açar (OCR'ın kaçırdığı bölüm numaraları için). **Otomatik bölümle** bölümleri baştan bulur. Bölümler `kitap.json` dosyasına kaydedilir; **Kitabı oluştur** OCR yapmadan EPUB'u yeniden yazar ve Okuma'daki kitap yerinde güncellenir.
+
+### 3.17 Arka plan işleri
+Sağ üstte, Ayarlar'ın solundaki simge arka planda çalışan işleri gösterir: altyazı ve kitap çevirisi, toplu hazırlık (transkript, analiz, özet, indeks), PDF'den kitap, altyazı araçları (OCR, hizalama, klip) ve sesli okumanın hazırlama/kayıt işleri. Simgedeki sayı çalışan iş sayısıdır; açılan listede her işin aşaması ve ilerlemesi görünür, işe tıklayınca ilgili sayfaya gidilir.
+
 ---
 
 ## 4. Terim sözlüğü (glossary)

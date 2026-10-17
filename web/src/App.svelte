@@ -9,10 +9,12 @@
   import Collections from './components/Collections.svelte';
   import ChatPanel from './components/ChatPanel.svelte';
   import MenuHost from './components/MenuHost.svelte';
+  import TaskTray from './components/TaskTray.svelte';
   import Library from './views/Library.svelte';
   import Translate from './views/Translate.svelte';
   import Books from './views/Books.svelte';
   import Reading from './views/Reading.svelte';
+  import PdfReview from './views/PdfReview.svelte';
   import Settings from './views/Settings.svelte';
   import Player from './views/Player.svelte';
   import VideoChat from './components/VideoChat.svelte';
@@ -142,6 +144,7 @@
       {#if app.view === 'library' && app.library.slug && !app.libraryView.home && !app.libraryView.chatOpen}
         <button class="btn sm" title="Koleksiyona sor panelini aç" onclick={() => (app.libraryView.chatOpen = true)}><Icon name="message" size={15} />Koleksiyona sor</button>
       {/if}
+      <TaskTray />
       <button class="icon-btn" class:on={app.view === 'settings'} title="Ayarlar" onclick={() => go('settings')}><Icon name="settings" size={20} /></button>
     </header>
     <div class="view">
@@ -153,6 +156,7 @@
       {:else if app.view === 'translate'}<Translate />
       {:else if app.view === 'books'}<Books />
       {:else if app.view === 'reading'}<Reading />
+      {:else if app.view === 'pdfreview' && app.pdfReview}{#key app.pdfReview.path}<PdfReview />{/key}
       {:else if app.view === 'player'}<Player />
       {:else if app.view === 'document'}<Document />
       {:else}<Settings />{/if}

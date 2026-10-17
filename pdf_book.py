@@ -214,9 +214,16 @@ def _blocks(text):
         lines = [line.strip() for line in block.split('\n') if line.strip() and not re.fullmatch(r'\s*```\w*\s*', line)]
         if not lines:
             continue
+        # Tesseract paragraflari (ozellikle diyaloglari) bos satirsiz verebilir. Calibre'nin yontemi: tipik satirdan
+        # belirgin kisa olup cumle sonu noktalamasiyla biten satir paragraf sonudur.
+        lengths = sorted(len(line) for line in lines)
+        typical = lengths[len(lengths) * 3 // 4] if len(lines) >= 3 else 0
         paragraph = lines[0]
-        for line in lines[1:]:
-            if paragraph.endswith('-') and LOWER_START.match(line):
+        for previous, line in zip(lines, lines[1:]):
+            if typical and len(previous) < typical * 0.8 and previous.endswith(TERMINAL):
+                result.append(re.sub(r'\s+', ' ', paragraph))
+                paragraph = line
+            elif paragraph.endswith('-') and LOWER_START.match(line):
                 paragraph = paragraph + line       # 'gel-' + 'di' -> 'gel-di' (sonra birlesir)
             else:
                 paragraph = paragraph + ' ' + line
@@ -329,8 +336,13 @@ def drop_duplicate_pages(texts):
     result, duplicates = list(texts), set()
     for index in range(1, len(texts)):
         previous, current = (' '.join(str(texts[i]).split())[:1500] for i in (index - 1, index))
-        if len(current) > 200 and SequenceMatcher(None, previous, current, autojunk=False).quick_ratio() >= DUPLICATE_RATIO \
-                and SequenceMatcher(None, previous, current, autojunk=False).ratio() >= DUPLICATE_RATIO:
+        if len(current) <= 200:
+            continue
+        # Hizli on eleme: kelime kumeleri cok ortusmuyorsa tekrar degildir (ayni dilde harf dagilimi hep benzer).
+        before, after = set(previous.casefold().split()), set(current.casefold().split())
+        if len(before & after) < DUPLICATE_RATIO * max(len(before), len(after)):
+            continue
+        if SequenceMatcher(None, previous, current, autojunk=False).ratio() >= DUPLICATE_RATIO:
             result[index] = ''
             duplicates.add(index + 1)
     return result, duplicates
@@ -561,7 +573,7 @@ def number_chapters(paragraphs, pdf, log=print):
                 log(f'Bölüm {value}: OCR "{result[index]["text"]}" okumuştu ({page}. sayfa), düzeltildi.')
                 result[index]['text'] = value
         else:
-            inserts.append((index, {'text': value, 'page': page}))
+            inserts.append((index, {'text': value, 'page': page, 'inserted': True}))
             log(f"Bölüm {value} başlığı OCR'da yoktu; {page}. sayfaya eklendi.")
     for index, paragraph in sorted(inserts, key=lambda item: item[0], reverse=True):
         result.insert(index, paragraph)
@@ -663,12 +675,20 @@ def layout_pages(paragraphs, pdf):
     return pages
 
 
-def split_chapters(paragraphs, language, outline=(), contents=None, layout=None):
-    """[{'title', 'paragraphs': [metin]}]. Sirasiyla: anlamli PDF icindekileri, kitabin kendi icindekiler
-    sayfasi (contents: contents_entries sonucu), baslik satirlari, sayfa duzeni (layout: bolum basi sayfalarini
-    donduren islev), CHUNK_PAGES sayfalik parcalar.
-    Baslik satirindan sonraki kisa satir alt baslik sayilip birlestirilir ('Chapter 1' + 'The Storm' ->
-    'Chapter 1: The Storm'). Ilk basliktan onceki metin kisaysa ilk bolume katilir, uzunsa 'Ön sayfalar'."""
+def _ordinal(paragraphs, index):
+    """index'teki paragrafin sayfasindaki sirasi: ayni sayfada ondan once gelen gercek (not ya da eklenmis
+    baslik olmayan) paragraf sayisi. Sinirlar (sayfa, sira) olarak saklanir; metin duzeltilse de anlamli kalir."""
+    page = paragraphs[index]['page']
+    return sum(1 for p in paragraphs[:index] if p['page'] == page and not p.get('note') and not p.get('inserted'))
+
+
+def auto_boundaries(paragraphs, language, outline=(), contents=None, layout=None):
+    """Otomatik bolum sinirlari: [{'title', 'page', 'ordinal', 'skip', 'level'}]. skip: bolum basinda atlanan
+    (baslik olarak kullanilan) gercek paragraf sayisi. Sirasiyla: anlamli PDF icindekileri, kitabin kendi
+    icindekiler sayfasi (contents: contents_entries sonucu), baslik satirlari, sayfa duzeni (layout: bolum basi
+    sayfalarini donduren islev), CHUNK_PAGES sayfalik parcalar. Baslik satirindan sonraki kisa satir alt baslik
+    sayilip birlestirilir ('Chapter 1' + 'The Storm' -> 'Chapter 1: The Storm'). Ilk sinirdan onceki metin
+    'Ön sayfalar' bolumu olur."""
     generic, front = GENERIC_TITLES.get(language, GENERIC_TITLES['en'])
     if not paragraphs:
         return []
@@ -699,31 +719,63 @@ def split_chapters(paragraphs, language, outline=(), contents=None, layout=None)
             index = next((i for i, p in enumerate(paragraphs) if p['page'] >= page), None)
             if index is not None and (not starts or index > starts[-1][0]):
                 starts.append((index, f'{generic} {number}', False))
-    chapters = []
+    boundaries = []
     for position, (index, title, from_text) in enumerate(starts):
         end = starts[position + 1][0] if position + 1 < len(starts) else len(paragraphs)
-        part = paragraphs[index + (1 if from_text else 0):end]
-        body = [p['text'] for p in part if not p.get('note')]
-        notes = [p['text'] for p in part if p.get('note')]
-        if subtitles and from_text and len(body) > 1 and _is_title_like(body[0]) and not is_strong(body[0]):
-            title = f'{title}: {body.pop(0)}'
-        chapters.append({'title': title, 'paragraphs': body, 'notes': notes, 'level': 0})
+        skip = 1 if from_text and not paragraphs[index].get('inserted') else 0
+        following = [p for p in paragraphs[index + (1 if from_text else 0):end] if not p.get('note')]
+        if (subtitles and from_text and len(following) > 1 and _is_title_like(following[0]['text'])
+                and not is_strong(following[0]['text']) and not following[0].get('inserted')):
+            title = f'{title}: {following[0]["text"]}'
+            skip += 1
+        boundaries.append({'title': title, 'page': paragraphs[index]['page'], 'ordinal': _ordinal(paragraphs, index),
+                           'skip': skip, 'level': 0})
     # 'Kısım Bir' / 'Part One' ile numarali bolumler birlikteyse kisimlar ust duzey, bolumler altinda.
-    parts = [c for c in chapters if is_part(c['title'])]
-    if parts and len(parts) < len(chapters):
+    parts = [b for b in boundaries if is_part(b['title'])]
+    if parts and len(parts) < len(boundaries):
         inside = False
-        for chapter in chapters:
-            if chapter in parts:
+        for boundary in boundaries:
+            if boundary in parts:
                 inside = True
             elif inside:
-                chapter['level'] = 1
-    lead = [p['text'] for p in paragraphs[:starts[0][0]] if not p.get('note')]
-    if lead:
-        if sum(len(text) for text in lead) < 400:
-            chapters[0]['paragraphs'] = lead + chapters[0]['paragraphs']
-        else:
-            chapters.insert(0, {'title': front, 'paragraphs': lead, 'level': 0})
+                boundary['level'] = 1
+    if any(not p.get('note') and not p.get('inserted') for p in paragraphs[:starts[0][0]]):
+        boundaries.insert(0, {'title': front, 'page': paragraphs[0]['page'], 'ordinal': 0, 'skip': 0, 'level': 0})
+    return boundaries
+
+
+def chapters_from(paragraphs, boundaries):
+    """Sinirlardan bolumler: [{'title', 'paragraphs', 'notes', 'level', 'page', 'ordinal', 'skip'}].
+    paragraphs: clean_pages ciktisi (eklenmis baslik yok). Sinirin sayfasi/sirasi artik yoksa (metin
+    duzeltildi) o sayfanin sonuna ya da sonraki sayfaya kayar."""
+    positions = {}
+    for index, paragraph in enumerate(paragraphs):
+        if not paragraph.get('note'):
+            positions.setdefault(paragraph['page'], []).append(index)
+
+    def locate(page, ordinal):
+        indices = positions.get(page, [])
+        if ordinal < len(indices):
+            return indices[ordinal]
+        return next((i for i, p in enumerate(paragraphs) if p['page'] > page and not p.get('note')), len(paragraphs))
+    located = sorted(((locate(b['page'], b.get('ordinal', 0)), position, b) for position, b in enumerate(boundaries)),
+                     key=lambda item: (item[0], item[1]))
+    chapters = []
+    for position, (index, _order, boundary) in enumerate(located):
+        end = located[position + 1][0] if position + 1 < len(located) else len(paragraphs)
+        part = paragraphs[index:end]
+        body = [p['text'] for p in part if not p.get('note')][int(boundary.get('skip', 0)):]
+        notes = [p['text'] for p in part if p.get('note')]
+        chapters.append({'title': boundary['title'], 'paragraphs': body, 'notes': notes,
+                         'level': int(boundary.get('level', 0)), 'page': boundary['page'],
+                         'ordinal': boundary.get('ordinal', 0), 'skip': int(boundary.get('skip', 0))})
     return chapters
+
+
+def split_chapters(paragraphs, language, outline=(), contents=None, layout=None):
+    """Otomatik bolumleme: auto_boundaries + chapters_from (eklenmis basliklar metne girmez)."""
+    boundaries = auto_boundaries(paragraphs, language, outline, contents, layout)
+    return chapters_from([p for p in paragraphs if not p.get('inserted')], boundaries)
 
 
 # ---------------------------------------------------------------------- EPUB
@@ -854,26 +906,188 @@ def write_epub(path, chapters, title, author, language, cover=None):
     return path
 
 
-def build_epub(pdf, work, texts, title=None, author=None, language=None, log=print):
-    """Okunmus sayfa metinlerinden EPUB uretir. (epub yolu, bilgi); bilgi: dil, bolum basliklari, uyarilar."""
-    paragraphs, language, warnings = clean_pages(texts, language)
+# ---------------------------------------------------------------------- gozden gecirme
+EDITS_DIR = 'duzeltme'      # elle duzeltilen sayfa metinleri (OCR ciktisi bozulmaz)
+BOOK_FILE = 'kitap.json'    # kitap adi, yazar, dil ve bolum sinirlari
+REVIEW_LONG_SIDE = 1600
+
+
+def _page_files(work, page):
+    return sorted((Path(work) / 'ocr').glob(f'{page:04d}*.txt'))
+
+
+def ocr_text(work, page):
+    """Sayfanin OCR metni (cift sayfa taramada iki yarisi birlikte); okunmamissa ''."""
+    return '\n\n'.join(_newlines(path.read_bytes().decode('utf-8')) for path in _page_files(work, page))
+
+
+def edit_path(work, page):
+    return Path(work) / EDITS_DIR / f'{page:04d}.txt'
+
+
+def page_text(work, page):
+    """Sayfanin gecerli metni: elle duzeltilmisse o, degilse OCR."""
+    path = edit_path(work, page)
+    return _newlines(path.read_bytes().decode('utf-8')) if path.exists() else ocr_text(work, page)
+
+
+def load_texts(pdf, work):
+    return [page_text(work, page) for page in range(1, page_count(pdf) + 1)]
+
+
+def save_page(work, page, text):
+    path = edit_path(work, page)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(_newlines(text).encode('utf-8'))
+
+
+def revert_page(work, page):
+    edit_path(work, page).unlink(missing_ok=True)
+
+
+def edited_pages(work):
+    folder = Path(work) / EDITS_DIR
+    return sorted(int(path.stem) for path in folder.glob('*.txt')) if folder.is_dir() else []
+
+
+def load_book(work):
+    import json
+    try:
+        data = json.loads((Path(work) / BOOK_FILE).read_bytes().decode('utf-8'))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_book(work, data):
+    """kitap.json: {'title', 'author', 'language', 'chapters': [sinir], 'auto': otomatik mi}."""
+    import json
+    chapters = []
+    for item in data.get('chapters') or []:
+        title = ' '.join(str(item.get('title', '')).split())
+        if not title:
+            raise ValueError('Bölüm adı boş olamaz.')
+        chapters.append({'title': title, 'page': int(item['page']), 'ordinal': max(0, int(item.get('ordinal', 0))),
+                         'skip': max(0, int(item.get('skip', 0))), 'level': 1 if int(item.get('level', 0)) else 0})
+    if not chapters:
+        raise ValueError('En az bir bölüm olmalı.')
+    chapters.sort(key=lambda item: (item['page'], item['ordinal']))
+    value = {'title': ' '.join(str(data.get('title', '')).split()), 'author': ' '.join(str(data.get('author', '')).split()),
+             'language': 'en' if data.get('language') == 'en' else 'tr', 'chapters': chapters, 'auto': bool(data.get('auto'))}
+    path = Path(work) / BOOK_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix('.tmp')
+    temp.write_bytes(json.dumps(value, ensure_ascii=False, indent=2).encode('utf-8'))
+    temp.replace(path)
+    return value
+
+
+_CLEAN_CACHE = {}
+
+
+def clean_cached(texts, language=None):
+    """clean_pages, ayni metin icin bellekten: gozden gecirmede her sayfa gecisinde yuzlerce sayfa yeniden
+    temizlenmesin. Sayfa duzeltilince metin degisir, sonuc yeniden hesaplanir. Son birkac kitap tutulur."""
+    import hashlib
+    key = hashlib.sha1(('\x00'.join(texts) + '\x01' + str(language)).encode('utf-8')).hexdigest()
+    if key not in _CLEAN_CACHE:
+        if len(_CLEAN_CACHE) >= 4:
+            _CLEAN_CACHE.pop(next(iter(_CLEAN_CACHE)))
+        _CLEAN_CACHE[key] = clean_pages(texts, language)
+    paragraphs, detected, warnings = _CLEAN_CACHE[key]
+    return [dict(p) for p in paragraphs], detected, list(warnings)
+
+
+def detect_structure(pdf, texts, paragraphs, language, log=print):
+    """Otomatik bolum sinirlari (yer imleri, icindekiler, basliklar, sayfa duzeni)."""
+    outline = outline_chapters(pdf)
+    augmented = paragraphs if outline else number_chapters(paragraphs, pdf, log)
+    return auto_boundaries(augmented, language, outline, contents_entries(texts),
+                           lambda: layout_pages(augmented, pdf))
+
+
+def analyze(pdf, work, log=print, redetect=False):
+    """Gozden gecirme ve EPUB icin kitabin hali: duzeltmeler uygulanmis metin, kayitli (yoksa otomatik) bolumler.
+    {'texts', 'paragraphs', 'language', 'warnings', 'book'}; otomatik bolumler kitap.json'a yazilir."""
+    texts = load_texts(pdf, work)
+    book = load_book(work)
+    paragraphs, language, warnings = clean_cached(texts, book.get('language'))
     if not paragraphs:
         raise ValueError("PDF'den metin çıkmadı; OCR ayarlarını (Ayarlar → Kütüphane ve belgeler) kontrol edin.")
-    outline = outline_chapters(pdf)
-    if not outline:
-        paragraphs = number_chapters(paragraphs, pdf, log)
-    chapters = split_chapters(paragraphs, language, outline, contents_entries(texts),
-                              lambda: layout_pages(paragraphs, pdf))
-    guessed_title, guessed_author = guess_title_author(pdf)
-    title = title or guessed_title
-    author = guessed_author if author is None else author
+    if redetect or not book.get('chapters'):
+        guessed_title, guessed_author = guess_title_author(pdf)
+        book = save_book(work, {'title': book.get('title') or guessed_title,
+                                'author': book.get('author', guessed_author) if book else guessed_author,
+                                'language': language, 'auto': True,
+                                'chapters': detect_structure(pdf, texts, paragraphs, language, log)})
+    return {'texts': texts, 'paragraphs': paragraphs, 'language': book['language'], 'warnings': warnings, 'book': book}
+
+
+def review(pdf, work, log=print, redetect=False):
+    """Gozden gecirme ekraninin ozeti: kitap bilgisi, bolumler (ilk satir ve paragraf sayisiyla), uyarilar."""
+    state = analyze(pdf, work, log, redetect)
+    chapters = chapters_from(state['paragraphs'], state['book']['chapters'])
+    return {'title': state['book']['title'], 'author': state['book']['author'], 'language': state['language'],
+            'auto': state['book'].get('auto', False), 'pages': len(state['texts']), 'warnings': state['warnings'],
+            'edited': edited_pages(work),
+            'chapters': [{'title': c['title'], 'page': c['page'], 'ordinal': c['ordinal'], 'skip': c['skip'],
+                          'level': c['level'], 'count': len(c['paragraphs']),
+                          'first': (c['paragraphs'][0] if c['paragraphs'] else '')[:120]} for c in chapters]}
+
+
+def page_image(pdf, page, long_side=REVIEW_LONG_SIDE):
+    """Sayfanin JPEG goruntusu (data URL; cift sayfa taramada tamami)."""
+    import base64
+    import io
+    document = documents.open_pdf(pdf)
+    try:
+        with documents._PDFIUM:
+            item = document[page - 1]
+            try:
+                width, height = item.get_size()
+                image = item.render(scale=long_side / max(width, height, 1.0),
+                                    fill_color=(255, 255, 255, 255)).to_pil().convert('RGB')
+            finally:
+                item.close()
+    finally:
+        with documents._PDFIUM:
+            document.close()
+    buffer = io.BytesIO()
+    image.save(buffer, 'JPEG', quality=82)
+    return 'data:image/jpeg;base64,' + base64.b64encode(buffer.getvalue()).decode('ascii')
+
+
+def page_view(pdf, work, page):
+    """Bir sayfanin gozden gecirmesi: goruntu, gecerli ve OCR metni, temizlenmis paragraflari (bolum baslatmak
+    icin sayfadaki siralariyla)."""
+    texts = load_texts(pdf, work)
+    if not 1 <= page <= len(texts):
+        raise ValueError('Sayfa bulunamadı.')
+    book = load_book(work)
+    paragraphs, _language, _warnings = clean_cached(texts, book.get('language'))
+    on_page = [p['text'] for p in paragraphs if p['page'] == page and not p.get('note')]
+    return {'page': page, 'pages': len(texts), 'image': page_image(pdf, page), 'text': texts[page - 1],
+            'ocr': ocr_text(work, page), 'edited': edit_path(work, page).exists(),
+            'paragraphs': [{'ordinal': ordinal, 'text': text[:200]} for ordinal, text in enumerate(on_page)]}
+
+
+def build_epub(pdf, work, texts=None, title=None, author=None, language=None, log=print):
+    """Kitabi EPUB olarak yazar: duzeltilmis metin + kitap.json'daki (yoksa otomatik bulunan) bolumler.
+    title/author verilirse kitap.json'a da yazilir. (epub yolu, bilgi); bilgi: dil, bolum basliklari, uyarilar."""
+    state = analyze(pdf, work, log)
+    book = state['book']
+    if title or author is not None or language:
+        book = save_book(work, dict(book, title=title or book['title'],
+                                    author=book['author'] if author is None else author,
+                                    language=language or book['language']))
+    chapters = chapters_from(state['paragraphs'], book['chapters'])
     try:
         cover = cover_jpeg(pdf)
     except Exception as error:  # kapak olmadan da kitap uretilir
         log(f'UYARI: Kapak görüntüsü alınamadı: {error}')
         cover = None
     target = Path(work) / (Path(pdf).stem + '.epub')
-    write_epub(target, chapters, title, author, language, cover)
-    log(f'EPUB oluşturuldu: {target.name} ({len(chapters)} bölüm, dil: {language})')
-    return target, {'language': language, 'chapters': [c['title'] for c in chapters], 'warnings': warnings,
-                    'title': title, 'author': author}
+    write_epub(target, chapters, book['title'], book['author'], book['language'], cover)
+    log(f'EPUB oluşturuldu: {target.name} ({len(chapters)} bölüm, dil: {book["language"]})')
+    return target, {'language': book['language'], 'chapters': [c['title'] for c in chapters],
+                    'warnings': state['warnings'], 'title': book['title'], 'author': book['author']}

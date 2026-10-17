@@ -44,6 +44,15 @@ class CleaningTests(unittest.TestCase):
             'siper kazmıştı. Gece oldu ve rüzgâr esti.', 'Yeni paragraf.'])
         self.assertEqual(paragraphs[0]['page'], 1)
 
+    def test_short_lines_ending_a_sentence_split_paragraphs(self):
+        # Tesseract diyaloglari bos satirsiz verebilir: kisa ve noktalamayla biten satir paragraf sonudur.
+        text = ('“...ve ondan sonra, Peder, ekmekle peyniri az daha alacak-\ntım.”\n“Ama almadın mı?”\n'
+                'Francis başını salladı ve uzun uzun düşündükten sonra yavaşça\nkonuştu.')
+        paragraphs, _language, _warnings = pdf_book.clean_pages([text], 'tr')
+        self.assertEqual([p['text'] for p in paragraphs], [
+            '“...ve ondan sonra, Peder, ekmekle peyniri az daha alacaktım.”', '“Ama almadın mı?”',
+            'Francis başını salladı ve uzun uzun düşündükten sonra yavaşça konuştu.'])
+
     def test_english_keeps_real_compounds(self):
         texts = ['The well-known professor was minimiz-ing the damage. It was well known and he was a professor of '
                  'the old school. The damage was done.']
@@ -65,8 +74,24 @@ class ChapterTests(unittest.TestCase):
         paragraphs = self.paragraphs([['Copyright 2009.'], ['Chapter 1', 'The Storm', 'It rained.'],
                                       ['More rain.'], ['CHAPTER 2', 'It stopped.']])
         chapters = pdf_book.split_chapters(paragraphs, 'en')
-        self.assertEqual([c['title'] for c in chapters], ['Chapter 1: The Storm', 'CHAPTER 2'])
-        self.assertEqual(chapters[0]['paragraphs'], ['Copyright 2009.', 'It rained.', 'More rain.'])
+        self.assertEqual([c['title'] for c in chapters], ['Front matter', 'Chapter 1: The Storm', 'CHAPTER 2'])
+        self.assertEqual(chapters[0]['paragraphs'], ['Copyright 2009.'])
+        self.assertEqual(chapters[1]['paragraphs'], ['It rained.', 'More rain.'])
+        self.assertEqual((chapters[1]['page'], chapters[1]['ordinal'], chapters[1]['skip']), (2, 0, 2))
+
+    def test_saved_boundaries_survive_text_edits_and_skip_inserted_headings(self):
+        paragraphs = self.paragraphs([['Intro.'], ['It rained.', 'More rain.'], ['It stopped.']])
+        boundaries = [{'title': 'Giriş', 'page': 1, 'ordinal': 0, 'skip': 0, 'level': 0},
+                      {'title': '7', 'page': 2, 'ordinal': 1, 'skip': 0, 'level': 1},
+                      {'title': 'Son', 'page': 3, 'ordinal': 5, 'skip': 0, 'level': 0}]   # sayfada 5. paragraf yok
+        chapters = pdf_book.chapters_from(paragraphs, boundaries)
+        self.assertEqual([(c['title'], c['paragraphs']) for c in chapters],
+                         [('Giriş', ['Intro.', 'It rained.']), ('7', ['More rain.', 'It stopped.']), ('Son', [])])
+        auto = pdf_book.auto_boundaries([{'text': 'Intro.', 'page': 1}, {'text': '1', 'page': 2, 'inserted': True},
+                                         {'text': 'It rained.', 'page': 2}, {'text': '2', 'page': 3},
+                                         {'text': 'It stopped.', 'page': 3}], 'en')
+        self.assertEqual([(b['title'], b['page'], b['ordinal'], b['skip']) for b in auto],
+                         [('Front matter', 1, 0, 0), ('1', 2, 0, 0), ('2', 3, 0, 1)])
 
     def test_bracketed_headings_and_fallback_chunks(self):
         paragraphs = self.paragraphs([['[Holy Empire]', 'A nation.'], ['Text.'], ['Text.'], ['[September 2009]', 'Go.'],
@@ -108,7 +133,10 @@ class PdfToEpubTests(unittest.TestCase):
         pdf = scanned_pdf(self.root / 'Leibowitz Icin Bir Ilahi - Walter M Miller JR.pdf', [(600, 850)] * 4)
         texts = ['BÖLÜM 1\n\nIssız çöl\n\nGenç rahip yürüdü ve bir taş buldu.', 'Taşı kaldırdı ve bir yazı gördü.',
                  'BÖLÜM 2\n\nYaşlı adam güldü.', 'Sonra gitti.']
-        epub, info = pdf_book.build_epub(pdf, self.root / 'is', texts, log=lambda *_: None)
+        pages = iter(texts)
+        work = self.root / 'is'
+        pdf_book.read_pages(pdf, work, lambda png, prompt: next(pages))
+        epub, info = pdf_book.build_epub(pdf, work, log=lambda *_: None)
         self.assertEqual((info['title'], info['author'], info['language']),
                          ('Leibowitz Icin Bir Ilahi', 'Walter M Miller JR', 'tr'))
         self.assertEqual(info['chapters'], ['BÖLÜM 1: Issız çöl', 'BÖLÜM 2'])
@@ -122,6 +150,44 @@ class PdfToEpubTests(unittest.TestCase):
         sources = sorted((project / 'source').glob('*.md'))
         self.assertEqual(len(sources), 2)
         self.assertIn('Genç rahip yürüdü', sources[0].read_text(encoding='utf-8'))
+
+
+class ReviewTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.pdf = scanned_pdf(self.root / 'Kitap - Yazar.pdf', [(600, 850)] * 4)
+        self.work = pdf_book.work_dir(self.pdf)
+        pages = iter(['BÖLÜM 1\n\nGenç rahip yürüdü.', 'Taşı kaldırdı.\n\nBir yazı gördü.', 'BÖLÜM 2\n\nYaşlı adam güldü.',
+                      'Sonra gitti.'])
+        pdf_book.read_pages(self.pdf, self.work, lambda png, prompt: next(pages))
+
+    def test_review_page_edits_and_saved_structure(self):
+        summary = pdf_book.review(self.pdf, self.work, log=lambda *_: None)
+        self.assertEqual(([c['title'] for c in summary['chapters']], summary['auto'], summary['pages']),
+                         (['BÖLÜM 1', 'BÖLÜM 2'], True, 4))
+        self.assertEqual(summary['chapters'][0]['first'], 'Genç rahip yürüdü.')
+        view = pdf_book.page_view(self.pdf, self.work, 2)
+        self.assertTrue(view['image'].startswith('data:image/jpeg;base64,'))
+        self.assertEqual([p['text'] for p in view['paragraphs']], ['Taşı kaldırdı.', 'Bir yazı gördü.'])
+        pdf_book.save_page(self.work, 2, 'Taşı kaldırdı ve baktı.\r\n\r\nBir yazı gördü.')
+        self.assertTrue(pdf_book.page_view(self.pdf, self.work, 2)['edited'])
+        self.assertEqual(pdf_book.ocr_text(self.work, 2), 'Taşı kaldırdı.\n\nBir yazı gördü.')   # OCR bozulmadi
+        # Kullanici 2. sayfanin ikinci paragrafinda yeni bolum baslatir ve ilk bolumun adini degistirir.
+        chapters = summary['chapters'] + [{'title': 'Yazı', 'page': 2, 'ordinal': 1, 'skip': 0, 'level': 0}]
+        chapters[0] = dict(chapters[0], title='Çöl')
+        pdf_book.save_book(self.work, {'title': 'Kitap', 'author': 'Yazar', 'language': 'tr', 'chapters': chapters})
+        epub, info = pdf_book.build_epub(self.pdf, self.work, log=lambda *_: None)
+        self.assertEqual(info['chapters'], ['Çöl', 'Yazı', 'BÖLÜM 2'])
+        self.assertIn('Taşı kaldırdı ve baktı.', EpubBook(epub).section_html(0))
+        self.assertFalse(pdf_book.review(self.pdf, self.work)['auto'])
+        pdf_book.revert_page(self.work, 2)
+        self.assertEqual(pdf_book.edited_pages(self.work), [])
+        with self.assertRaises(ValueError):
+            pdf_book.save_book(self.work, {'chapters': [{'title': ' ', 'page': 1}]})
+        redetected = pdf_book.review(self.pdf, self.work, log=lambda *_: None, redetect=True)
+        self.assertEqual(([c['title'] for c in redetected['chapters']], redetected['auto']), (['BÖLÜM 1', 'BÖLÜM 2'], True))
 
 
 class BridgePdfTests(unittest.TestCase):
@@ -168,6 +234,23 @@ class BridgePdfTests(unittest.TestCase):
         self.assertEqual([book['title'] for book in self.bridge.shelf_list()], ['Benim Kitabım'])
         self.assertTrue(any(event == 'pdf_progress' for event, _data in self.events))
         self.assertEqual(self.bridge.pdf_info(str(pdf))['read'], 3)           # okunan sayfalar saklandi
+        # Gozden gecirme: 2. bolumun adi duzeltilir, sayfa metni duzeltilir, kitap yeniden yazilir.
+        summary = self.bridge.pdf_review(str(pdf))
+        self.assertEqual([c['title'] for c in summary['chapters']], ['BÖLÜM 1', 'BÖLÜM 2'])
+        chapters = [dict(summary['chapters'][0]), dict(summary['chapters'][1], title='İkinci')]
+        saved = self.bridge.pdf_save_structure(str(pdf), {'title': 'Benim Kitabım', 'author': 'Yazar', 'language': 'tr',
+                                                          'chapters': chapters})
+        self.assertEqual(([c['title'] for c in saved['chapters']], saved['auto']), (['BÖLÜM 1', 'İkinci'], False))
+        page = self.bridge.pdf_save_page(str(pdf), 2, 'Taşı kaldırdı, sonra baktı.')
+        self.assertTrue(page['edited'])
+        self.assertFalse(self.bridge.pdf_save_page(str(pdf), 2, page['ocr'])['edited'])   # OCR'in aynisi
+        self.bridge.pdf_save_page(str(pdf), 2, 'Taşı kaldırdı, sonra baktı.')
+        book_id = done['book_id']
+        self.bridge.reader_open(book_id)                                       # okuyucu onbellege alir
+        rebuilt = self.bridge.pdf_rebuild(str(pdf), 'reading')
+        self.assertEqual((rebuilt['chapters'], rebuilt['book_id']), (['BÖLÜM 1', 'İkinci'], book_id))
+        self.assertIn('sonra baktı', self.bridge.reader_section(book_id, 0)['html'])
+        self.assertIn('error', self.bridge.pdf_page(str(pdf), 99))
 
 
 if __name__ == '__main__':

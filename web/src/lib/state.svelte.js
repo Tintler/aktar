@@ -30,6 +30,7 @@ export const app = $state({
   reader: { size: 19, font: 'serif', leading: 1.75, width: 680, paper: 'theme' },
   // PDF'den kitap (bridge_pdf): acik pencere ve calisan is (pencere kapansa da is surer).
   pdfImport: null,            // {open, info, title, author, target, running, progress, result}
+  pdfReview: null,            // gozden gecirme: {path, target, summary} (bridge_pdf.pdf_review)
   settingsTab: 'models',      // Ayarlar sayfasinin acik kategorisi (ui.json 'settings_tab')
   // Sesli okuma (bridge_tts): motor durumu, kurulu motorlar, hazirlama/kayit ilerlemesi, tercihler (ui.json 'tts').
   tts: { state: 'idle', message: '', device: null, exporting: false },
@@ -433,6 +434,26 @@ export function closePdfImport() {
 export async function finishPdfImport() {
   const result = app.pdfImport?.result;
   app.pdfImport = null;
+  await openPdfResult(result);
+}
+
+// PDF'nin gozden gecirme ekranini acar (sayfalar okunmus olmali).
+export async function openPdfReview(path, target = 'reading') {
+  app.busy = 'Kitap hazırlanıyor…';
+  const summary = await act('pdf_review', path).finally(() => (app.busy = ''));
+  if (!summary) return;
+  app.pdfImport = null;
+  app.pdfReview = { path, target, summary };
+  app.view = 'pdfreview';
+}
+
+export async function finishPdfReview(result) {
+  app.pdfReview = null;
+  toast(`Kitap yeniden oluşturuldu (${result.chapters.length} bölüm).`, 'ok');
+  await openPdfResult(result);
+}
+
+async function openPdfResult(result) {
   if (!result || result.error) return;
   if (result.target === 'books') {
     const snapshot = await act('book_choose_epub', result.epub);

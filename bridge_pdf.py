@@ -81,6 +81,7 @@ class PdfMixin:
                     added = self.shelf_add([str(epub)])
                     if added and added.get('added'):
                         result['book_id'] = added['added'][0]
+                        getattr(self._shelf(), '_cache', {}).pop(result['book_id'], None)   # yeniden uretildiyse
                 self._emit('pdf_done', result)
             except GracefulStop as error:
                 self._emit('pdf_done', {'path': str(pdf), 'cancelled': True, 'error': str(error)})
@@ -91,6 +92,74 @@ class PdfMixin:
         self._pdf_job = threading.Thread(target=work, name='aktar-pdf-book', daemon=True)
         self._pdf_job.start()
         return {'started': True}
+
+    # ------------------------------------------------------------------ gozden gecirme
+    def _pdf_work(self, path):
+        pdf = Path(str(path))
+        if not pdf.is_file():
+            raise ValueError('PDF bulunamadı: ' + str(path))
+        return pdf, pdf_book.work_dir(pdf)
+
+    def _pdf_call(self, action):
+        try:
+            return action()
+        except (ValueError, OSError, KeyError) as error:
+            return {'error': str(error)}
+
+    def pdf_review(self, path, redetect=False):
+        """Gozden gecirme ozeti: kitap bilgisi, bolumler, uyarilar, duzeltilen sayfalar. redetect: bolumleri
+        otomatik yeniden bul (kayitli duzenlemeler silinir)."""
+        def run():
+            pdf, work = self._pdf_work(path)
+            if self._pdf_running():
+                raise ValueError('PDF okunurken gözden geçirilemez; okuma bitince açın.')
+            return dict(pdf_book.review(pdf, work, self._log, bool(redetect)), path=str(pdf), name=pdf.name)
+        return self._pdf_call(run)
+
+    def pdf_page(self, path, page):
+        def run():
+            pdf, work = self._pdf_work(path)
+            return pdf_book.page_view(pdf, work, int(page))
+        return self._pdf_call(run)
+
+    def pdf_save_page(self, path, page, text):
+        def run():
+            pdf, work = self._pdf_work(path)
+            if str(text).strip() == pdf_book.ocr_text(work, int(page)).strip():
+                pdf_book.revert_page(work, int(page))     # OCR'in aynisi: duzeltme tutulmaz
+            else:
+                pdf_book.save_page(work, int(page), str(text))
+            return pdf_book.page_view(pdf, work, int(page))
+        return self._pdf_call(run)
+
+    def pdf_revert_page(self, path, page):
+        def run():
+            pdf, work = self._pdf_work(path)
+            pdf_book.revert_page(work, int(page))
+            return pdf_book.page_view(pdf, work, int(page))
+        return self._pdf_call(run)
+
+    def pdf_save_structure(self, path, data):
+        """Kitap adi, yazar, dil ve bolum sinirlarini kaydeder (kitap.json); ozeti dondurur."""
+        def run():
+            pdf, work = self._pdf_work(path)
+            pdf_book.save_book(work, dict(data or {}, auto=False))
+            return dict(pdf_book.review(pdf, work, self._log), path=str(pdf), name=pdf.name)
+        return self._pdf_call(run)
+
+    def pdf_rebuild(self, path, target='reading'):
+        """Duzeltmelerle EPUB'u yeniden yazar (OCR yapilmaz). Okuma'daki kitap yerinde guncellenir."""
+        def run():
+            pdf, work = self._pdf_work(path)
+            epub, info = pdf_book.build_epub(pdf, work, log=self._log)
+            result = {'path': str(pdf), 'epub': str(epub), 'target': target, **info}
+            if target == 'reading':
+                added = self.shelf_add([str(epub)])
+                if added and added.get('added'):
+                    result['book_id'] = added['added'][0]
+                    getattr(self._shelf(), '_cache', {}).pop(result['book_id'], None)   # eski bolumler gosterilmesin
+            return result
+        return self._pdf_call(run)
 
     def pdf_cancel(self):
         stop = self._pdf_stop

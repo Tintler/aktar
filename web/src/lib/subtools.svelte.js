@@ -6,7 +6,7 @@ import { confirm, notice } from './confirm.svelte.js';
 
 export const subtool = $state({ job: null });
 
-const KIND_NAMES = { align: 'Otomatik hizalama', ocr: 'Altyazı OCR', whisper: 'Kelime zamanları', clip: 'Klip kaydı' };
+export const KIND_NAMES = { align: 'Otomatik hizalama', ocr: 'Altyazı OCR', whisper: 'Kelime zamanları', clip: 'Klip kaydı' };
 const STAGE_NAMES = { whisper: 'Konuşmadan metin', frames: 'Altyazı görüntüleri', ocr: 'OCR', align: 'Hizalanıyor', clip: 'Klip kodlanıyor' };
 const listeners = new Set();
 

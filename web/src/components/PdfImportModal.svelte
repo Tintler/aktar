@@ -3,7 +3,7 @@
   // Durum app.pdfImport'ta (pencere kapansa da is surer, bitince bildirim gelir).
   import Modal from './Modal.svelte';
   import Icon from '../lib/Icon.svelte';
-  import { app, act, closePdfImport, finishPdfImport, openSettings } from '../lib/state.svelte.js';
+  import { app, act, closePdfImport, finishPdfImport, openPdfReview, openSettings } from '../lib/state.svelte.js';
   import { call } from '../lib/api.js';
 
   const job = app.pdfImport;
@@ -57,13 +57,15 @@
   {#snippet footer()}
     {#if job.result}
       <button class="btn" onclick={closePdfImport}>Kapat</button>
+      {#if !job.result.error}<button class="btn" onclick={() => openPdfReview(info.path, job.target)} title="Bölümleri ve sayfa metinlerini düzelt"><Icon name="pencil" size={15} />Gözden geçir</button>{/if}
       {#if !job.result.error}<button class="btn primary" onclick={finishPdfImport}>{job.result.target === 'books' ? "Kitap Çevir'de aç" : 'Okumaya başla'}</button>{/if}
     {:else if job.running}
       <button class="btn" onclick={() => call('pdf_cancel')}><Icon name="stop" size={15} />Durdur</button>
       <button class="btn primary" onclick={closePdfImport}>Arka planda sürsün</button>
     {:else}
       <button class="btn" onclick={closePdfImport}>İptal</button>
-      <button class="btn primary" disabled={!job.title.trim()} onclick={start}>Başlat</button>
+      {#if info.read >= info.pages}<button class="btn" onclick={() => openPdfReview(info.path, job.target)} title="Sayfalar okunmuş; bölümleri ve metni düzeltin"><Icon name="pencil" size={15} />Gözden geçir</button>{/if}
+      <button class="btn primary" disabled={!job.title.trim()} onclick={start}>{info.read >= info.pages ? 'Kitabı yeniden oluştur' : 'Başlat'}</button>
     {/if}
   {/snippet}
 </Modal>

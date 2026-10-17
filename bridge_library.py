@@ -684,7 +684,9 @@ class LibraryMixin:
         self._queue_resume = threading.Event()
         self._queue_resume.set()
         self._queue = {'total': len(entries), 'done': 0, 'index': 0, 'name': '', 'step': '',
-                       'label': 'Başlıyor…', 'paused': False, 'percent': None, 'failed': []}
+                       'label': 'Başlıyor…', 'paused': False, 'percent': None, 'failed': [],
+                       # F139: is takibinden koleksiyona gidebilmek icin
+                       'slug': collection[0] if collection else '', 'title': collection[1] if collection else ''}
         self._row_status = {library._key(entry['path']): ('Sırada', 'dim') for entry in entries}
         self._log(f'Toplu hazırlık başladı: {len(entries)} dosya' + (' (Whisper açık).' if whisper else '.'))
         self._queue_worker = threading.Thread(
