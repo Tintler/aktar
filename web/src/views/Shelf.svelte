@@ -1,7 +1,7 @@
 <script>
   import Icon from '../lib/Icon.svelte';
   import BookCover from '../components/BookCover.svelte';
-  import { app, act, toast } from '../lib/state.svelte.js';
+  import { app, act, openPdfImport, toast } from '../lib/state.svelte.js';
   import { confirm } from '../lib/confirm.svelte.js';
 
   let { onopen } = $props();
@@ -39,6 +39,7 @@
 <section class="page">
   <div class="page-head">
     <h1>Okuma</h1>
+    <button class="btn" onclick={() => openPdfImport(null, 'reading')} title="Taranmış PDF'yi okuyup EPUB kitap yapar"><Icon name="fileText" size={16} />PDF'den kitap</button>
     <button class="btn primary" onclick={add}><Icon name="plus" size={16} />Kitap ekle</button>
   </div>
 

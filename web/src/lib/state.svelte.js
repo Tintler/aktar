@@ -28,6 +28,8 @@ export const app = $state({
   shelf: [],
   reading: { book: null, section: 0, offset: 0, percent: 0 },
   reader: { size: 19, font: 'serif', leading: 1.75, width: 680, paper: 'theme' },
+  // PDF'den kitap (bridge_pdf): acik pencere ve calisan is (pencere kapansa da is surer).
+  pdfImport: null,            // {open, info, title, author, target, running, progress, result}
   settingsTab: 'models',      // Ayarlar sayfasinin acik kategorisi (ui.json 'settings_tab')
   // Sesli okuma (bridge_tts): motor durumu, kurulu motorlar, hazirlama/kayit ilerlemesi, tercihler (ui.json 'tts').
   tts: { state: 'idle', message: '', device: null, exporting: false },
@@ -249,6 +251,17 @@ export async function init() {
     if (done) toast(done, 'ok');
     if (error) toast(error, 'error');
   });
+  on('pdf_progress', (data) => {
+    if (app.pdfImport && app.pdfImport.info.path === data.path) { app.pdfImport.running = true; app.pdfImport.progress = data; }
+  });
+  on('pdf_done', (data) => {
+    const job = app.pdfImport;
+    if (!job || job.info.path !== data.path) return;
+    job.running = false;
+    if (data.cancelled) { app.pdfImport = null; toast('PDF okuma durduruldu; okunan sayfalar saklandı.'); return; }
+    job.result = { target: job.target, ...data };
+    job.open = true;          // pencere kapatilmissa sonucla yeniden acilir
+  });
   on('library', (state) => setLibrary(state));
   on('row', ({ row, meta }) => {
     const index = app.library.rows.findIndex((r) => r.key === row.key);
@@ -400,6 +413,37 @@ export async function openFile(row, at = null, origin = 'library') {
 export function openInTranslate(path) {
   app.pendingVideo = path;
   app.view = 'translate';
+}
+
+// PDF'den kitap penceresini acar (target: 'reading' | 'books').
+export async function openPdfImport(path = null, target = 'reading') {
+  if (app.pdfImport?.running) { app.pdfImport.open = true; return; }
+  const info = await act('pdf_info', path);
+  if (!info) return;
+  app.pdfImport = { open: true, info, title: info.title, author: info.author, target, running: false, progress: null, result: null };
+}
+
+export function closePdfImport() {
+  if (!app.pdfImport) return;
+  if (app.pdfImport.running) app.pdfImport.open = false;
+  else app.pdfImport = null;
+}
+
+// Bitmis isin kitabini acar: Okuma'da okuyucu ya da Kitap Cevir'de proje.
+export async function finishPdfImport() {
+  const result = app.pdfImport?.result;
+  app.pdfImport = null;
+  if (!result || result.error) return;
+  if (result.target === 'books') {
+    const snapshot = await act('book_choose_epub', result.epub);
+    if (snapshot) { applyBookSnapshot(snapshot); go('books'); }
+    return;
+  }
+  const books = await call('shelf_list');
+  if (Array.isArray(books)) app.shelf = books;
+  const data = result.book_id ? await act('reader_open', result.book_id) : null;
+  if (data) app.reading = { book: data, section: data.position.section, offset: data.position.offset, percent: data.percent };
+  go('reading');
 }
 
 // Ayarlar'i belirli bir kategoride acar (orn. sesli okumada motor yoksa 'voice').

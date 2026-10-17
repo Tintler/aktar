@@ -2,12 +2,14 @@
   // Okuma (Cevirgec): kitaplik ya da acik kitap.
   import Shelf from './Shelf.svelte';
   import Reader from './Reader.svelte';
-  import { app, act, onDrop } from '../lib/state.svelte.js';
+  import { app, act, onDrop, openPdfImport } from '../lib/state.svelte.js';
   import { presetDrop } from '../components/VoicePresetModal.svelte';
 
   // Pencereye birakilan EPUB'lar kitapliga eklenir.
   onDrop('reading', async (paths) => {
     if (presetDrop.handler) return presetDrop.handler(paths);   // ses penceresi acikken: ses resmi
+    const pdf = paths.find((path) => /\.pdf$/i.test(path));
+    if (pdf) return openPdfImport(pdf, 'reading');              // F138: taranmis PDF'den kitap
     const result = await act('shelf_add', paths);
     if (result) app.shelf = result.books;
   });

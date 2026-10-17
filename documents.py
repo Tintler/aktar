@@ -572,6 +572,26 @@ def tesseract_workers():
     return max(1, min(8, (os.cpu_count() or 2) - 2))
 
 
+def tessdata_dir(exe):
+    """Kullanicinin dil verisi klasoru (APP_DIR/models/tessdata), icinde .traineddata varsa. Tesseract
+    Program Files'a kuruluysa yeni dil (orn. tur.traineddata) eklemek yonetici izni ister; buraya konan
+    dosyalar izinsiz kullanilir. Kurulu dillerden eksik olanlar (eng, osd) bir kez buraya kopyalanir."""
+    import shutil
+    from app_core import APP_DIR
+    folder = APP_DIR / 'models' / 'tessdata'
+    if not any(folder.glob('*.traineddata')):
+        return None
+    installed = Path(exe).resolve().parent / 'tessdata'
+    for source in installed.glob('*.traineddata'):
+        target = folder / source.name
+        if not target.exists():
+            try:
+                shutil.copyfile(source, target)
+            except OSError:
+                pass
+    return folder
+
+
 def tesseract_reader(cfg, log=print, lang=None, psm='3'):
     """(png) -> metin; Tesseract yoksa anlasilir hata. Turkce dil verisi yoksa 'eng'e duser.
 
@@ -587,8 +607,10 @@ def tesseract_reader(cfg, log=print, lang=None, psm='3'):
                          'yolunu gösterin; veya OCR motoru olarak görü modelini seçin.')
     hide = {'creationflags': getattr(subprocess, 'CREATE_NO_WINDOW', 0)} if os_name() == 'nt' else {}
     wanted = str(lang or cfg.get('tesseract_lang', 'tur+eng')).strip() or 'tur+eng'
+    data = tessdata_dir(exe)
+    data_args = ['--tessdata-dir', str(data)] if data else []
     try:
-        listed = subprocess.run([exe, '--list-langs'], capture_output=True, text=True,
+        listed = subprocess.run([exe, '--list-langs', *data_args], capture_output=True, text=True,
                                 encoding='utf-8', errors='replace', timeout=60, **hide)
         available = set((listed.stdout or '').split())
     except (OSError, subprocess.SubprocessError):
@@ -609,7 +631,7 @@ def tesseract_reader(cfg, log=print, lang=None, psm='3'):
             image = Path(folder) / 'sayfa.png'
             image.write_bytes(png)
             result = subprocess.run([exe, str(image), 'stdout', '-l', '+'.join(langs),
-                                     '--psm', str(psm)], capture_output=True, timeout=600,
+                                     '--psm', str(psm), *data_args], capture_output=True, timeout=600,
                                     env=env, **hide)
         if result.returncode != 0:
             raise ValueError('Tesseract hatası: '

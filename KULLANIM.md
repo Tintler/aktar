@@ -396,6 +396,13 @@ Ses, bilgisayarınızda çalışan ayrı bir ses motoruyla üretilir (Çevirgeç
 
 Motor yalnızca okurken çalışan bir alt süreçtir; Aktar kapanınca (çökse bile) kendiliğinden kapanır.
 
+### 3.16 PDF'den kitap (taranmış PDF)
+Taranmış (metni resim olan) bir PDF'yi Okuma ya da Kitap Çevir sayfasına bırakın veya **PDF'den kitap** düğmesine basın. Pencerede kitap adı ve yazar (dosya adından tahmin edilir) düzeltilir, kitabın sonra nereye gideceği seçilir: **Okuma'ya ekle** (Türkçe kitaplar, sesli okuma) ya da **Kitap Çevir'de aç** (İngilizce kitaplar). Sayfalar Ayarlar → Kütüphane ve belgeler'deki OCR motoruyla okunur: **OCR modeli** (ör. LM Studio'da glm-ocr) daha doğru, **Tesseract** çok daha hızlıdır (yüzlerce sayfa birkaç dakikada). Tesseract seçiliyse kitabın dili birkaç sayfadan anlaşılır ve kitabın tamamı yalnızca o dille okunur.
+
+Okunan her sayfa PDF'nin yanındaki `<PDF adı>-pdf\ocr` klasörüne yazılır; iş durdurulursa ya da Aktar kapanırsa bir sonraki sefer kaldığı sayfadan sürer. Pencere kapatılabilir, okuma arka planda sürer ve bitince sonuç gösterilir. Temizleme kurallarla yapılır: tekrar eden üst/alt bilgiler ve filigranlar, sayfa numaraları, satır ve sayfa sonunda bölünmüş kelimeler, sayfalar arasında yarım kalan paragraflar, taramada iki kez geçen sayfalar; çift sayfa taramalar ikiye bölünür, dipnotlar bölüm sonunda "Notlar" altında toplanır. Bölümler sırasıyla PDF'nin yer imlerinden, kitabın kendi içindekiler sayfasından, bölüm başlıklarından ("Chapter 3", "Kısım Bir", sayfa başındaki "12") ya da sayfa düzeninden (üstünde büyük boşluk olan bölüm başı sayfaları) bulunur; OCR'ın okumadığı ya da yanlış okuduğu bölüm numaraları sayfa düzenine bakılarak düzeltilir. OCR hatası olabilecek sayfalar sonuçta "Kontrol edilecek sayfalar" olarak listelenir.
+
+Türkçe Tesseract dil dosyası kurulumda yoksa ve Program Files'a yazma izniniz yoksa `tur.traineddata` dosyasını Aktar'ın yanındaki `models\tessdata` klasörüne koyun; Aktar oradaki dilleri kullanır.
+
 ---
 
 ## 4. Terim sözlüğü (glossary)

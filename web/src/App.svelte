@@ -5,6 +5,7 @@
   import ConfirmHost from './components/ConfirmHost.svelte';
   import ReviewModal from './components/ReviewModal.svelte';
   import BookReviewModal from './components/BookReviewModal.svelte';
+  import PdfImportModal from './components/PdfImportModal.svelte';
   import Collections from './components/Collections.svelte';
   import ChatPanel from './components/ChatPanel.svelte';
   import MenuHost from './components/MenuHost.svelte';
@@ -83,8 +84,8 @@
     dragging = true;
   }
   const dropHint = $derived(app.view === 'translate' ? 'Videoyu açmak için bırakın'
-    : app.view === 'books' ? 'EPUB ya da çeviri klasörünü açmak için bırakın'
-    : app.view === 'reading' ? 'Kitaplığa eklemek için bırakın'
+    : app.view === 'books' ? 'EPUB, PDF ya da çeviri klasörünü açmak için bırakın'
+    : app.view === 'reading' ? "EPUB ya da taranmış PDF'yi kitaplığa eklemek için bırakın"
     : app.view === 'files' ? 'İncelemek için bırakın'
     : app.view === 'subscriptions' ? 'Logo olarak eklemek için bırakın' : 'Koleksiyona eklemek için bırakın');
 
@@ -169,6 +170,7 @@
 
 {#if app.review}<ReviewModal data={app.review} onsubmit={submitReview} />{/if}
 {#if app.books.review}<BookReviewModal data={app.books.review} onsubmit={submitBookReview} />{/if}
+{#if app.pdfImport?.open}<PdfImportModal />{/if}
 <ConfirmHost />
 
 <div class="toasts">

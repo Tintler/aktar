@@ -5,7 +5,7 @@
   import Toggle from '../components/Toggle.svelte';
   import BookGlossaryModal from '../components/BookGlossaryModal.svelte';
   import BookAnalysisModal from '../components/BookAnalysisModal.svelte';
-  import { app, act, applyBookSnapshot, onDrop, openInReader, savePref, toast } from '../lib/state.svelte.js';
+  import { app, act, applyBookSnapshot, onDrop, openInReader, openPdfImport, savePref, toast } from '../lib/state.svelte.js';
   import { call } from '../lib/api.js';
   import { confirm, notice } from '../lib/confirm.svelte.js';
 
@@ -37,7 +37,8 @@
   onDrop('books', (paths) => {
     if (!idle) return toast('Çalışan çeviri tamamlanmadan seçim değiştirilemez.', 'error');
     const path = paths[0];
-    if (/\.epub$/i.test(path)) chooseEpub(path);
+    if (/\.pdf$/i.test(path)) openPdfImport(path, 'books');   // F138: taranmis PDF once EPUB'a cevrilir
+    else if (/\.epub$/i.test(path)) chooseEpub(path);
     else openProject(path);
   });
 
@@ -191,6 +192,7 @@
     <h1>Kitap Çevir</h1>
     <button class="btn" disabled={!idle} onclick={() => openProject()} title="Daha önce oluşturulmuş {'{'}KitapAdı{'}'}-ceviri klasörünü açar ve kayıtlı kontrol noktalarından devam eder.">
       <Icon name="history" size={16} />Projeyi sürdür</button>
+    <button class="btn" disabled={!idle} onclick={() => openPdfImport(null, 'books')} title="Taranmış PDF'yi okuyup EPUB yapar, sonra burada açar"><Icon name="fileText" size={16} />PDF'den</button>
     <button class="btn" disabled={!idle} onclick={() => chooseEpub()}><Icon name="book" size={16} />EPUB aç</button>
   </div>
 
