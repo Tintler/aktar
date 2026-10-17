@@ -261,8 +261,13 @@ class LibraryBridgeTests(unittest.TestCase):
                 feed(text)
         self.assertEqual(len(pushes), 2)  # ikinci parca araliga takildi
         self.assertEqual(bridge_library.chat_entries(entries)[1],
-                         {'kind': 'pending', 'text': 'Dosyalarda aranıyor…', 'thinking': 'Plan yap bitti'})
+                         {'kind': 'pending', 'text': 'Dosyalarda aranıyor…', 'thinking': 'Plan yap bitti', 'stream': ''})
         self.assertEqual(bridge_library.chat_entries([('pending', 'Bekle')])[0]['thinking'], '')
+        # F142: cevap metni de bekleyen kayda akar; dusunce korunur.
+        with mock.patch.object(bridge_library.time, 'monotonic', return_value=20.0):
+            feed.on_text('Cevap ')
+        self.assertEqual(bridge_library.chat_entries(entries)[1]['stream'], 'Cevap ')
+        self.assertEqual(bridge_library.chat_entries(entries)[1]['thinking'], 'Plan yap bitti')
 
     def test_dropping_a_folder_creates_a_collection_and_scans_it(self):
         folder = self.root / 'Dersler'

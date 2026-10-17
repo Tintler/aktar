@@ -2,15 +2,18 @@
   // Sesli mod (F141): elleri serbest sohbet. Acikken mikrofon dinler; konusma bitip kisa bir sessizlik olunca
   // kayit yerel Whisper ile metne cevrilip gonderilir, cevap sohbet sesiyle okunur, sonra yeniden dinlenir.
   // Okurken tiklamak sozu keser ve dinlemeye gecer; Esc ya da dugme sesli modu kapatir. Ses bilgisayardan cikmaz.
+  // F142: soru dusunmesiz gonderilir (ust bilesen onsend'de think=false verir); cevap akarken tamamlanan
+  // cumleler hemen okunur (stream: genel sohbetin akan metni; yoksa bekleyen kaydin 'stream' alani).
   import { onDestroy } from 'svelte';
   import Icon from '../lib/Icon.svelte';
   import { toast } from '../lib/state.svelte.js';
   import { call } from '../lib/api.js';
   import { voiceStatus, startRecording } from '../lib/voice.js';
-  import { speaker, ensureVoice, speak, stopSpeaking, entryText } from '../lib/speaker.svelte.js';
+  import { speaker, ensureVoice, streamSpeaker, stopSpeaking, entryText } from '../lib/speaker.svelte.js';
 
-  // entries: sohbet kayitlari; busy: cevap hazirlaniyor; onsend(text): soruyu gonderir
-  let { entries = [], busy = false, disabled = false, onsend } = $props();
+  // entries: sohbet kayitlari; busy: cevap hazirlaniyor; stream: akan cevap metni (null: bekleyen kayittan);
+  // onsend(text): soruyu dusunmesiz gonderir; onstop: uretimi durdurur (soz kesilince; yoksa cevap arkada biter)
+  let { entries = [], busy = false, stream = null, disabled = false, onsend, onstop = null } = $props();
 
   const SPEECH = 0.045;       // bu tepe duzeyinin ustu konusma sayilir
   const SILENCE_MS = 1300;    // konusmadan sonra bu kadar sessizlik: soru bitti
@@ -23,6 +26,10 @@
   let timer = null;
   let mark = 0;
   let sentAt = 0;
+  let answering = false;      // gonderilen sorunun cevabi bekleniyor/okunuyor
+  let streamer = null;        // streamSpeaker (cevap okunurken)
+
+  const live = $derived(stream ?? entries.findLast?.((e) => e.kind === 'pending')?.stream ?? '');
 
   const on = $derived(mode !== 'off');
   const TITLES = {
@@ -57,6 +64,8 @@
     clearTimer();
     recorder?.cancel();
     recorder = null;
+    answering = false;
+    streamer = null;
     stopSpeaking();
     mode = 'off';
     level = 0;
@@ -108,37 +117,61 @@
     const text = (result?.text ?? '').trim();
     if (result?.error) toast(result.error, 'error');
     if (!text) { listen(); return; }
+    mode = 'waiting';
+    // Onceki cevap hala uretiliyorsa (soz kesildi) bitmesi beklenir; sohbet ayni anda tek soru alir.
+    for (let i = 0; busy && i < 600 && mode === 'waiting'; i++) await new Promise((r) => setTimeout(r, 100));
+    if (mode !== 'waiting') return;
     mark = entries.length;
     sentAt = Date.now();
-    mode = 'waiting';
+    answering = true;
     onsend?.(text);
   }
 
-  // Cevap geldi: son kayit cevap (ya da hata) ve sohbet bos. Sonra okunur, ardindan yeniden dinlenir.
+  // Cevap akarken tamamlanan cumleler okunur; cevap bitince (son kayit cevap ya da hata) kalan kisim eklenir,
+  // okuma bitince yeniden dinlenir.
   $effect(() => {
-    const count = entries.length, working = busy, last = entries.at(-1);
-    if (mode !== 'waiting') return;
+    const count = entries.length, working = busy, last = entries.at(-1), text = live;
+    if (!answering || (mode !== 'waiting' && mode !== 'speaking')) return;
+    if (working && text) {
+      start().update(text);
+      return;
+    }
     if (!working && count > mark && (last?.kind === 'assistant' || last?.kind === 'error')) {
-      reply(last);
+      answering = false;
+      start().finish(entryText(last));
       return;
     }
     // Soru gonderilemediyse (sohbet kilitli vb.) yeniden dinlenir.
     if (!working && count === mark) {
-      const wait = setTimeout(() => { if (mode === 'waiting' && entries.length === mark && !busy && Date.now() - sentAt > 3500) listen(); }, 4000);
+      const wait = setTimeout(() => { if (mode === 'waiting' && entries.length === mark && !busy && Date.now() - sentAt > 3500) { answering = false; listen(); } }, 4000);
       return () => clearTimeout(wait);
     }
   });
 
-  async function reply(entry) {
+  function start() {
+    if (streamer) return streamer;
+    const current = streamer = streamSpeaker();
     mode = 'speaking';
-    const done = await speak(entryText(entry));
-    if (!done && speaker.message && mode === 'speaking') toast(speaker.message, 'error');
-    if (mode === 'speaking') listen();
+    current.done.then((ok) => {
+      if (streamer !== current) return;
+      streamer = null;
+      if (!ok && speaker.message && mode === 'speaking') toast(speaker.message, 'error');
+      if (mode === 'speaking') { answering = false; listen(); }
+    });
+    return current;
+  }
+
+  function interrupt() {
+    streamer = null;
+    stopSpeaking();
+    if (answering && busy) onstop?.();
+    answering = false;
+    listen();
   }
 
   function click() {
     if (mode === 'off') begin();
-    else if (mode === 'speaking') { stopSpeaking(); listen(); }
+    else if (mode === 'speaking') interrupt();
     else if (mode === 'listening') finish();
     else end();
   }
@@ -153,7 +186,7 @@
     {#if mode === 'starting' || mode === 'transcribing' || mode === 'waiting'}
       <Icon name="loader" size={15} spin />
     {:else}
-      <Icon name={mode === 'speaking' ? 'volume' : 'headphones'} size={15} />
+      <Icon name="waveform" size={16} />
     {/if}
     {#if on}<span class="txt">{LABELS[mode]}</span>{/if}
   </button>

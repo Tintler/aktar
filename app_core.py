@@ -287,6 +287,48 @@ def qa_config(cfg, think=None):
     return value
 
 
+def keep_loaded(client, names, log=None):
+    """F142: modelleri LM Studio'da acikca yukler (REST /api/v1/models/load); yukluyse dokunmaz.
+
+    LM Studio istekle (JIT) yukledigi modellerden yalnizca sonuncusunu tutar: soru icin embedding, cevap
+    icin sohbet modeli istenince her soruda biri bosaltilip digeri yuklenir. Acikca yuklenen model bu
+    tahliyeye girmez. LM Studio disi sunucularda (REST API yok) sessizce bir sey yapmaz.
+    Donen: bu cagrida yuklenen instance kimlikleri (uygulama kapanirken bosaltmak icin)."""
+    wanted = [name for name in dict.fromkeys(str(n or '').strip() for n in names) if name]
+    if not wanted:
+        return []
+    try:
+        listing = client.request('/api/v1/models')
+        models = listing.get('models') or []
+    except (RuntimeError, ValueError, AttributeError):
+        return []
+    loaded = []
+    for name in wanted:
+        entry = next((item for item in models if name in (item.get('key'), item.get('id'), item.get('selected_variant'))
+                      or any(i.get('id') == name for i in item.get('loaded_instances') or [])), None)
+        if entry is None or entry.get('loaded_instances'):
+            continue
+        if log:
+            log(f'LM Studio: {name} kalıcı yükleniyor (sorular arasında boşaltılmasın diye)…')
+        try:
+            result = client.request('/api/v1/models/load', {'model': name})
+        except (RuntimeError, ValueError) as error:
+            if log:
+                log(f'LM Studio: {name} yüklenemedi, ilk istekte yüklenecek: {error}')
+            continue
+        loaded.append(str(result.get('instance_id') or name))
+    return loaded
+
+
+def unload_models(client, instances):
+    """keep_loaded ile yuklenenleri bosaltir (uygulama kapanirken); hatalar yok sayilir."""
+    for instance in instances:
+        try:
+            client.request('/api/v1/models/unload', {'instance_id': instance})
+        except (RuntimeError, ValueError):
+            pass
+
+
 def tr_lower(text):
     """Turkce kucuk harf: I -> ı, İ -> i (str.lower/casefold bunu yanlis yapar)."""
     return str(text).replace('I', 'ı').replace('İ', 'i').lower()

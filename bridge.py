@@ -24,7 +24,8 @@ from pathlib import Path
 import documents
 import media_server
 import themes
-from app_core import APP_DIR, DEFAULT_CONFIG, WINDOWS, Client, load_config, read, save_json, validate_config
+from app_core import (APP_DIR, DEFAULT_CONFIG, WINDOWS, Client, keep_loaded, load_config, qa_config, read, save_json,
+                      unload_models, validate_config)
 from bridge_assistant import AssistantMixin, FilesMixin
 from bridge_book import BookMixin
 from bridge_reader import ReaderMixin
@@ -126,6 +127,31 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         except OSError as error:
             return _error(error)
         return prefs
+
+    # ------------------------------------------------------------------ LM Studio modelleri (F142)
+    def _keep_chat_models(self):
+        """Soru oncesi: sohbet (soru-cevap) ve embedding modelleri LM Studio'da acikca yuklenir; boylece her
+        soruda biri bosaltilip digeri yeniden yuklenmez. Is parcaciginda cagrilir (yukleme surebilir)."""
+        try:
+            cfg = load_config()
+            names = [qa_config(cfg)['model'], cfg.get('embedding_model', '')]
+            loaded = keep_loaded(Client(cfg, self._log), names, self._log)
+        except (RuntimeError, ValueError, OSError) as error:
+            self._log(f'LM Studio modelleri hazırlanamadı: {error}')
+            return
+        with self._lock:
+            self._kept_models = list(dict.fromkeys(getattr(self, '_kept_models', []) + loaded))
+
+    def _release_models(self):
+        """Kapanirken: yalnizca uygulamanin acikca yukledigi modeller bosaltilir (LM Studio bellegi bosalsin)."""
+        kept, self._kept_models = getattr(self, '_kept_models', []), []
+        if not kept:
+            return
+        try:
+            cfg = dict(load_config(), timeout_seconds=5)
+            unload_models(Client(cfg, self._log), kept)
+        except (RuntimeError, ValueError, OSError):
+            pass
 
     # ------------------------------------------------------------------ temalar
     def list_themes(self):
@@ -306,6 +332,7 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         self._stop_native_for_close()
         self._stop_assistant_for_close()
         self._stop_watch_for_close()
+        self._release_models()
         if close:
             threading.Timer(0.1, close).start()
         return True
@@ -323,3 +350,4 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         self._stop_native_for_close()
         self._stop_assistant_for_close()
         self._stop_watch_for_close()
+        self._release_models()

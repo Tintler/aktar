@@ -60,7 +60,11 @@
   {:else if entry.kind === 'error'}
     <div class="error selectable">{entry.text}</div>
   {:else if entry.kind === 'pending'}
-    {#if entry.thinking}
+    {#if entry.stream}
+      <!-- F142: cevap metni yazilirken akar (atiflar cevap bitince dugmeye donusur) -->
+      {#if entry.thinking}<Thought text={entry.thinking} />{/if}
+      <div class="answer md selectable">{@html richHtml(entry.stream)}</div>
+    {:else if entry.thinking}
       <!-- F102: uretim sirasinda dusunce kucuk alanda canli akar -->
       <Thought text={entry.thinking} live />
     {:else}

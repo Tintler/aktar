@@ -22,11 +22,11 @@
     if (scroller) queueMicrotask(() => (scroller.scrollTop = scroller.scrollHeight));
   });
 
-  async function ask(text = question) {
+  async function ask(text = question, think = app.think) {
     const value = text.trim();
     if (!value || !q?.ready || q.asking) return;
     question = '';
-    const state = await act('player_ask', value, app.think, templateFor('video'));
+    const state = await act('player_ask', value, think, templateFor('video'));
     if (state) app.player = state;
   }
 
@@ -100,7 +100,7 @@
     <form class="ask" onsubmit={(e) => { e.preventDefault(); ask(); }}>
       <input bind:value={question} disabled={!q.ready || q.asking}
         placeholder={q.asking ? 'Yanıt hazırlanıyor…' : q.ready ? 'Soru sorun…' : 'Video hazırlanıyor…'} />
-      <VoiceMode entries={q.entries} busy={!!q.asking} disabled={!q.ready} onsend={(value) => ask(value)} />
+      <VoiceMode entries={q.entries} busy={!!q.asking} disabled={!q.ready} onsend={(value) => ask(value, false)} />
       <MicButton bind:value={question} disabled={!q.ready || q.asking} />
       <TemplatePicker kind="video" />
       <ThinkToggle />

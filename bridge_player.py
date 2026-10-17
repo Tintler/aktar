@@ -461,6 +461,7 @@ class PlayerMixin:
         instructions, name = chat_templates.instruction(template)
 
         def work():
+            self._keep_chat_models()
             try:
                 turn = video.session.ask(text, think=think, on_reasoning=reasoning_feed(
                     lambda: video.entries, lambda: self._push_player(video)),

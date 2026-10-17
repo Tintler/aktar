@@ -150,6 +150,7 @@ class DocumentMixin:
 
         def work():
             turn, error = None, ''
+            self._keep_chat_models()
             try:
                 turn = doc.session.ask(text, think=think, on_reasoning=reasoning_feed(
                     lambda: doc.entries, lambda: self._push_doc(doc)),

@@ -21,11 +21,11 @@
     if (scroller) queueMicrotask(() => (scroller.scrollTop = scroller.scrollHeight));
   });
 
-  async function ask(text = question) {
+  async function ask(text = question, think = app.think) {
     const value = text.trim();
     if (!value || !chat?.enabled) return;
     question = '';
-    const state = await act('chat_ask', value, view.scope === 'selected' ? selectedPaths() : null, app.think);
+    const state = await act('chat_ask', value, view.scope === 'selected' ? selectedPaths() : null, think);
     if (state) app.chat = state;
   }
 
@@ -73,7 +73,7 @@
   <div class="note">{chat?.note ?? ''}</div>
   <form class="ask" onsubmit={(e) => { e.preventDefault(); ask(); }}>
     <input bind:value={question} disabled={!chat?.enabled} placeholder={view.scope === 'selected' ? 'Seçili dosyalara sor…' : 'Tüm dosyalara sor…'} />
-    <VoiceMode entries={chat?.entries ?? []} busy={!!chat?.busy} disabled={!chat?.enabled} onsend={(value) => ask(value)} />
+    <VoiceMode entries={chat?.entries ?? []} busy={!!chat?.busy} disabled={!chat?.enabled} onsend={(value) => ask(value, false)} />
     <MicButton bind:value={question} disabled={!chat?.enabled} />
     <TemplatePicker kind="collection" />
     <ThinkToggle />

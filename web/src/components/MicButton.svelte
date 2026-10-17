@@ -1,8 +1,9 @@
 <script>
   // Sesle soru (F112): tikla konus, tekrar tikla bitir (Esc vazgecer). Ses yerelde Whisper ile
   // metne cevrilir ve kutuya eklenir; gondermek kullanicida. Whisper yoksa aciklamali devre disi.
+  // F142: Ayarlar → Ses'ten kapatilabilir (ui.json mic_button: false); kapaliyken hic cizilmez.
   import Icon from '../lib/Icon.svelte';
-  import { act, toast } from '../lib/state.svelte.js';
+  import { app, act, toast } from '../lib/state.svelte.js';
   import { voiceStatus, startRecording, appendText } from '../lib/voice.js';
 
   let { value = $bindable(''), disabled = false, ontext = null } = $props();
@@ -102,6 +103,7 @@
   });
 </script>
 
+{#if app.prefs.mic_button !== false}
 <button type="button" class="mic" class:rec={mode === 'recording'} {title} aria-label={title} aria-pressed={mode === 'recording'}
   disabled={!info?.available || mode === 'working' || (disabled && mode === 'idle')} onclick={click}
   style:--level={Math.min(1, level * 3)}>
@@ -113,6 +115,7 @@
     <Icon name="mic" size={16} />
   {/if}
 </button>
+{/if}
 
 <style>
   .mic { flex: none; height: 30px; min-width: 30px; padding: 0 7px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; gap: 5px;

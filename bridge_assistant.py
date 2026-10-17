@@ -111,6 +111,7 @@ class AssistantMixin:
 
         def work():
             log = lambda message: self._log('[Sohbet] ' + str(message))  # noqa: E731
+            self._keep_chat_models()
             try:
                 turn = assistant.Assistant(data['history'], log=log).ask(
                     text, on_delta=delta, cancelled=self._conv_cancel.is_set, think=think,

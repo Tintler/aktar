@@ -413,6 +413,10 @@
               <input class="field n" bind:value={cfg.whisper_language} placeholder="otomatik" />
             </div>
             <div class="fr">
+              <div class="l">Sohbetlerde mikrofon düğmesi<small>Kapalıyken sohbet kutularındaki mikrofon (konuşmayı yazıya dökme) düğmesi gösterilmez. Sesli mod bundan etkilenmez.</small></div>
+              <Toggle checked={app.prefs.mic_button !== false} onchange={(value) => savePref({ mic_button: value })} />
+            </div>
+            <div class="fr">
               <div class="l">GPU kütüphane klasörü<small class:okc={cuda.ok} class:errc={cuda.ok === false}>{cuda.message || 'Boş: pip ile kurulan ya da pakete gömülü cuBLAS 12 / cuDNN 9.'}</small></div>
               <div class="pick">
                 <input class="field w2" bind:value={cfg.whisper_cuda_dir} placeholder="Boş: otomatik" />

@@ -1,10 +1,9 @@
 // Sohbet sesli modu (F141): model cevabini sesli okuma motoruyla cumle cumle okur. Okuyucunun oynaticisindan
 // (player.svelte.js) ayridir; ses Ayarlar → Ses → "Sohbet sesi" (ui.json tts.chat_voice) ile secilir.
-// Sesler onbellege yazilmaz (book: null).
+// Sesler onbellege yazilmaz (book: null). F142: streamSpeaker cevap uretilirken tamamlanan cumleleri okur.
 import { call } from './api.js';
 import { app } from './state.svelte.js';
 
-const PREFETCH = 2;
 const MAX_SENTENCE = 280;
 
 export const speaker = $state({ speaking: false, loading: false, message: '' });
@@ -23,6 +22,7 @@ export function speechText(markdown) {
     .replace(/^\s*\|.*\|\s*$/gm, '')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/\[[^\]\n]{1,40}\]/g, '')
     .replace(/https?:\/\/\S+/g, '')
     .replace(/<[^>]+>/g, '')
     .replace(/^\s{0,3}#{1,6}\s+/gm, '')
@@ -31,6 +31,7 @@ export function speechText(markdown) {
     .replace(/^\s*[-*_]{3,}\s*$/gm, '')
     .replace(/(\*\*|__|\*|_|~~|`)/g, '')
     .replace(/[ \t]+/g, ' ')
+    .replace(/ +([.,!?;:…])/g, '$1')
     .trim();
 }
 
@@ -94,53 +95,89 @@ function stopSource() {
 }
 
 /** Metni okur; bitince (ya da durdurulunca) cozulur. Donen: true tamamlandi, false durduruldu/hata. */
-export async function speak(text) {
-  const sentences = splitSentences(text);
-  const token = ++generation;
-  stopSource();
-  if (!sentences.length) return true;
-  context ??= new AudioContext();
-  if (context.state === 'suspended') await context.resume();
-  speaker.speaking = true;
-  const voice = voiceRef(), rate = speed();
-  const pending = new Map();
-  const fetch = (i) => {
-    if (i >= sentences.length) return null;
-    if (!pending.has(i)) {
-      pending.set(i, call('tts_say', sentences[i], rate, null, 'tr', voice).then((result) => {
-        if (!result || result.error) throw new Error(result?.error ?? 'Ses üretilemedi.');
-        return result.audio ? decode(result.audio) : null;
-      }));
-      pending.get(i).catch(() => {});
-    }
-    return pending.get(i);
-  };
-  try {
-    for (let i = 0; i < sentences.length; i++) {
-      const buffer = await fetch(i);
-      for (let j = i + 1; j <= i + PREFETCH; j++) fetch(j);
-      if (token !== generation) return false;
-      if (!buffer) continue;
-      await new Promise((resolve) => {
-        source = context.createBufferSource();
-        source.buffer = buffer;
-        source.connect(context.destination);
-        source.onended = resolve;
-        source.start();
-        stopWaiter = resolve;
-      });
-      stopWaiter = null;
-      if (token !== generation) return false;
-    }
-    return true;
-  } catch (error) {
-    speaker.message = error.message;
-    return false;
-  } finally {
-    if (token === generation) { speaker.speaking = false; source = null; }
-  }
+export function speak(text) {
+  const stream = streamSpeaker();
+  stream.finish(text);
+  return stream.done;
 }
 
+/** F142: cevap uretilirken okur. update(akan ham metin) tamamlanan cumleleri sirasiyla kuyruga ekler (son,
+ * yarim kalabilecek parca beklenir); finish(son duz metin) kalanini ekler. done: bitince true, durdurulunca false. */
+export function streamSpeaker() {
+  stopSpeaking();
+  const token = generation;
+  const voice = voiceRef(), rate = speed();
+  const clips = [];
+  let queued = 0, finished = false;
+  speaker.message = '';
+
+  const add = (sentences) => {
+    for (const sentence of sentences.slice(queued)) {
+      const clip = call('tts_say', sentence, rate, null, 'tr', voice).then((result) => {
+        if (!result || result.error) throw new Error(result?.error ?? 'Ses üretilemedi.');
+        return result.audio ? decode(result.audio) : null;
+      });
+      clip.catch(() => {});
+      clips.push(clip);
+    }
+    queued = Math.max(queued, sentences.length);
+    wake?.();
+  };
+
+  const done = (async () => {
+    context ??= new AudioContext();
+    if (context.state === 'suspended') await context.resume();
+    let index = 0;
+    try {
+      while (token === generation) {
+        if (index < clips.length) {
+          const buffer = await clips[index++];
+          if (token !== generation) return false;
+          speaker.speaking = true;
+          if (buffer) await playBuffer(buffer);
+        } else if (finished) {
+          return true;
+        } else {
+          await new Promise((resolve) => { wake = resolve; });
+          wake = null;
+        }
+      }
+      return false;
+    } catch (error) {
+      speaker.message = error.message;
+      return false;
+    } finally {
+      if (token === generation) { speaker.speaking = false; source = null; }
+    }
+  })();
+
+  return {
+    done,
+    update(raw) {
+      if (finished || token !== generation) return;
+      add(splitSentences(speechText(raw)).slice(0, -1));
+    },
+    finish(text) {
+      if (finished || token !== generation) return;
+      add(splitSentences(text));
+      finished = true;
+      wake?.();
+    },
+  };
+}
+
+function playBuffer(buffer) {
+  return new Promise((resolve) => {
+    source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(context.destination);
+    source.onended = resolve;
+    stopWaiter = resolve;
+    source.start();
+  }).finally(() => { stopWaiter = null; });
+}
+
+let wake = null;
 let stopWaiter = null;
 
 export function stopSpeaking() {
@@ -148,5 +185,6 @@ export function stopSpeaking() {
   stopSource();
   stopWaiter?.();
   stopWaiter = null;
+  wake?.();
   speaker.speaking = false;
 }

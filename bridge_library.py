@@ -117,8 +117,9 @@ STREAM_INTERVAL = 0.08  # saniye: akis olaylarinin en sik gonderilme araligi
 def pending_entry(value):
     """Bekleyen kayit: duz metin ya da canli dusunceli {'text', 'thinking'} (F102)."""
     if isinstance(value, dict):
-        return {'kind': 'pending', 'text': str(value.get('text') or ''), 'thinking': str(value.get('thinking') or '')}
-    return {'kind': 'pending', 'text': str(value), 'thinking': ''}
+        return {'kind': 'pending', 'text': str(value.get('text') or ''), 'thinking': str(value.get('thinking') or ''),
+                'stream': str(value.get('stream') or '')}
+    return {'kind': 'pending', 'text': str(value), 'thinking': '', 'stream': ''}
 
 
 def reasoning_feed(entries, push):
@@ -127,16 +128,22 @@ def reasoning_feed(entries, push):
     entries() guncel kayit listesini verir; push() arayuze olay yayar (STREAM_INTERVAL ile seyreltilir)."""
     last = [0.0]
 
-    def feed(text):
+    def update(**change):
         items = entries()
         for index, (kind, value) in enumerate(items):
             if kind == 'pending':
-                label = value.get('text', '') if isinstance(value, dict) else value
-                items[index] = ('pending', {'text': label, 'thinking': text})
+                old = value if isinstance(value, dict) else {'text': value}
+                items[index] = ('pending', dict(old, **change))
         now = time.monotonic()
         if now - last[0] >= STREAM_INTERVAL:
             last[0] = now
             push()
+
+    def feed(text):
+        update(thinking=text)
+
+    # F142: cevap metni de akar (qa.model_answer on_text'i gorurse akisli ister); arayuzde yazilirken gorunur.
+    feed.on_text = lambda text: update(stream=text)
     return feed
 
 
@@ -1004,6 +1011,7 @@ class LibraryMixin:
 
         def work():
             turn, error = None, ''
+            self._keep_chat_models()
             try:
                 turn = session.ask(question, think=think, on_reasoning=reasoning_feed(
                     lambda: chat['entries'], lambda: self._emit('chat', {'slug': slug})),

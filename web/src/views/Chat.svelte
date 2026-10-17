@@ -54,13 +54,14 @@
     input.style.height = Math.min(input.scrollHeight, 220) + 'px';
   }
 
-  async function send(value = text) {
+  // think: dusunme dugmesi; sesli mod (F142) dusunmesiz gonderir.
+  async function send(value = text, think = app.think) {
     const message = value.trim();
     if (!message || !chat || chat.busy || chat.locked) return;
     text = '';
     queueMicrotask(grow);
     stick = true;
-    const state = await act('assistant_ask', message, app.think, templateFor('assistant'));
+    const state = await act('assistant_ask', message, think, templateFor('assistant'));
     if (state) app.assistant = state;
     refreshConversations();
   }
@@ -171,7 +172,8 @@
       <ThinkToggle label />
       <TemplatePicker kind="assistant" label />
       <span class="grow"></span>
-      <VoiceMode {entries} busy={!!chat?.busy} disabled={!chat || chat.locked} onsend={(value) => send(value)} />
+      <VoiceMode {entries} busy={!!chat?.busy} stream={chat?.stream ?? ''} disabled={!chat || chat.locked}
+        onsend={(value) => send(value, false)} onstop={() => act('assistant_stop')} />
       <MicButton bind:value={text} disabled={!chat || chat.locked} ontext={() => queueMicrotask(() => { grow(); input?.focus(); })} />
       {#if chat?.busy}
         <button class="send stop" type="button" title="Durdur" onclick={() => act('assistant_stop')}><Icon name="stop" size={14} /></button>
@@ -201,16 +203,11 @@
     </div>
   </aside>
 
-  <div class="main">
+  <!-- F142: yazma kutusu karsilama ve konusma duzeninde ayni ogedir; ilk soruda yeniden olusturulmaz
+       (sesli mod ve mikrofon kaydi kapanmasin). -->
+  <div class="main" class:welcome={empty}>
     {#if empty}
-      <div class="welcome">
-        <div class="hello"><Logo size={34} /><h1>Bugün ne konuşalım?</h1></div>
-        {@render composer(true)}
-        <div class="suggestions">
-          {#each SUGGESTIONS as s}<button class="chip" onclick={() => send(s)}>{s}</button>{/each}
-        </div>
-        <p class="note dim">Genel sorulara kendi bilgisiyle cevap verir; sorunuz kütüphanenizdeki videolar ya da belgelerle ilgiliyse onlara bakıp kaynak gösterir.</p>
-      </div>
+      <div class="hello"><Logo size={34} /><h1>Bugün ne konuşalım?</h1></div>
     {:else}
       <div class="scroll" bind:this={scroller} onscroll={scrolled}>
         <div class="thread">
@@ -250,7 +247,13 @@
           {/if}
         </div>
       </div>
-      <div class="dock">{@render composer(false)}</div>
+    {/if}
+    <div class:dock={!empty} class:start={empty}>{@render composer(empty)}</div>
+    {#if empty}
+      <div class="suggestions">
+        {#each SUGGESTIONS as s}<button class="chip" onclick={() => send(s)}>{s}</button>{/each}
+      </div>
+      <p class="note dim">Genel sorulara kendi bilgisiyle cevap verir; sorunuz kütüphanenizdeki videolar ya da belgelerle ilgiliyse onlara bakıp kaynak gösterir.</p>
     {/if}
   </div>
 </section>
@@ -277,7 +280,8 @@
   .none { color: var(--dim); font-size: 12.5px; padding: 10px 12px; }
 
   .main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
-  .welcome { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; padding: 0 32px 12vh; }
+  .main.welcome { align-items: center; justify-content: center; gap: 22px; padding: 0 32px 12vh; }
+  .start { width: min(720px, 100%); display: flex; justify-content: center; }
   .hello { display: flex; align-items: center; gap: 14px; }
   .hello h1 { font-size: clamp(26px, 3vw, 36px); font-weight: 700; letter-spacing: -.02em; }
   .suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 720px; }

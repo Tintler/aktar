@@ -20,11 +20,11 @@
     if (scroller) queueMicrotask(() => (scroller.scrollTop = scroller.scrollHeight));
   });
 
-  async function ask(text = question) {
+  async function ask(text = question, think = app.think) {
     const value = text.trim();
     if (!value || !chat?.enabled) return;
     question = '';
-    const state = await act('doc_ask', value, app.think, templateFor('doc'));
+    const state = await act('doc_ask', value, think, templateFor('doc'));
     if (state && app.document) app.document.chat = state;
   }
 
@@ -49,7 +49,7 @@
     {#if chat.note}<div class="note">{#if !chat.ready && !chat.note.startsWith('Bu belge')}<Icon name="loader" size={13} spin />{/if}{chat.note}</div>{/if}
     <form class="ask" onsubmit={(e) => { e.preventDefault(); ask(); }}>
       <input bind:value={question} disabled={!chat.enabled} placeholder="Belgeye sor…" />
-      <VoiceMode entries={chat.entries} busy={!!chat.asking} disabled={!chat.enabled} onsend={(value) => ask(value)} />
+      <VoiceMode entries={chat.entries} busy={!!chat.asking} disabled={!chat.enabled} onsend={(value) => ask(value, false)} />
       <MicButton bind:value={question} disabled={!chat.enabled} />
       <TemplatePicker kind="doc" />
       <ThinkToggle />

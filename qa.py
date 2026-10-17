@@ -473,7 +473,13 @@ def model_answer(client, messages, on_reasoning=None, cancelled=None):
     bos yanit / token siniri / iptal client.chat ile ayni hatalari verir."""
     if on_reasoning is None:
         return client.chat(messages)
-    text, finish = client.chat_stream(messages, cancelled=cancelled, on_reasoning=on_reasoning)
+    # F142: geri cagrinin on_text'i varsa cevap metni de akarken verilir (sesli mod okumaya erken baslar).
+    on_text = getattr(on_reasoning, 'on_text', None)
+    if on_text is None:
+        text, finish = client.chat_stream(messages, cancelled=cancelled, on_reasoning=on_reasoning)
+    else:
+        text, finish = client.chat_stream(messages, cancelled=cancelled, on_reasoning=on_reasoning,
+                                          on_delta=lambda value: on_text(strip_thinking(value)))
     if finish == 'cancelled':
         raise GracefulStop('Soru durduruldu.')
     if not str(text).strip():

@@ -477,6 +477,18 @@ class ModelAnswerTests(unittest.TestCase):
         self.assertEqual(qa.model_answer(StreamClient(('Cevap', 'stop')), [], seen.append), 'Cevap')
         self.assertEqual(seen, ['Düşün', 'Düşün biraz'])
 
+    def test_answer_text_streams_when_callback_wants_it(self):
+        class TextClient:
+            def chat_stream(self, messages, cancelled=None, on_reasoning=None, on_delta=None, **_kwargs):
+                on_delta('<think>x</think>Mer')
+                on_delta('<think>x</think>Merhaba.')
+                return 'Merhaba.', 'stop'
+        seen = []
+        feed = lambda _text: None  # noqa: E731
+        feed.on_text = seen.append
+        self.assertEqual(qa.model_answer(TextClient(), [], feed), 'Merhaba.')
+        self.assertEqual(seen, ['Mer', 'Merhaba.'])
+
     def test_without_callback_uses_plain_chat(self):
         self.assertEqual(qa.model_answer(FakeClient(['Düz']), []), 'Düz')
 

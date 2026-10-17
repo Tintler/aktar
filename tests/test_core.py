@@ -1023,5 +1023,51 @@ class MediaPathTests(unittest.TestCase):
             self.assertEqual(names, ['a.mkv', 'c.mp4'])
 
 
+class KeepLoadedTests(unittest.TestCase):
+    """F142: soru-cevap ve embedding modelleri LM Studio'da acikca yuklenir (JIT tahliyesi olmasin)."""
+
+    class FakeClient:
+        def __init__(self, models, fail_list=False):
+            self.models, self.fail_list, self.calls = models, fail_list, []
+
+        def request(self, route, payload=None):
+            self.calls.append((route, payload))
+            if route == '/api/v1/models':
+                if self.fail_list:
+                    raise RuntimeError('HTTP 404')
+                return {'models': self.models}
+            if route == '/api/v1/models/load':
+                return {'instance_id': payload['model'], 'status': 'loaded'}
+            return {}
+
+    def test_loads_only_missing_models_once(self):
+        client = self.FakeClient([
+            {'key': 'sohbet', 'loaded_instances': [{'id': 'sohbet'}]},
+            {'key': 'gomme', 'loaded_instances': []},
+            {'key': 'baska', 'loaded_instances': []},
+        ])
+        loaded = app_core.keep_loaded(client, ['sohbet', 'gomme', '', 'gomme', 'yok'])
+        self.assertEqual(loaded, ['gomme'])
+        self.assertEqual([c for c in client.calls if c[0] == '/api/v1/models/load'],
+                         [('/api/v1/models/load', {'model': 'gomme'})])
+
+    def test_servers_without_rest_api_are_left_alone(self):
+        client = self.FakeClient([], fail_list=True)
+        self.assertEqual(app_core.keep_loaded(client, ['sohbet']), [])
+        self.assertEqual(len(client.calls), 1)
+
+    def test_unload_ignores_errors(self):
+        class Failing:
+            def __init__(self):
+                self.calls = []
+
+            def request(self, route, payload=None):
+                self.calls.append(payload)
+                raise RuntimeError('kapali')
+        client = Failing()
+        app_core.unload_models(client, ['a', 'b'])
+        self.assertEqual(client.calls, [{'instance_id': 'a'}, {'instance_id': 'b'}])
+
+
 if __name__ == '__main__':
     unittest.main()
