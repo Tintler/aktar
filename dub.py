@@ -179,7 +179,10 @@ def mix_command(video, track, output, options, has_audio, duck_file=None):
         command += ['-map', '0:a']
     command += ['-map', '0:s?', '-map', '0:t?', '-c', 'copy', '-c:a:0', 'aac', '-b:a:0', '192k',
                 '-metadata:s:a:0', 'language=tur', '-metadata:s:a:0', 'title=Türkçe dublaj',
-                '-disposition:a', '0', '-disposition:a:0', 'default']
+                '-disposition:a', '0', '-disposition:a:0', 'default',
+                # Kopyalanan akislar karistirma filtresinden hizli akar; FFmpeg varsayilan olarak 10 sn'den fazla
+                # bekletmez ve dublaj paketleri dosyanin sonuna yigilir (oynaticilar sesi bulamaz). Tam siralama:
+                '-max_interleave_delta', '0', '-max_muxing_queue_size', '65536']
     return command + [str(output)]
 
 

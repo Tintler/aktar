@@ -145,6 +145,9 @@ class DubPureTests(unittest.TestCase):
         self.assertIn('-disposition:a:0', command)
         self.assertEqual(command[command.index('-c:a:0') + 1], 'aac')
         self.assertIn('0:a', command)
+        # Gercek ornekte (HEVC kopya + Opus) dublaj paketleri 16. sn'den sonra dosya sonuna yigiliyordu.
+        self.assertEqual(command[command.index('-max_interleave_delta') + 1], '0')
+        self.assertIn('-max_muxing_queue_size', command)
         m4a = dub.mix_command('v.mkv', 'd.wav', 'o.m4a', {'format': 'm4a', 'duck': False, 'background': 0.5}, True)
         self.assertIn('volume=0.5000', m4a[m4a.index('-filter_complex') + 1])
         self.assertNotIn('0:v?', m4a)
