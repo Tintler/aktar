@@ -686,7 +686,10 @@ class LibraryMixin:
         self._queue = {'total': len(entries), 'done': 0, 'index': 0, 'name': '', 'step': '',
                        'label': 'Başlıyor…', 'paused': False, 'percent': None, 'failed': [],
                        # F139: is takibinden koleksiyona gidebilmek icin
-                       'slug': collection[0] if collection else '', 'title': collection[1] if collection else ''}
+                       'slug': collection[0] if collection else '', 'title': collection[1] if collection else '',
+                       # F140: is takibinde islenen ve siradaki dosyalar: state waiting|active|done|failed
+                       'items': [{'name': Path(entry['path']).name, 'path': str(entry['path']), 'state': 'waiting',
+                                  'detail': ''} for entry in entries]}
         self._row_status = {library._key(entry['path']): ('Sırada', 'dim') for entry in entries}
         self._log(f'Toplu hazırlık başladı: {len(entries)} dosya' + (' (Whisper açık).' if whisper else '.'))
         self._queue_worker = threading.Thread(
@@ -705,6 +708,21 @@ class LibraryMixin:
         key = library._key(path)
         self._row_status[key] = (text, tone)
         self._emit('row_status', {'key': key, 'text': text, 'tone': tone})
+        item = self._queue_item(path)
+        if item is not None and item['state'] == 'active' and item['detail'] != text:
+            item['detail'] = text       # 'Kare 11/57', 'Whisper %40': is takibinde islenen dosyanin ilerlemesi
+            self._push_queue()
+
+    def _queue_item(self, path, state=None, detail=None):
+        """Kuyruktaki dosyanin kaydi; state/detail verilirse gunceller."""
+        queue = self._queue
+        item = next((i for i in (queue or {}).get('items', []) if i['path'] == str(path)), None)
+        if item is not None:
+            if state is not None:
+                item['state'] = state
+            if detail is not None:
+                item['detail'] = detail
+        return item
 
     def queue_pause(self):
         if not self._queue_running() or self._queue is None:
@@ -745,6 +763,7 @@ class LibraryMixin:
         def started(index, path, step):
             queue.update(index=index, name=Path(path).name, step=step, percent=None,
                          label=f'Hazırlanıyor {index + 1}/{queue["total"]} · {Path(path).name} — {step}')
+            self._queue_item(path, 'active', step)
             self._set_row(path, 'İşleniyor…', 'accent')
             self._push_queue()
 
@@ -805,6 +824,7 @@ class LibraryMixin:
                 failed += 1
                 queue['done'] += 1
                 queue['failed'].append(path.name)
+                self._queue_item(path, 'failed', str(error)[:160])
                 self._log(f'HATA [{path.name}]: {error}')
                 self._set_row(path, 'Hata', 'danger')
                 self._push_queue()
@@ -818,6 +838,7 @@ class LibraryMixin:
             repeats = 0
             done += 1
             queue['done'] += 1
+            self._queue_item(path, 'done', '')
             self._row_status.pop(library._key(path), None)
             self._refresh_entry(path)
             self._push_queue()

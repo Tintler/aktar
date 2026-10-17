@@ -29,6 +29,7 @@
       list.push({ id: 'library', icon: 'library', title: 'Toplu hazırlık' + (q.title ? ': ' + q.title : ''),
         detail: [q.label, q.paused ? 'duraklatıldı' : ''].filter(Boolean).join(' · '),
         percent: pct(q.done + (q.percent ?? 0) / 100, q.total), count: `${q.done} / ${q.total} dosya`,
+        items: q.items ?? [], remaining: Math.max(1, q.total - q.done),
         go: async () => {
           app.libraryView.home = false;
           go('library');
@@ -57,6 +58,16 @@
     return list;
   });
 
+  // Rozet: kalan is birimi (kuyrukta bekleyen dosyalar dahil); digerleri birer is.
+  const remaining = $derived(tasks.reduce((sum, task) => sum + (task.remaining ?? 1), 0));
+  // 'Kare 11/57', 'Whisper %40' gibi adim ilerlemesinden yuzde
+  function stepPercent(detail) {
+    const ratio = /(\d+)\s*\/\s*(\d+)/.exec(detail ?? '');
+    if (ratio) return pct(Number(ratio[1]), Number(ratio[2]));
+    const percent = /%\s*(\d+)/.exec(detail ?? '');
+    return percent ? Number(percent[1]) : null;
+  }
+
   function choose(task) {
     open = false;
     task.go();
@@ -66,10 +77,11 @@
 <svelte:window onclick={(e) => { if (open && !e.target.closest('.task-tray')) open = false; }} />
 
 <div class="task-tray">
-  <button class="icon-btn" class:on={open} class:busy={tasks.length} title={tasks.length ? `Arka planda ${tasks.length} iş` : 'Arka planda iş yok'}
+  <button class="icon-btn" class:on={open} class:busy={tasks.length}
+    title={tasks.length ? `Arka planda ${tasks.length} iş · ${remaining} birim kaldı (kuyruktaki dosyalar dahil)` : 'Arka planda iş yok'}
     onclick={() => (open = !open)}>
     <Icon name={tasks.length ? 'loader' : 'list'} size={20} spin={tasks.length > 0} />
-    {#if tasks.length}<i class="count">{tasks.length}</i>{/if}
+    {#if tasks.length}<i class="count">{remaining}</i>{/if}
   </button>
   {#if open}
     <div class="pop" role="dialog" aria-label="Arka plan işleri">
@@ -83,6 +95,27 @@
             {#if task.sub}<small class="sub">{task.sub}</small>{/if}
             <span class="bar"><span class="track" class:wait={task.percent === null}><i style:width="{task.percent ?? 30}%"></i></span>
               <small class="num">{task.count || (task.percent !== null ? `%${task.percent}` : '')}</small></span>
+            {#if task.items?.length}
+              {@const active = task.items.filter((item) => item.state === 'active')}
+              {@const waiting = task.items.filter((item) => item.state === 'waiting')}
+              {@const failed = task.items.filter((item) => item.state === 'failed')}
+              {@const finished = task.items.filter((item) => item.state === 'done').length}
+              <span class="items">
+                {#each active as item (item.path)}
+                  {@const step = stepPercent(item.detail)}
+                  <span class="item active"><Icon name="loader" size={12} spin /><span class="iname">{item.name}</span><small>{item.detail}</small></span>
+                  {#if step !== null}<span class="track mini"><i style:width="{step}%"></i></span>{/if}
+                {/each}
+                {#each waiting.slice(0, 8) as item (item.path)}
+                  <span class="item"><Icon name="timer" size={12} /><span class="iname">{item.name}</span><small>Sırada</small></span>
+                {/each}
+                {#if waiting.length > 8}<span class="item more">+{waiting.length - 8} dosya daha sırada</span>{/if}
+                {#each failed as item (item.path)}
+                  <span class="item failed" title={item.detail}><Icon name="alert" size={12} /><span class="iname">{item.name}</span><small>Hata</small></span>
+                {/each}
+                {#if finished}<span class="item more"><Icon name="check" size={12} />{finished} dosya hazır</span>{/if}
+              </span>
+            {/if}
           </span>
         </button>
       {:else}
@@ -114,5 +147,16 @@
   .track.wait i { animation: slide 1.4s ease-in-out infinite; }
   @keyframes slide { from { margin-left: -30%; } to { margin-left: 100%; } }
   .num { flex: none; color: var(--dim); font-size: 11px; }
+  .items { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--outline); }
+  .item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--secondary); min-width: 0; }
+  .item :global(svg) { flex: none; color: var(--dim); }
+  .item .iname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item small { flex: none; color: var(--dim); font-size: 11px; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item.active { color: var(--text); font-weight: 600; }
+  .item.active :global(svg) { color: var(--accent); }
+  .item.active small { color: var(--accent); font-weight: 500; }
+  .item.failed, .item.failed :global(svg) { color: var(--danger); }
+  .item.more { color: var(--dim); font-size: 11px; padding-left: 18px; }
+  .track.mini { height: 3px; margin: 1px 0 3px 18px; }
   .empty { padding: 12px; color: var(--dim); font-size: 12px; line-height: 1.5; }
 </style>
