@@ -134,6 +134,20 @@
   }[app.tts.state] ?? '');
 
   $effect(() => { call('tts_engines').then((list) => { if (Array.isArray(list)) app.engines = list; }); });
+
+  // F141: sohbetlerdeki sesli modun sesi (okuyucudan ayri secilebilir); bos: okuma sesi.
+  let chatVoices = $state([]);
+  $effect(() => {
+    app.engines;
+    call('tts_voices').then((list) => { if (Array.isArray(list)) chatVoices = list; });
+  });
+  const chatGroups = $derived([...new Set(chatVoices.map((v) => v.group))]);
+  const CHAT_SPEEDS = [0.9, 1, 1.1, 1.2, 1.35, 1.5];
+
+  function setChat(change) {
+    Object.assign(app.ttsPrefs, change);
+    saveTtsPrefs();
+  }
 </script>
 
 <section>
@@ -192,6 +206,23 @@
       </div>
     {/each}
   {/each}
+
+  <div class="fr">
+    <div class="l">Sohbet sesi<small>Sohbetlerdeki sesli modda cevapları okuyan ses. Okuma sesinden farklı bir motor seçilirse
+      sesli moda geçerken o motor yüklenir.</small></div>
+    <select class="field w" value={app.ttsPrefs.chat_voice ?? ''} onchange={(e) => setChat({ chat_voice: e.currentTarget.value })}>
+      <option value="">Okuma sesiyle aynı</option>
+      {#each chatGroups as group}
+        <optgroup label={group}>
+          {#each chatVoices.filter((v) => v.group === group) as v}<option value={v.value}>{v.label}</option>{/each}
+        </optgroup>
+      {/each}
+    </select>
+    <select class="field" title="Sohbet sesinin hızı" value={String(app.ttsPrefs.chat_speed ?? 1)}
+      onchange={(e) => setChat({ chat_speed: Number(e.currentTarget.value) })}>
+      {#each CHAT_SPEEDS as s}<option value={String(s)}>{s.toLocaleString('tr-TR')}×</option>{/each}
+    </select>
+  </div>
 
   <div class="fr">
     <div class="l">Hazırlanan sesler<small>Okuyucudaki "Hazırla" ile önceden üretilen sesler; motor yüklenmeden anında okunur.

@@ -11,6 +11,7 @@ import re
 import threading
 from pathlib import Path
 
+import audiobook
 import voice_presets
 from app_core import APP_DIR, ROOT
 from tts import Engines
@@ -35,16 +36,117 @@ class TtsMixin:
     def tts_engines(self):
         return self._engines().engines()
 
-    def tts_load(self, language=None):
-        """Kitap dili icin secilen motoru ve sesi (arka planda) hazirlar."""
+    def tts_load(self, language=None, voice=None):
+        """Kitap dili icin secilen motoru ve sesi (arka planda) hazirlar. `voice`: sayfanin kendi sesi
+        (sohbet, dublaj): '' okuyucunun sesi, 'preset:<kimlik>' ses kaydi ya da '<motor>/<ses>'."""
         device = self.ui_prefs().get('tts', {}).get('device', 'auto')
-        return self._engines().load(language or 'tr', device)
+        override = self._voice_override(voice)
+        return self._engines().load(self._override_language(override, language), device, override)
 
-    def tts_say(self, text, speed=1.0, book=None, language='tr'):
+    def tts_say(self, text, speed=1.0, book=None, language='tr', voice=None):
         try:
-            return self._engines().say(text, speed, book, language or 'tr')
+            override = self._voice_override(voice)
+            return self._engines().say(text, speed, book, self._override_language(override, language), override)
         except Exception as error:
             return _error(error)
+
+    # ------------------------------------------------------------------ sayfa sesleri (F141)
+    def _voice_override(self, ref):
+        """Ses secimi -> tts.Engines override'i ({'voice', 'options'}) ya da None (okuyucunun sesi)."""
+        ref = str(ref or '').strip()
+        if not ref:
+            return None
+        if ref.startswith('preset:'):
+            preset = voice_presets.get(APP_DIR, ref[7:])
+            if preset is None:
+                return None
+            return {'voice': preset['voice'], 'options': dict(preset.get('options') or {})}
+        if re.fullmatch(r'[\w-]+/[\w.-]+', ref):
+            return {'voice': ref, 'options': None}
+        return None
+
+    def _override_language(self, override, language=None):
+        if override:
+            spec = self._voice_specs().get(override['voice'])
+            if spec:
+                return spec.get('language') or 'tr'
+        return language or 'tr'
+
+    def tts_voices(self):
+        """Sohbet ve dublaj ses secicileri icin: kayitli sesler ve motor sesleri [{value, label, group}]."""
+        specs = self._voice_specs()
+        result = []
+        try:
+            presets = voice_presets.list_presets(APP_DIR)
+        except OSError:
+            presets = []
+        for item in presets:
+            if item.get('voice') in specs:
+                result.append({'value': 'preset:' + item['id'], 'label': item.get('name') or item['id'],
+                               'group': 'Kayıtlı sesler', 'language': specs[item['voice']].get('language', 'tr')})
+        for value, spec in specs.items():
+            name = spec.get('name') or value
+            result.append({'value': value, 'label': spec['engine_name'] if name == spec['engine_name'] else f'{spec["engine_name"]} · {name}',
+                           'group': 'Ses motorları', 'language': spec.get('language', 'tr')})
+        return result
+
+    # ------------------------------------------------------------------ sesli kitap (F141)
+    def _audiobook_running(self):
+        job = getattr(self, '_audiobook_job', None)
+        return job is not None and job.is_alive()
+
+    def tts_audiobook(self, title, author, chapters, speed=1.0, book=None, language='tr', fmt='m4b', cover=True):
+        """Kitabin tamamini sesli kitap olarak yazar: 'm4b' (bolum isaretli tek dosya) ya da 'mp3'
+        (secilen klasore bolum basina bir dosya). Ilerleme ve sonuc 'tts_audiobook' olayiyla gelir."""
+        if self._audiobook_running():
+            return {'error': 'Bir sesli kitap kaydı zaten sürüyor.'}
+        fmt = fmt if fmt in audiobook.FORMATS else 'm4b'
+        engines = self._engines()
+        if engines.state != 'ready':
+            return {'error': 'Ses motoru hazır değil.'}
+        name = audiobook.safe_name(title)
+        if fmt == 'mp3':
+            target = self._dialog('open_folder', 'Sesli kitabın kaydedileceği klasörü seç')
+        else:
+            target = self._dialog('save_file', 'Sesli kitabı kaydet', name + '.m4b', ('Sesli kitap (*.m4b)',))
+            if target and not str(target).lower().endswith('.m4b'):
+                target = str(target) + '.m4b'
+        if not target:
+            return None
+        art = None
+        if cover and book:
+            try:
+                art = self._shelf().cover(book)
+            except (ValueError, OSError, KeyError):
+                art = None
+        cancel = threading.Event()
+        self._audiobook_cancel = cancel
+
+        def progress(done, total, chapter, count):
+            self._emit('tts_audiobook', {'done': done, 'total': total, 'chapter': chapter, 'chapters': count,
+                                         'title': title, 'book': book})
+
+        def work():
+            try:
+                result = audiobook.build(engines, chapters, target, fmt, title, author, art, speed, book,
+                                         language or 'tr', progress, cancel, self._log)
+                self._log('Sesli kitap kaydedildi: ' + result['output'])
+                self._emit('tts_audiobook', dict(result, finished=True, format=fmt, title=title))
+            except audiobook.Stopped as error:
+                self._emit('tts_audiobook', {'finished': True, 'cancelled': True, 'error': str(error)})
+            except Exception as error:
+                self._log(f'HATA: Sesli kitap kaydedilemedi: {error}')
+                self._emit('tts_audiobook', {'finished': True, 'error': str(error)})
+
+        self._audiobook_job = threading.Thread(target=work, name='aktar-tts-audiobook', daemon=True)
+        self._audiobook_job.start()
+        return {'started': True, 'target': str(target)}
+
+    def tts_audiobook_cancel(self):
+        cancel = getattr(self, '_audiobook_cancel', None)
+        if cancel:
+            cancel.set()
+        return True
 
     def tts_cached(self, book, sentences, speed=1.0, language='tr'):
         """Bu cumlelerden kacinin sesi hazir (motor yuklenmeden okunabilir)."""
@@ -218,6 +320,10 @@ class TtsMixin:
     def _stop_tts_for_close(self):
         """Pencere kapaninca: hazirlama durur, motor sureci kapatilir."""
         self.tts_prepare_cancel()
+        self.tts_audiobook_cancel()
+        job = getattr(self, '_audiobook_job', None)
+        if job is not None and job.is_alive():
+            job.join(5)
         cached = getattr(self, '_engines_cache', None)
         if cached is not None:
             cached.shutdown()

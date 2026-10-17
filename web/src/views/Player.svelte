@@ -13,6 +13,7 @@
   import SyncPanel from '../components/SyncPanel.svelte';
   import ClipPanel from '../components/ClipPanel.svelte';
   import SubtitleExportModal from '../components/SubtitleExportModal.svelte';
+  import DubModal from '../components/DubModal.svelte';
   import { notes, loadNotes, startNote, NOTE_COLORS } from '../lib/notes.svelte.js';
   import { subtool, onSubtool, IDENTITY, signed, jobText } from '../lib/subtools.svelte.js';
 
@@ -66,7 +67,7 @@
   let surface = $state();
   let lastRect = '';
   let rafId = 0;
-  const covered = $derived(!!menu.current || exporting || !!dialog.current || !!app.review);
+  const covered = $derived(!!menu.current || exporting || dubbing || !!dialog.current || !!app.review);
   function placeLoop() {
     rafId = requestAnimationFrame(placeLoop);
     if (!native || !surface) return;
@@ -261,6 +262,7 @@
   let clipRange = $state(null);      // {start, end}
   let previewEnd = null;             // onizleme bu anda durur
   let exporting = $state(false);
+  let dubbing = $state(false);   // F141: dublaj penceresi
   let osd = $state('');
   let osdTimer;
 
@@ -471,6 +473,8 @@
     if (subs === null) items.push('sep', { label: 'Altyazı akışları okunuyor…', disabled: true });
     if (ccKey) {
       items.push('sep', { label: 'Zamanlama ve dışa aktarma…', icon: 'timer', action: () => { if (panel !== 'sync') openPanel('sync'); } });
+      items.push({ label: subtool.job?.kind === 'dub' ? 'Dublaj hazırlanıyor…' : 'Bu altyazıyla Türkçe dublaj…', icon: 'volume',
+        disabled: !!subtool.job, action: () => (dubbing = true) });
       if (cues.some((c) => c.words?.length)) {
         items.push({ label: 'Söylenen kelimeyi vurgula', icon: wordHighlight ? 'check' : null, action: () => {
           wordHighlight = !wordHighlight;
@@ -635,6 +639,10 @@
     </div>
   {/if}
 </section>
+
+{#if dubbing && p && ccKey}
+  <DubModal path={p.path} source={ccKey} label={ccLabel} {timing} {audio} onclose={() => (dubbing = false)} />
+{/if}
 
 {#if exporting && p && ccKey}
   <SubtitleExportModal path={p.path} source={ccKey} label={ccLabel} {timing} {audio} onclose={() => (exporting = false)} />

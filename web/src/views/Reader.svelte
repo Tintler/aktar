@@ -195,7 +195,55 @@
     call('tts_prepare_cancel');
   }
 
+  let showExport = $state(false);
+
+  // F141: kitabin bolumleri icindekilerin ust duzeyine gore; bir bolum birden cok EPUB kismindan olusabilir.
+  function bookChapters() {
+    const depth = Math.min(...book.toc.map((e) => e.depth ?? 0));
+    const starts = [];
+    for (const entry of book.toc) {
+      if ((entry.depth ?? 0) !== depth || starts.some((s) => s.section === entry.section)) continue;
+      starts.push({ section: entry.section, title: entry.title });
+    }
+    starts.sort((a, b) => a.section - b.section);
+    if (!starts.length) return book.sections.map((s, i) => ({ from: i, to: i + 1, title: s.title || `Bölüm ${i + 1}` }));
+    starts[0].section = 0;
+    return starts.map((s, i) => ({ from: s.section, to: starts[i + 1]?.section ?? sectionCount, title: s.title }));
+  }
+
+  async function exportBook(fmt) {
+    showExport = false;
+    if (app.ttsAudiobook) return;
+    if (!(await ensureEngine({ needEngine: true }))) return;
+    const pauses = resolvePauses(app.ttsPrefs.pauses);
+    const chapters = [];
+    app.ttsAudiobook = { book: book.id, title: book.title, done: 0, total: 0, chapter: 0, chapters: 0, reading: true };
+    for (const part of bookChapters()) {
+      const chapter = { title: part.title, sentences: [], gaps: [] };
+      for (let number = part.from; number < part.to; number++) {
+        const result = await call('reader_section', book.id, number);
+        if (!result || result.error) continue;
+        const holder = document.createElement('div');
+        holder.innerHTML = result.html;
+        const cut = segment(holder, splitOptions());
+        cut.sentences.forEach((text, i) => {
+          chapter.sentences.push(text);
+          chapter.gaps.push(pauseAfter(text, cut.breaks.has(i), pauses, app.ttsPrefs.speed));
+        });
+      }
+      if (chapter.sentences.length) chapters.push(chapter);
+    }
+    if (!chapters.length) { app.ttsAudiobook = null; toast('Kitapta seslendirilecek metin yok.'); return; }
+    const result = await act('tts_audiobook', book.title, book.author ?? '', chapters, app.ttsPrefs.speed, book.id,
+      book.language || 'tr', fmt);
+    if (result?.started) {
+      const total = chapters.reduce((n, c) => n + c.sentences.length, 0);
+      app.ttsAudiobook = { book: book.id, title: book.title, done: 0, total, chapter: 1, chapters: chapters.length };
+    } else app.ttsAudiobook = null;
+  }
+
   async function exportSection() {
+    showExport = false;
     if (app.ttsExport) return;
     if (!sentences.length) { toast('Bu bölümde kaydedilecek metin yok.'); return; }
     if (!(await ensureEngine())) return;
@@ -462,8 +510,25 @@
             {/if}
           </div>
         {/if}
-        <button class="chip" title="Bu bölümü WAV ses dosyası olarak kaydet" disabled={Boolean(app.ttsExport)} onclick={exportSection}>
-          <Icon name="download" size={14} />{app.ttsExport ? `Kaydediliyor ${app.ttsExport.done}/${app.ttsExport.total}` : 'Kaydet'}</button>
+        {#if app.ttsAudiobook}
+          <button class="chip acc" title={app.ttsAudiobook.reading ? 'Bölümler okunuyor…' : 'Sesli kitap kaydını durdur (biten bölümler saklanır, sonra kaldığı yerden sürer)'}
+            disabled={app.ttsAudiobook.reading} onclick={() => call('tts_audiobook_cancel')}>
+            <Icon name="headphones" size={14} />{app.ttsAudiobook.reading ? 'Sesli kitap hazırlanıyor…'
+              : `Sesli kitap ${app.ttsAudiobook.chapter}/${app.ttsAudiobook.chapters} · %${app.ttsAudiobook.total ? Math.floor((app.ttsAudiobook.done * 100) / app.ttsAudiobook.total) : 0}`}
+            {#if !app.ttsAudiobook.reading}<Icon name="x" size={12} />{/if}</button>
+        {/if}
+        <div class="prep">
+          <button class="chip" title="Sesi dosyaya kaydet: bu bölüm ya da kitabın tamamı (sesli kitap)" disabled={Boolean(app.ttsExport)}
+            onclick={() => (showExport = !showExport)}>
+            <Icon name="download" size={14} />{app.ttsExport ? `Kaydediliyor ${app.ttsExport.done}/${app.ttsExport.total}` : 'Kaydet'}</button>
+          {#if showExport}
+            <div class="prep-menu">
+              <button onclick={exportSection}>Bu bölümü WAV olarak kaydet</button>
+              <button disabled={Boolean(app.ttsAudiobook)} onclick={() => exportBook('m4b')}>Sesli kitap: tek M4B dosyası (bölümlü, kapaklı)</button>
+              <button disabled={Boolean(app.ttsAudiobook)} onclick={() => exportBook('mp3')}>Sesli kitap: bölüm başına MP3 (klasöre)</button>
+            </div>
+          {/if}
+        </div>
         <button class="icon-btn" title="Sonraki bölüm (Alt+→)" disabled={section >= sectionCount - 1} onclick={() => load(section + 1)}><Icon name="forward" /></button>
       </div>
     </div>

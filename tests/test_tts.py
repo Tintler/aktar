@@ -106,6 +106,22 @@ class EnginesTests(unittest.TestCase):
         self.prefs['voices'] = {'tr': 'gone/voice'}
         self.assertEqual(self.engines.choice('tr'), ('ema-lightning', 'tr-voice'))
 
+    def test_override_voice_for_chat_and_dubbing(self):
+        make_engine(self.root, 'ema-lightning', ('tr',))
+        make_engine(self.root, 'piper', ('tr', 'en'))
+        self.prefs.update(voices={'tr': 'ema-lightning/tr-voice'}, options={'piper/tr-voice': {'tarif': 'kayitli'}})
+        override = {'voice': 'piper/tr-voice', 'options': None}
+        self.assertEqual(self.engines.choice('tr', override), ('piper', 'tr-voice'))
+        self.assertEqual(self.engines._voice_options('piper', 'tr-voice', override), {'tarif': 'kayitli'})
+        preset = {'voice': 'piper/tr-voice', 'options': {'tarif': 'onayar'}}
+        self.assertEqual(self.engines._voice_options('piper', 'tr-voice', preset), {'tarif': 'onayar'})
+        # Kullanilamayan ya da baska dildeki ses: okuyucunun secimi gecerli kalir.
+        self.assertEqual(self.engines.choice('tr', {'voice': 'gone/x'}), ('ema-lightning', 'tr-voice'))
+        self.assertEqual(self.engines.choice('tr', {'voice': 'piper/en-voice'}), ('ema-lightning', 'tr-voice'))
+        # Onbellek anahtari secilen sesle degisir.
+        self.assertNotEqual(self.engines._cache_path('abcdef12', 'Merhaba', 1.0, 'tr'),
+                            self.engines._cache_path('abcdef12', 'Merhaba', 1.0, 'tr', preset))
+
     def test_load_say_export_and_switch(self):
         make_engine(self.root, 'ema-lightning', ('tr',))
         make_engine(self.root, 'piper', ('tr', 'en'))

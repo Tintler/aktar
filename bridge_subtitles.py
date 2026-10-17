@@ -7,6 +7,7 @@ Oynatici ve Altyazi Cevir sayfalarinin ortak araclari:
   - subtitle_ocr: goruntu tabanli (PGS/VobSub) akisi OCR ile okuyup videonun yanina SRT yazar.
   - whisper_words: kelime zamanlari olmayan eski Whisper transkriptini yeniden cikarir.
   - clip_save: secilen araligi altyazili/altyazisiz klip olarak kaydeder.
+  - dub_create: secili altyaziyi sesli okuma motoruyla seslendirip videoya dublaj parcasi ekler (dub.py).
 
 Altyazi kaynaklari oynaticinin anahtarlariyla verilir: 'stream:<index>', 'file:<yol>',
 'whisper', 'ocr:<index>'. Uzun isler tek bir arka plan is parcaciginda calisir ve 'subtool'
@@ -19,6 +20,7 @@ import threading
 from pathlib import Path
 
 import clip
+import dub
 import media_server
 import qa
 import speech
@@ -322,6 +324,56 @@ class SubtitleToolsMixin:
         player = getattr(self, '_player_video', None)
         if player is not None and player.path == path:
             self._push_player(player)
+
+    # ------------------------------------------------------------------ dublaj (F141)
+    def dub_create(self, path, key, options=None, timing=None, voice=''):
+        """Secili altyaziyi seslendirip videonun yanina dublajli kopya (.dublaj.mkv) ya da ses (.m4a) yazar.
+        `voice`: '' (sesli okumanin Turkce sesi), 'preset:<kimlik>' ya da '<motor>/<ses>'."""
+        path = Path(str(path))
+        if not key:
+            return {'error': 'Seslendirilecek altyazıyı seçin (CC menüsü).'}
+        try:
+            source = self._source(path, key)
+        except (RuntimeError, ValueError, OSError) as error:
+            return {'error': str(error)}
+        options = dub.options_of(options)
+        override = self._voice_override(voice)
+        language = self._override_language(override, 'tr')
+        engines = self._engines()
+        engine_id, _voice = engines.choice(language, override)
+        if engine_id is None:
+            return {'error': 'Dublaj için kurulu ses motoru yok; Ayarlar → Ses → Sesli okuma bölümünden kurun.'}
+        can_speed = any(item['id'] == engine_id and item['speed'] for item in engines.engines())
+        if source.whisper:
+            segments = source.whisper['segments']
+        else:
+            try:
+                segments = qa.transcript_from_cues(subtitle.cues_of(source.kind, source.payload))
+            except ValueError as error:
+                return {'error': str(error)}
+        stem = path.stem + '.dublaj'
+        target = _unique(path, stem, options['format'])
+        player = getattr(self, '_player_video', None)
+        info = player.info if player is not None and player.path == path and player.info else None
+        device = self.ui_prefs().get('tts', {}).get('device', 'auto')
+
+        def work(cancel, progress):
+            probed = info or media_server.probe(path)
+            progress(0, 0, 'engine')
+            engines.load(language, device, override)
+            while engines.state == 'loading':
+                if cancel.is_set():
+                    raise GracefulStop('Dublaj durduruldu.')
+                cancel.wait(0.2)
+            if engines.state != 'ready':
+                raise RuntimeError(engines.message or 'Ses motoru yüklenemedi.')
+            self._log(f'Dublaj başlıyor: {path.name} ({len(segments)} satır) -> {target.name}')
+            result = dub.build(engines, path, segments, target, options, timing, language, override,
+                               duration=probed.get('duration') or 0.0, has_audio=bool(probed.get('audio')),
+                               can_speed=can_speed, progress=progress, cancelled=cancel.is_set, log=self._log)
+            self._log('Dublaj kaydedildi: ' + result['output'])
+            return dict(result, name=target.name)
+        return self._start_tool('dub', path, work)
 
     # ------------------------------------------------------------------ klip
     def clip_save(self, path, start, end, options=None, key=None, timing=None, fmt='source', style=None):

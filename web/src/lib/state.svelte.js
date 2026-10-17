@@ -37,6 +37,7 @@ export const app = $state({
   engines: [],
   ttsPrepare: null,           // {book, done, total}: cumleler hazirlanirken
   ttsExport: null,
+  ttsAudiobook: null,         // F141: {book, title, done, total, chapter, chapters}: sesli kitap kaydedilirken
   ttsPrefs: { device: 'auto', speed: 1, voices: {}, options: {} },
   // Komut satirindan ya da baska sayfadan acilmak uzere bekleyen video (Translate acilinca alir).
   pendingVideo: null,
@@ -246,6 +247,17 @@ export async function init() {
     app.ttsExport = null;
     if (data.error) toast('Ses kaydedilemedi: ' + data.error, 'error');
     else toast(`Ses kaydedildi (${data.count} cümle): ${data.path}`, 'ok');
+  });
+  // F141: sesli kitap kaydi (okuyucu); bitince dosya/klasor gosterilir.
+  on('tts_audiobook', async (data) => {
+    if (!data.finished) { app.ttsAudiobook = { ...data, chapters: data.chapters, chapter: data.chapter }; return; }
+    app.ttsAudiobook = null;
+    if (data.cancelled) { toast('Sesli kitap kaydı durduruldu; biten bölümler saklandı, yeniden başlatınca kaldığı yerden sürer.'); return; }
+    if (data.error) { toast('Sesli kitap kaydedilemedi: ' + data.error, 'error'); return; }
+    const where = data.format === 'mp3' ? 'Klasör' : 'Dosya';
+    if (await confirm({ title: 'Sesli kitap hazır', message: `${data.title} · ${data.chapters} bölüm\n${where}: ${data.output}`, ok: 'Konumu aç', cancel: 'Kapat' })) {
+      act('reveal', data.output);
+    }
   });
   on('tts_engines', ({ engines, done, error }) => {
     app.engines = engines;

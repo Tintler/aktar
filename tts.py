@@ -37,6 +37,10 @@ DATA_PATH_BUDGET = 70   # room for downloaded models/voices under <engine>/data
 FROZEN = bool(getattr(sys, 'frozen', False))
 
 
+class Cancelled(RuntimeError):
+    """A long rendering (export) was stopped by its cancel event."""
+
+
 def language_key(language):
     return str(language or 'tr').split('-')[0].split('_')[0].lower() or 'tr'
 
@@ -233,11 +237,17 @@ class Engines:
             })
         return result
 
-    def choice(self, language):
-        """(engine, voice) for a book language: the user's choice when usable, otherwise a default."""
+    def choice(self, language, override=None):
+        """(engine, voice) for a book language: the user's choice when usable, otherwise a default.
+        `override` ({'voice': '<engine>/<voice>', 'options'}) is another page's own voice (chat, dubbing);
+        it wins when usable for that language."""
         key = language_key(language)
         usable = {item['id']: item for item in self.engines() if item['mode']}
-        engine_id, _, voice_id = ((self._prefs().get('voices') or {}).get(key) or '').partition('/')
+        chosen = (override or {}).get('voice') or (self._prefs().get('voices') or {}).get(key) or ''
+        engine_id, _, voice_id = chosen.partition('/')
+        if override and not (engine_id in usable and any(v['id'] == voice_id and v['language'] == key
+                                                          for v in usable[engine_id]['voices'])):
+            engine_id, _, voice_id = ((self._prefs().get('voices') or {}).get(key) or '').partition('/')
         if engine_id in usable and any(v['id'] == voice_id and v['language'] == key for v in usable[engine_id]['voices']):
             return engine_id, voice_id
         for candidate in [DEFAULT_ENGINE.get(key)] + sorted(usable):
@@ -245,6 +255,12 @@ class Engines:
             if voice:
                 return candidate, voice['id']
         return None, None
+
+    def _voice_options(self, engine_id, voice_id, override=None):
+        """The voice's settings: the override's when it names this voice, else the saved ones."""
+        if override and override.get('voice') == f'{engine_id}/{voice_id}' and override.get('options') is not None:
+            return dict(override['options'])
+        return dict((self._prefs().get('options') or {}).get(f'{engine_id}/{voice_id}') or {})
 
     # ------------------------------------------------------------- status
     def status(self):
@@ -259,9 +275,9 @@ class Engines:
             self._set('loading', message.get('message', ''))
 
     # ------------------------------------------------------------- loading and speech
-    def load(self, language, device='auto'):
+    def load(self, language, device='auto', override=None):
         """Starts (or reuses) the worker for a book language in the background; returns the status."""
-        engine_id, voice_id = self.choice(language)
+        engine_id, voice_id = self.choice(language, override)
         with self._lock:
             key = language_key(language)
             if engine_id is None:
@@ -269,7 +285,7 @@ class Engines:
                 self._set('missing', 'Bu dil için kullanılabilir bir ses motoru yok. Ayarlar → Sesli okuma bölümünden kurun.')
                 return self.status()
             target = {'engine': engine_id, 'voice': voice_id, 'device': device or 'auto', 'language': key}
-            options = ((self._prefs().get('options') or {}).get(f'{engine_id}/{voice_id}') or {})
+            options = self._voice_options(engine_id, voice_id, override)
             if self._loading and self._loading.is_alive():
                 return self.status()
             same = (self._worker and self._worker.alive and self.state == 'ready'
@@ -315,14 +331,14 @@ class Engines:
         return self._worker
 
     # ------------------------------------------------------------- sentence cache
-    def _cache_path(self, book, text, speed, language):
+    def _cache_path(self, book, text, speed, language, override=None):
         """Where a sentence rendered with the voice chosen for `language` is kept (None: no caching)."""
         if not book or not re.fullmatch(r'[0-9a-f]{8,40}', str(book)):
             return None
-        engine_id, voice_id = self.choice(language)
+        engine_id, voice_id = self.choice(language, override)
         if engine_id is None:
             return None
-        options = (self._prefs().get('options') or {}).get(f'{engine_id}/{voice_id}') or {}
+        options = self._voice_options(engine_id, voice_id, override)
         key = json.dumps([engine_id, voice_id, options, round(float(speed), 2), text], sort_keys=True, ensure_ascii=False)
         return self.app_dir / CACHE_DIR / book / (hashlib.sha1(key.encode('utf-8')).hexdigest() + '.wav')
 
@@ -332,16 +348,16 @@ class Engines:
             duration = clip.getnframes() / clip.getframerate()
         return {'audio': base64.b64encode(data).decode('ascii'), 'duration': duration}
 
-    def say(self, text, speed=1.0, book=None, language='tr'):
+    def say(self, text, speed=1.0, book=None, language='tr', override=None):
         """One sentence as base64 WAV: from the book's cache when it was rendered before, else from the engine."""
         text = ' '.join(str(text).split())
         if not text:
             return {'audio': '', 'duration': 0.0}
-        path = self._cache_path(book, text, speed, language)
+        path = self._cache_path(book, text, speed, language, override)
         if path is not None and path.exists():
             return dict(self._clip(path.read_bytes()), cached=True)
         worker = self._ready_worker()
-        engine_id, voice_id = self.choice(language)
+        engine_id, voice_id = self.choice(language, override)
         if (self.current.get('engine'), self.current.get('voice')) != (engine_id, voice_id):
             raise RuntimeError('Ses motoru hazır değil.')
         result = worker.request('say', text=text, speed=float(speed), rate=AUDIO_RATE, timeout=600)
@@ -352,12 +368,12 @@ class Engines:
             os.replace(partial, path)
         return {'audio': result.get('audio', ''), 'duration': result.get('duration', 0.0), 'cached': False}
 
-    def cached(self, book, sentences, speed, language='tr'):
+    def cached(self, book, sentences, speed, language='tr', override=None):
         """How many of the sentences are already rendered for this book and voice."""
         count = 0
         for sentence in sentences:
             text = ' '.join(str(sentence).split())
-            path = self._cache_path(book, text, speed, language) if text else None
+            path = self._cache_path(book, text, speed, language, override) if text else None
             count += bool(path is not None and path.exists())
         return count
 
@@ -383,9 +399,11 @@ class Engines:
         shutil.rmtree(target, ignore_errors=True)
         return self.cache_info()
 
-    def export(self, sentences, speed, path, progress=None, book=None, language='tr', gaps=None):
+    def export(self, sentences, speed, path, progress=None, book=None, language='tr', gaps=None,
+               override=None, cancel=None):
         """Writes all sentences into one WAV file, reusing (and filling) the book's cache; blocking.
-        `gaps` gives the seconds of silence after each sentence (default SENTENCE_GAP)."""
+        `gaps` gives the seconds of silence after each sentence (default SENTENCE_GAP).
+        A set `cancel` event stops it with Cancelled (the partial file is left to the caller)."""
         gaps = list(gaps or ())
         pairs = [(' '.join(str(s).split()), _gap(gaps, i)) for i, s in enumerate(sentences) if str(s).strip()]
         texts = [text for text, _ in pairs]
@@ -395,7 +413,9 @@ class Engines:
         stream = None
         try:
             for index, (text, gap) in enumerate(pairs):
-                result = self.say(text, speed, book, language)
+                if cancel is not None and cancel.is_set():
+                    raise Cancelled('Ses kaydı durduruldu.')
+                result = self.say(text, speed, book, language, override)
                 with wave.open(io.BytesIO(base64.b64decode(result['audio']))) as clip:
                     if stream is None:
                         rate = clip.getframerate()

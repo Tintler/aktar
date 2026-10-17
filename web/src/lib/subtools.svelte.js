@@ -6,8 +6,9 @@ import { confirm, notice } from './confirm.svelte.js';
 
 export const subtool = $state({ job: null });
 
-export const KIND_NAMES = { align: 'Otomatik hizalama', ocr: 'Altyazı OCR', whisper: 'Kelime zamanları', clip: 'Klip kaydı' };
-const STAGE_NAMES = { whisper: 'Konuşmadan metin', frames: 'Altyazı görüntüleri', ocr: 'OCR', align: 'Hizalanıyor', clip: 'Klip kodlanıyor' };
+export const KIND_NAMES = { align: 'Otomatik hizalama', ocr: 'Altyazı OCR', whisper: 'Kelime zamanları', clip: 'Klip kaydı', dub: 'Dublaj' };
+const STAGE_NAMES = { whisper: 'Konuşmadan metin', frames: 'Altyazı görüntüleri', ocr: 'OCR', align: 'Hizalanıyor', clip: 'Klip kodlanıyor',
+  engine: 'Ses motoru hazırlanıyor', voice: 'Seslendiriliyor', mix: 'Ses karıştırılıyor' };
 const listeners = new Set();
 
 // Is bitince (done/error/cancelled) cagrilir: fn(job). Donen fonksiyon dinlemeyi birakir.
@@ -30,6 +31,12 @@ on('subtool', async (data) => {
   if (data.kind === 'clip') {
     const extra = result.subtitle ? '\nAltyazı: ' + result.subtitle.split(/[\\/]/).pop() : '';
     if (await confirm({ title: 'Klip kaydedildi', message: result.name + extra, ok: 'Konumu aç', cancel: 'Kapat' })) act('reveal', result.output);
+  } else if (data.kind === 'dub') {
+    const notes = [result.faster ? `${result.faster} satır sığması için hızlandırıldı` : '', result.shifted ? `${result.shifted} satır biraz kaydırıldı` : '']
+      .filter(Boolean).join(', ');
+    if (await confirm({ title: 'Dublaj hazır', message: `${result.name} · ${result.lines} satır${notes ? '\n' + notes + '.' : ''}`, ok: 'Konumu aç', cancel: 'Kapat' })) {
+      act('reveal', result.output);
+    }
   } else if (data.kind === 'ocr') {
     toast(`Altyazı okundu (${result.lines} satır): ${result.name}`, 'ok');
   } else if (data.kind === 'whisper') {
@@ -42,7 +49,7 @@ export function jobText(job) {
   const stage = STAGE_NAMES[job.stage] ?? KIND_NAMES[job.kind] ?? '';
   const { done = 0, total = 0 } = job.progress ?? {};
   if (!total) return stage + '…';
-  if (job.stage === 'ocr') return `${stage}: ${Math.round(done)} / ${Math.round(total)}`;
+  if (job.stage === 'ocr' || job.stage === 'voice') return `${stage}: ${Math.round(done)} / ${Math.round(total)}`;
   return `${stage}: %${Math.min(100, Math.round((done * 100) / total))}`;
 }
 

@@ -4,6 +4,7 @@
   import ChatMessages from './ChatMessages.svelte';
   import ThinkToggle from './ThinkToggle.svelte';
   import MicButton from './MicButton.svelte';
+  import VoiceMode from './VoiceMode.svelte';
   import TemplatePicker from './TemplatePicker.svelte';
   import { app, act, refreshChat, selectedPaths, openFile } from '../lib/state.svelte.js';
   import { confirm } from '../lib/confirm.svelte.js';
@@ -72,6 +73,7 @@
   <div class="note">{chat?.note ?? ''}</div>
   <form class="ask" onsubmit={(e) => { e.preventDefault(); ask(); }}>
     <input bind:value={question} disabled={!chat?.enabled} placeholder={view.scope === 'selected' ? 'Seçili dosyalara sor…' : 'Tüm dosyalara sor…'} />
+    <VoiceMode entries={chat?.entries ?? []} busy={!!chat?.busy} disabled={!chat?.enabled} onsend={(value) => ask(value)} />
     <MicButton bind:value={question} disabled={!chat?.enabled} />
     <TemplatePicker kind="collection" />
     <ThinkToggle />

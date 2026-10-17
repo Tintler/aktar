@@ -4,6 +4,7 @@
   import ChatMessages from './ChatMessages.svelte';
   import ThinkToggle from './ThinkToggle.svelte';
   import MicButton from './MicButton.svelte';
+  import VoiceMode from './VoiceMode.svelte';
   import TemplatePicker from './TemplatePicker.svelte';
   import { templateFor } from '../lib/templates.svelte.js';
   import { app, act } from '../lib/state.svelte.js';
@@ -19,8 +20,8 @@
     if (scroller) queueMicrotask(() => (scroller.scrollTop = scroller.scrollHeight));
   });
 
-  async function ask() {
-    const value = question.trim();
+  async function ask(text = question) {
+    const value = text.trim();
     if (!value || !chat?.enabled) return;
     question = '';
     const state = await act('doc_ask', value, app.think, templateFor('doc'));
@@ -48,6 +49,7 @@
     {#if chat.note}<div class="note">{#if !chat.ready && !chat.note.startsWith('Bu belge')}<Icon name="loader" size={13} spin />{/if}{chat.note}</div>{/if}
     <form class="ask" onsubmit={(e) => { e.preventDefault(); ask(); }}>
       <input bind:value={question} disabled={!chat.enabled} placeholder="Belgeye sor…" />
+      <VoiceMode entries={chat.entries} busy={!!chat.asking} disabled={!chat.enabled} onsend={(value) => ask(value)} />
       <MicButton bind:value={question} disabled={!chat.enabled} />
       <TemplatePicker kind="doc" />
       <ThinkToggle />

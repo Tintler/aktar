@@ -4,6 +4,7 @@
   import ChatMessages from './ChatMessages.svelte';
   import ThinkToggle from './ThinkToggle.svelte';
   import MicButton from './MicButton.svelte';
+  import VoiceMode from './VoiceMode.svelte';
   import TemplatePicker from './TemplatePicker.svelte';
   import { templateFor } from '../lib/templates.svelte.js';
   import { app, act, seekPlayer } from '../lib/state.svelte.js';
@@ -99,6 +100,7 @@
     <form class="ask" onsubmit={(e) => { e.preventDefault(); ask(); }}>
       <input bind:value={question} disabled={!q.ready || q.asking}
         placeholder={q.asking ? 'Yanıt hazırlanıyor…' : q.ready ? 'Soru sorun…' : 'Video hazırlanıyor…'} />
+      <VoiceMode entries={q.entries} busy={!!q.asking} disabled={!q.ready} onsend={(value) => ask(value)} />
       <MicButton bind:value={question} disabled={!q.ready || q.asking} />
       <TemplatePicker kind="video" />
       <ThinkToggle />

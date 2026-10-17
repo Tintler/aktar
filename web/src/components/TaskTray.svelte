@@ -55,6 +55,11 @@
       list.push({ id: 'ttsexport', icon: 'download', title: 'Ses kaydediliyor', detail: app.reading.book?.title ?? '',
         percent: pct(app.ttsExport.done, app.ttsExport.total), count: `${app.ttsExport.done} / ${app.ttsExport.total} cümle`, go: () => go('reading') });
     }
+    const a = app.ttsAudiobook;
+    if (a) {
+      list.push({ id: 'audiobook', icon: 'headphones', title: 'Sesli kitap kaydediliyor', detail: [a.title, a.chapters ? `Bölüm ${a.chapter} / ${a.chapters}` : 'bölümler okunuyor'].filter(Boolean).join(' · '),
+        percent: a.total ? pct(a.done, a.total) : null, count: a.total ? `${a.done} / ${a.total} cümle` : '', go: () => go('reading') });
+    }
     return list;
   });
 
