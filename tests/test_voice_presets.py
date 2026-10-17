@@ -1,5 +1,9 @@
 """Sesli okuma onayarlari (F137): voice_presets ve bridge_tts.tts_preset_* metotlari."""
 from __future__ import annotations
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / 'src'))
+
 
 import base64
 import io

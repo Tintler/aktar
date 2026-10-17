@@ -6,7 +6,7 @@ cd /d "%~dp0"
 rem Ses motoru paketlerini derler: dist-engines\aktar-ses-<id>-win64.zip
 py -3 -m pip install -r requirements.txt -r requirements-tts.txt
 if errorlevel 1 goto :error
-py -3 build_engines.py %*
+py -3 tools\build_engines.py %*
 if errorlevel 1 goto :error
 echo.
 echo Hazir: %CD%\dist-engines

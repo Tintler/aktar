@@ -44,6 +44,7 @@ fi
     --noconfirm --clean --onefile --windowed \
     --name Aktar \
     --specpath build/linux --workpath build/linux/work \
+    --paths "$ROOT/src" \
     "$@" \
     --exclude-module faster_whisper --exclude-module ctranslate2 \
     --exclude-module PySide6 --exclude-module PyQt5 --exclude-module PyQt6 \

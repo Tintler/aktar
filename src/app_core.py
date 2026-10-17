@@ -30,9 +30,9 @@ try:
 except ImportError:
     fcntl = None
 
-ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
+ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent.parent))  # kaynak: src/'nin ustu
 APP_DIR = (Path(sys.executable).resolve().parent
-           if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent)
+           if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent.parent)
 # Kullaniciya gosterilen dosya adlari ve ikili uzantisi platforma gore (Windows / Linux).
 WINDOWS = os.name == 'nt'
 EXE_SUFFIX = '.exe' if WINDOWS else ''

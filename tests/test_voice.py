@@ -12,7 +12,7 @@ import wave
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))
 
 import bridge  # noqa: E402
 import bridge_voice  # noqa: E402

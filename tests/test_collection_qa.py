@@ -8,7 +8,7 @@ import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / 'src'))
 
 import collection_qa  # noqa: E402
 import qa  # noqa: E402

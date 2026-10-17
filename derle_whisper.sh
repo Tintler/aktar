@@ -49,7 +49,7 @@ fi
     --exclude-module PIL --exclude-module sklearn --exclude-module tensorflow \
     --exclude-module IPython \
     "$@" \
-    whisper_cli.py
+    src/whisper_cli.py
 
 echo
 echo "Derleme tamamlandi: dist/aktar-whisper/"

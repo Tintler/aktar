@@ -22,8 +22,8 @@ import threading
 import urllib.error
 import urllib.request
 
-ROOT = Path(getattr(__import__('sys'), '_MEIPASS', Path(__file__).resolve().parent))
-APP_DIR = Path(__import__('sys').executable).resolve().parent if getattr(__import__('sys'), 'frozen', False) else Path(__file__).resolve().parent
+ROOT = Path(getattr(__import__('sys'), '_MEIPASS', Path(__file__).resolve().parent.parent))
+APP_DIR = Path(__import__('sys').executable).resolve().parent if getattr(__import__('sys'), 'frozen', False) else Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = {
     'base_url': 'http://127.0.0.1:1234/v1',
     'model': 'gemma-4-26b-a4b-it-qat@q4_k_xl',

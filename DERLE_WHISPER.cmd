@@ -39,7 +39,7 @@ py -3 -m PyInstaller ^
     --exclude-module PIL --exclude-module sklearn --exclude-module tensorflow ^
     --exclude-module IPython ^
     %GPU_ARGS% ^
-    whisper_cli.py
+    src\whisper_cli.py
 
 if errorlevel 1 (
     echo HATA: Whisper paketi derlenemedi.

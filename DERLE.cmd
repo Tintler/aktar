@@ -29,6 +29,7 @@ popd
 py -3 -m PyInstaller ^
     --noconfirm --clean --onefile --windowed ^
     --name Aktar ^
+    --paths src ^
     %ICON_ARG% ^
     --add-data "bin\ffmpeg.exe;bin" --add-data "bin\ffprobe.exe;bin" ^
     --add-data "assets;assets" ^

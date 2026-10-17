@@ -1,7 +1,7 @@
 """Builds the voice engine packages (worker.exe + runtime + motor.json) as release zips.
 
-    py -3 build_engines.py            all engines
-    py -3 build_engines.py ema        one engine (folder name under engines/)
+    py -3 tools/build_engines.py            all engines
+    py -3 tools/build_engines.py ema        one engine (folder name under engines/)
 
 Output: dist-engines/aktar-ses-<id>-win64.zip with one folder <id>/ inside, to be installed in
 Aktar with Ayarlar → Sesli okuma → "Dosyadan kur". Packages are built locally and not published:
@@ -17,7 +17,7 @@ import subprocess
 import sys
 import zipfile
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 BUILD = ROOT / 'build-engines'
 DIST = ROOT / 'dist-engines'
 # Extra PyInstaller options per engine folder: data files and native libraries the analysis misses.

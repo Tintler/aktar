@@ -380,7 +380,7 @@ Sol menüdeki **Kitap Çevir**, DRM içermeyen İngilizce EPUB kitapları Türk�
 
 Her parça kaydedildiği için çeviri **Duraklat**, **Durdur** ya da uygulama kapanınca kaldığı yerden sürer: yarım projeyi **Projeyi sürdür** ile (ya da `-ceviri` klasörünü sayfaya bırakarak) açın. Soldaki listede bölüm durumları görünür; bir bölüme tıklayınca kaynak ve çeviri yan yana, sözlük terimleri vurgulu gösterilir, sağ tık **Bu bölümü yeniden çevir** seçeneğini açar. **Terim sözlüğü** sonradan düzenlenirse değişen terimlerin geçtiği çevrilmiş bölümlerin yeniden çevrilmesi önerilir. Bitince klasörde `TAM-CEVIRI.md` ve `<KitapAdı> TR.epub` oluşur; ayrıntılı kayıt `translation.log` dosyasında ve sayfanın **Günlük** sekmesindedir.
 
-Sunucu, model, temperature, zaman aşımı, otomatik tekrar ve katı sözlük ortak ayarlardan gelir; parça boyutu, token payları, bitiş işareti ve EPUBCheck **Ayarlar → Kitap çevirisi** bölümündedir (`config.json` içinde `"book"` anahtarı). Komut satırından aynı motor `py -3 book_cli.py --epub kitap.epub` ile çalışır.
+Sunucu, model, temperature, zaman aşımı, otomatik tekrar ve katı sözlük ortak ayarlardan gelir; parça boyutu, token payları, bitiş işareti ve EPUBCheck **Ayarlar → Kitap çevirisi** bölümündedir (`config.json` içinde `"book"` anahtarı). Komut satırından aynı motor `py -3 src/book_cli.py --epub kitap.epub` ile çalışır.
 
 ### 3.14 Okuma (EPUB kitaplığı)
 Sol menüdeki **Okuma**, EPUB kitaplarınızı uygulama içinde okumanızı sağlar (Çevirgeç'in okuyucusu). **Kitap ekle** ile ya da EPUB'ları sayfaya sürükleyerek kitaplığa ekleyin; dosyalar taşınmaz, yalnızca yolları `book_library.json` dosyasına yazılır. DRM'li EPUB'lar açılmaz. Kitap Çevir sayfasında çeviri bitince **Türkçe EPUB'u oku** çıktıyı kitaplığa ekleyip doğrudan açar.
@@ -390,7 +390,7 @@ Okurken üstteki liste düğmesi **İçindekiler** ve **Yer imleri** panelini a�
 ### 3.15 Sesli okuma
 Okuma sayfasında alttaki **oynat** düğmesi bölümü cümle cümle sesli okur; okunan cümle vurgulanır, metne tıklayınca o cümleye atlanır, **Boşluk** duraklatır. Hız düğmesi okuma hızını değiştirir. **Hazırla** bu bölümün (ya da buradan kitabın sonuna kadar) sesini önceden üretip `ses-onbellegi` klasöründe saklar; hazır bölümler motor yüklenmeden anında okunur. **Kaydet** bölümü tek bir WAV dosyası olarak yazar.
 
-Ses, bilgisayarınızda çalışan ayrı bir ses motoruyla üretilir (Çevirgeç'in motorları): **EMA Lightning** (küçük ve hızlı Türkçe ses) ve **VoxCPM** (Trendyol-TTS anlatıcı, tarifle tasarlanan ya da bir kayıttan klonlanan ses; NVIDIA ekran kartı önerilir). Kaynak koddan çalışırken `py -3 -m pip install -r requirements-tts.txt` ile paketler kuruluysa motorlar doğrudan kullanılır. `.exe` için motor paketini proje klasöründe `DERLE_SES.cmd` ile oluşturun (`dist-enginesktar-ses-<motor>-win64.zip`) ve **Ayarlar → Sesli okuma → Dosyadan kur** ile kurun; motorlar `ses-motorlari` klasörüne açılır, modeller ilk kullanımda iner. Çevirgeç için derlenmiş paketler de kurulabilir. Ses, işlemci (CPU/GPU), varsayılan hız, cümle ve paragraf sonu duraklamaları ve tırnak içini bölmeme aynı bölümden ayarlanır (`ui.json` → `tts`).
+Ses, bilgisayarınızda çalışan ayrı bir ses motoruyla üretilir (Çevirgeç'in motorları): **EMA Lightning** (küçük ve hızlı Türkçe ses) ve **VoxCPM** (Trendyol-TTS anlatıcı, tarifle tasarlanan ya da bir kayıttan klonlanan ses; NVIDIA ekran kartı önerilir). Kaynak koddan çalışırken `py -3 -m pip install -r requirements-tts.txt` ile paketler kuruluysa motorlar doğrudan kullanılır. `.exe` için motor paketini proje klasöründe `DERLE_SES.cmd` ile oluşturun (`dist-engines\aktar-ses-<motor>-win64.zip`) ve **Ayarlar → Sesli okuma → Dosyadan kur** ile kurun; motorlar `ses-motorlari` klasörüne açılır, modeller ilk kullanımda iner. Çevirgeç için derlenmiş paketler de kurulabilir. Ses, işlemci (CPU/GPU), varsayılan hız, cümle ve paragraf sonu duraklamaları ve tırnak içini bölmeme aynı bölümden ayarlanır (`ui.json` → `tts`).
 
 **Okuyan ses:** Okuyucunun sağ altındaki ses düğmesi kayıtlı sesleri resimleriyle listeler; birine tıklayınca okuma o sesle, kaldığı cümleden sürer. **Yeni ses** ile ad, resim (Resim seç, Ctrl+V ya da pencereye bırakma) ve motor sesi seçilir: EMA Lightning, VoxCPM Trendyol-TTS, tarifle tasarlanan ses (ses tarifi yazılır) ya da kayıttan klonlanan ses (kayıt ve isteğe bağlı metni). Klon kaydı sesin içine kopyalanır; asıl dosya taşınsa da ses çalışır. Sesler `ses-presetleri` klasöründe durur; düzenlemek için listede kalem simgesine basın. **Ayarlardaki ses** seçilirse Ayarlar → Ses bölümündeki ses kullanılır.
 
@@ -509,10 +509,10 @@ MP4/WebM (H.264, VP9, AV1 + AAC/MP3/Opus) videolar doğrudan oynatılır. Diğer
 Arayüz olmadan da kullanılabilir (aynı çekirdeği paylaşır):
 
 ```bat
-py -3 cevir.py check
-py -3 cevir.py streams "C:\video\Movie.mkv"
-py -3 cevir.py extract "C:\video\Movie.mkv" --stream 2
-py -3 cevir.py translate "C:\video\Movie.ass" --series game-of-thrones --glossary "Ash=Kul"
+py -3 src/cevir.py check
+py -3 src/cevir.py streams "C:\video\Movie.mkv"
+py -3 src/cevir.py extract "C:\video\Movie.mkv" --stream 2
+py -3 src/cevir.py translate "C:\video\Movie.ass" --series game-of-thrones --glossary "Ash=Kul"
 ```
 
 - `check` — ffmpeg/ffprobe bulunabilirliği ve yapılandırma geçerliliği.
