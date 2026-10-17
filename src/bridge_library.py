@@ -22,6 +22,7 @@ import search_index
 import speech
 import transcript_export
 import video_frames
+import voice_split
 from app_core import Client, GracefulStop, load_config
 
 CHAT_GREETING = ('Bu koleksiyondaki dosyalar hakkında soru sorun; cevaplar hangi dosyada, '
@@ -36,7 +37,7 @@ STATUS_TEXT = {'ready': 'Hazır', 'transcript': 'Metin hazır', 'pending': 'Bekl
 META_TEXT = {'ready': 'hazır', 'transcript': 'metin hazır', 'pending': 'bekliyor',
              'no_subtitle': 'Whisper bekliyor', 'no_text': 'OCR bekliyor', 'missing': 'bulunamadı'}
 OCR_OVERRIDES = ('tesseract', 'model', 'vision')  # prepare_start: yalnizca bu hazirlik icin
-PLAN_GROUPS = ('ready', 'summary', 'index', 'document', 'subtitle', 'vision', 'whisper', 'frames')
+PLAN_GROUPS = ('ready', 'summary', 'index', 'document', 'subtitle', 'vision', 'whisper', 'frames', 'speakers')
 
 
 def format_duration(seconds):
@@ -641,11 +642,14 @@ class LibraryMixin:
                                    if result['frames_seconds'] else '',
                                    # transkripti hazir olup yalniz goruntusu okunacaklar (sayaca eklenir)
                                    'frames_extra': len({library._key(entry['path']) for entry in result['frames']}
-                                                       & {library._key(entry['path']) for entry in result['ready']})})
+                                                       & {library._key(entry['path']) for entry in result['ready']}),
+                                   'speakers_extra': len({library._key(entry['path']) for entry in result['speakers']}
+                                                         & {library._key(entry['path']) for entry in result['ready']})})
 
         threading.Thread(target=work, name='aktar-library-plan', daemon=True).start()
         return {'files': len(entries), 'model': cfg['model'], 'whisper': whisper_ready,
                 'frames': bool((self._lib_data or {}).get('frames')),
+                'speakers': bool((self._lib_data or {}).get('speakers')), 'speakers_ready': voice_split.available()[0],
                 'whisper_model': cfg['whisper_model'], 'whisper_device': cfg['whisper_device'],
                 'vision_model': str(cfg.get('vision_model', '')).strip() or cfg['model'],
                 'ocr_engine': documents.ocr_engine(cfg), 'warnings': warnings}
@@ -656,10 +660,11 @@ class LibraryMixin:
         self._lib_plan = None
         return True
 
-    def prepare_start(self, summaries=True, vision=True, whisper=False, ocr_engine='', frames=False):
+    def prepare_start(self, summaries=True, vision=True, whisper=False, ocr_engine='', frames=False, speakers=False):
         """`ocr_engine` ('tesseract' | 'model' | 'vision'; bos: Ayarlardaki) yalnizca bu
         hazirlik icin taranmis sayfalarin motorunu degistirir. `frames` (F114): videolarin
-        goruntusu de okunur; secim koleksiyona yazilir (klasor izleme de ona uyar)."""
+        goruntusu de okunur; secim koleksiyona yazilir (klasor izleme de ona uyar).
+        `speakers` (F146): videolarda konusmacilar ayrilir (transkriptte ve soru-cevapta 'K1:' etiketleri)."""
         plan = self._lib_plan
         if plan is None:
             return {'error': 'Hazırlık planı hazır değil.'}
@@ -671,21 +676,28 @@ class LibraryMixin:
         entries = ((list(plan['summary']) if summaries else []) + list(plan['index'])
                    + list(plan['document']) + list(plan['subtitle'])
                    + (list(plan['vision']) if vision else []) + (list(plan['whisper']) if whisper else []))
-        if frames:  # transkripti hazir olup yalniz goruntusu okunacak videolar da siraya girer
-            queued = {library._key(entry['path']) for entry in entries}
-            entries += [entry for entry in plan['frames'] if library._key(entry['path']) not in queued]
-        if self._lib_data is not None and bool(self._lib_data.get('frames')) != bool(frames):
-            self._lib_data['frames'] = bool(frames)
+        speakers = bool(speakers) and voice_split.available()[0]
+        for wanted, group in ((frames, 'frames'), (speakers, 'speakers')):
+            if wanted:  # transkripti hazir olup yalniz goruntusu/konusmacilari islenecek videolar da siraya girer
+                queued = {library._key(entry['path']) for entry in entries}
+                entries += [entry for entry in plan[group] if library._key(entry['path']) not in queued]
+        changed = False
+        for name, value in (('frames', bool(frames)), ('speakers', speakers)):
+            if self._lib_data is not None and bool(self._lib_data.get(name)) != value:
+                self._lib_data[name] = value
+                changed = True
+        if changed:
             library.save_collection(self._lib_data, self._lib_slug)
         self._lib_plan = None
         if not entries and not summaries:
             return self.library_state()
         videos = [entry['path'] for entry in self._lib_entries if not entry['missing']]
         collection = (self._lib_slug, self._lib_data['title'], videos) if self._lib_data else None
-        self._start_queue(entries, whisper, summaries, collection, vision, ocr_engine, frames)
+        self._start_queue(entries, whisper, summaries, collection, vision, ocr_engine, frames, speakers)
         return self.library_state()
 
-    def _start_queue(self, entries, whisper, summaries, collection, vision=True, ocr_engine='', frames=False):
+    def _start_queue(self, entries, whisper, summaries, collection, vision=True, ocr_engine='', frames=False,
+                     speakers=False):
         """Kuyrugu baslatir; acik olmayan koleksiyonun dosyalari da olabilir (F114 klasor izleme)."""
         self._queue_cancel = threading.Event()
         self._queue_resume = threading.Event()
@@ -701,7 +713,7 @@ class LibraryMixin:
         self._log(f'Toplu hazırlık başladı: {len(entries)} dosya' + (' (Whisper açık).' if whisper else '.'))
         self._queue_worker = threading.Thread(
             target=self._run_queue, args=(entries, whisper, bool(summaries), collection, bool(vision), ocr_engine,
-                                          bool(frames)),
+                                          bool(frames), bool(speakers)),
             name='aktar-library-queue', daemon=True)
         self._queue_worker.start()
 
@@ -754,7 +766,8 @@ class LibraryMixin:
         self._push_queue()
         return self._queue
 
-    def _run_queue(self, entries, allow_whisper, summaries, collection, allow_vision, ocr_engine='', frames=False):
+    def _run_queue(self, entries, allow_whisper, summaries, collection, allow_vision, ocr_engine='', frames=False,
+                   speakers=False):
         """Eski QueueWorker.run: siradaki dosyalari library.transcribe/index ile isler."""
         done = failed = 0
         last_error, repeats = '', 0
@@ -818,6 +831,14 @@ class LibraryMixin:
                                                     cancelled=cancel.is_set)
                     log(f'{count} kare betimlendi')
                     has_text = False  # indeks kare betimleriyle yeniden kurulur
+                if (speakers and outcome != 'skipped' and entry['kind'] == 'video'
+                        and voice_split.load_speakers(path) is None):
+                    started(index, path, 'konuşmacılar ayrılıyor')
+                    voice_split.diarize(path, log=log, cancelled=cancel.is_set,
+                                        progress=lambda done, total, stage, path=path: total > 0 and self._set_row(
+                                            path, ('Model %' if stage == 'download' else 'Konuşmacı %')
+                                            + str(int(100 * done / total)), 'accent'))
+                    has_text = False  # indeks konusmaci etiketleriyle yeniden kurulur
                 if outcome != 'skipped' and str(cfg.get('embedding_model', '')).strip():
                     if not has_text:
                         started(index, path, 'indeksleniyor')

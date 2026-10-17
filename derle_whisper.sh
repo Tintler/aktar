@@ -43,6 +43,7 @@ fi
     --specpath build/linux --workpath build/linux/work \
     --collect-data faster_whisper \
     --collect-binaries ctranslate2 \
+    --collect-binaries sherpa_onnx \
     --exclude-module PySide6 --exclude-module scipy --exclude-module torch \
     --exclude-module transformers --exclude-module numba --exclude-module llvmlite \
     --exclude-module pyarrow --exclude-module pandas --exclude-module matplotlib \

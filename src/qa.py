@@ -117,19 +117,24 @@ def transcript_from_cues(cues, keep_lines=False):
 
 
 def compact_lines(segments, max_seconds=LINE_SECONDS, max_chars=LINE_CHARS):
-    """Ardisik kisa segmentleri satirlarda birlestirir (zaman damgasi yukunu azaltir)."""
+    """Ardisik kisa segmentleri satirlarda birlestirir (zaman damgasi yukunu azaltir).
+    F146: konusmacisi belli segmentler ('speaker') yalnizca ayni konusmaciyla birlesir; satir 'Ad: ' ile baslar."""
     lines = []
     for segment in segments:
         current = lines[-1] if lines else None
         # Kare betimleri (F114) konusmayla birlesmez; '[Görüntü]' satiri ayri kalir.
         if (current and not current.get('visual') and not segment.get('visual')
+                and current.get('speaker') == segment.get('speaker')
                 and segment['start'] - current['start'] <= max_seconds
                 and segment['start'] - current['end'] <= 3.0
                 and len(current['text']) + 1 + len(segment['text']) <= max_chars):
             current['text'] += ' ' + segment['text']
             current['end'] = max(current['end'], segment['end'])
         else:
-            lines.append(dict(segment))
+            line = dict(segment)
+            if segment.get('speaker'):
+                line['text'] = f'{segment["speaker"]}: {segment["text"]}'
+            lines.append(line)
     return lines
 
 
@@ -156,13 +161,18 @@ VISUAL_LABEL = '[Görüntü]'
 
 def with_visual(data):
     """F114: videonun segmentleri + kare betimleri ('[Görüntü] ...' satirlari) zaman sirasiyla.
-    Betimler cached_sessions'ta oturuma 'visual' olarak eklenir (video_frames.py uretir)."""
+    Betimler cached_sessions'ta oturuma 'visual' olarak eklenir (video_frames.py uretir).
+    F146: konusmacilar ayrildiysa ('speakers') segmentlere konusmaci adi eklenir."""
     visual = data.get('visual') or []
+    segments = data['segments']
+    if data.get('speakers'):
+        import voice_split
+        segments = voice_split.label(segments, data['speakers'])
     if not visual:
-        return data['segments']
+        return segments
     extra = [{'start': float(item['start']), 'end': float(item['start']), 'text': f'{VISUAL_LABEL} {item["text"]}',
               'visual': True} for item in visual]
-    return sorted(list(data['segments']) + extra, key=lambda item: item['start'])
+    return sorted(list(segments) + extra, key=lambda item: item['start'])
 
 
 def visual_path(video, base=None):
@@ -347,6 +357,8 @@ def source_key(source):
     'document:pdf'."""
     if source.get('kind') == 'sheet':
         return 'document:sheet:2'  # F96: tarih + toplam satirli yeni metin; eski onbellek gecersiz
+    if source.get('kind') == 'epub':
+        return 'document:epub:2'   # F146: sayfalar okuyucunun bolum numaralariyla; eski onbellek gecersiz
     if source.get('kind') in DOCUMENT_KINDS:
         return f'document:{source["kind"]}'
     if source.get('kind') == 'subtitle':
@@ -378,9 +390,16 @@ def cached_sessions(video, base=None):
             continue
         sessions.append(data)
     if sessions and not is_document(sessions[0]):
+        import voice_split
         visual, _complete = load_visual(video, base)
+        try:
+            speakers = voice_split.load_speakers(video, base)
+        except OSError:
+            speakers = None
         for data in sessions:
             data['visual'] = visual
+            if speakers:
+                data['speakers'] = speakers
     return sessions
 
 

@@ -1,6 +1,8 @@
 # Istege bagli: Soru Sor sekmesinde altyazisiz videolar icin konusmadan metin (Whisper).
 # Kurulum: py -3 -m pip install -r requirements-whisper.txt
 faster-whisper==1.2.1
+# F146: dublajda ses ayirma (muzik/efekt korunur) ve konusmaci ayrimi; modeller ilk kullanimda indirilir.
+sherpa-onnx==1.13.8
 
 # NVIDIA GPU (CUDA 12) ile hizlandirma:
 #   - cuBLAS 12 / cuDNN 9 DLL'leri zaten bir klasorde varsa (baska programlarla ortak)

@@ -30,10 +30,14 @@ def render(session, fmt):
         if document:
             raise ValueError('Belgeler SRT olarak dışa aktarılamaz: ' + title)
         cues = []
-        for number, segment in enumerate(session['segments'], 1):
+        segments = session['segments']
+        if session.get('speakers'):  # F146: konusmaci etiketi
+            import voice_split
+            segments = voice_split.label(segments, session['speakers'])
+        for number, segment in enumerate(segments, 1):
             end = max(float(segment['end']), float(segment['start']) + 0.5)
-            cues.append(f'{number}\n{srt_time(segment["start"])} --> {srt_time(end)}\n'
-                        f'{segment["text"]}\n')
+            text = f'{segment["speaker"]}: {segment["text"]}' if segment.get('speaker') else segment['text']
+            cues.append(f'{number}\n{srt_time(segment["start"])} --> {srt_time(end)}\n{text}\n')
         return '\n'.join(cues)
     lines = qa.lines_of(dict(session, visual=[]))  # kare betimleri (F114) disa aktarilmaz
     if fmt == 'md':

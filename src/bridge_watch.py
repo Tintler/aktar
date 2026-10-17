@@ -113,22 +113,25 @@ class WatchMixin:
         else:
             library.save_collection(probe, slug)
         pending -= stable
-        self._watch_prepare(slug, data['title'], entries, targets, bool(data.get('frames')))
+        self._watch_prepare(slug, data['title'], entries, targets, bool(data.get('frames')),
+                            bool(data.get('speakers')))
 
-    def _watch_prepare(self, slug, title, entries, targets, frames=False):
-        """`frames`: koleksiyonda son 'Hepsini hazirla'da video goruntuleri secildiyse (F114)."""
+    def _watch_prepare(self, slug, title, entries, targets, frames=False, speakers=False):
+        """`frames`: koleksiyonda son 'Hepsini hazirla'da video goruntuleri secildiyse (F114);
+        `speakers`: konusmacilar ayrilsin diye secildiyse (F146)."""
         plan = library.plan(targets)
         whisper = speech.available()[0]
         jobs = (list(plan['summary']) + list(plan['index']) + list(plan['document']) + list(plan['subtitle'])
                 + list(plan['vision']) + (list(plan['whisper']) if whisper else []))
-        if frames:
-            queued = {library._key(entry['path']) for entry in jobs}
-            jobs += [entry for entry in plan['frames'] if library._key(entry['path']) not in queued]
+        for wanted, group in ((frames, 'frames'), (speakers, 'speakers')):
+            if wanted:
+                queued = {library._key(entry['path']) for entry in jobs}
+                jobs += [entry for entry in plan[group] if library._key(entry['path']) not in queued]
         names = ', '.join(entry['path'].name for entry in targets[:3]) + (' …' if len(targets) > 3 else '')
         self._log(f'Klasör izleme · {title}: {len(targets)} yeni dosya ({names})')
         if jobs:
             videos = [entry['path'] for entry in entries if not entry['missing']]
             self._emit('toast', {'message': f'{title}: {len(targets)} yeni dosya bulundu, hazırlanıyor.', 'kind': 'info'})
-            self._start_queue(jobs, whisper, True, (slug, title, videos), frames=frames)
+            self._start_queue(jobs, whisper, True, (slug, title, videos), frames=frames, speakers=speakers)
         elif hasattr(self, '_subs_auto_scan'):
             self._subs_auto_scan(slug)  # hazirlik gerekmiyorsa ekstreler hemen okunur

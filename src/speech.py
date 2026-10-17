@@ -428,14 +428,21 @@ def _run_helper(audio, model_name=DEFAULT_MODEL, device='auto', language='', pro
     {"result": {...}} veya {"error": "..."}. stderr (model indirme cubuklari vb.)
     work_files/qa altindaki gunluk dosyasina gider; hata olursa sonu mesaja eklenir.
     """
+    arguments = [str(audio), '--model', model_name, '--device', device,
+                 '--language', language or '', '--models-dir', str(download_root or model_dir())]
+    if str(cuda_dir or '').strip():
+        arguments += ['--cuda-dir', str(cuda_dir)]
+    return run_helper_task(arguments, progress, cancelled, log)
+
+
+def run_helper_task(arguments, progress=None, cancelled=None, log=print):
+    """aktar-whisper paketini `arguments` ile calistirir; sonucu ('result') dondurur.
+    Ilk arguman (ya da '--task'tan sonraki ilk konumsal arguman) giris WAV'idir; gunluk onun yanina yazilir."""
     command = helper_command()
     if command is None:
         raise RuntimeError(FROZEN_HINT)
-    command = command + [str(audio), '--model', model_name, '--device', device,
-                         '--language', language or '', '--models-dir',
-                         str(download_root or model_dir())]
-    if str(cuda_dir or '').strip():
-        command += ['--cuda-dir', str(cuda_dir)]
+    command = command + list(arguments)
+    audio = arguments[2] if arguments[0] == '--task' else arguments[0]
     log_path = Path(audio).with_suffix('.whisper.log')
     kwargs = {}
     if os.name == 'nt':
@@ -451,7 +458,7 @@ def _run_helper(audio, model_name=DEFAULT_MODEL, device='auto', language='', pro
         try:
             for line in process.stdout:
                 if cancelled and cancelled():
-                    raise GracefulStop('Konuşmadan metin durduruldu.')
+                    raise GracefulStop('İş durduruldu.')
                 try:
                     message = json.loads(line)
                 except ValueError:

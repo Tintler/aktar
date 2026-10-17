@@ -27,12 +27,13 @@ GREETING = ('Bu belgeye soru sorun; cevaplar hangi sayfada geçtiğini gösterir
 
 
 class DocumentSession:
-    def __init__(self, path):
+    def __init__(self, path, greeting=GREETING):
         self.path = Path(path)
         self.kind = documents.kind_of(self.path)
         self.key = library.file_chat_key(self.path)
+        self.greeting = greeting
         saved = library.load_chat(self.key)   # onceki acilistan kalan sohbet
-        self.entries = [('note', GREETING)] + saved['entries']
+        self.entries = [('note', greeting)] + saved['entries']
         self.history = saved['history']
         self.session = None
         self.ready = False
@@ -84,19 +85,21 @@ class DocumentMixin:
             return {'error': 'Belge açılamadı: ' + str(error)}
         return result
 
-    def _start_doc_prepare(self, doc):
+    def _start_doc_prepare(self, doc, push=None):
         """Metni cikarir (gerekirse gorsel modelle); embedding modeli varsa indeksler.
 
         Uzun taranmis PDF'ler (VISION_PAGES_ON_OPEN sayfadan fazla) acilista okunmaz;
-        'Hepsini hazirla'ya birakilir."""
+        'Hepsini hazirla'ya birakilir. `push(doc)`: durum degisince arayuze bildirir (F146: okuyucu
+        kitap sohbeti kendi olayini kullanir)."""
         log = lambda message: self._log('[Belge] ' + str(message))  # noqa: E731
+        push = push or self._push_doc
 
         reader = ['görü modeli']  # F91: secili OCR motorunun adi (cfg okununca)
 
         def progress(done, total):
             if not doc.ready:
                 doc.note = f'{reader[0][0].upper() + reader[0][1:]} ile okunuyor… {done}/{total}'
-                self._push_doc(doc)
+                push(doc)
 
         def work():
             entry = {'path': doc.path, 'kind': 'image' if doc.kind == 'image' else 'document',
@@ -135,25 +138,32 @@ class DocumentMixin:
                                 'Ayarlar → Kütüphane indeksi\'nden embedding modeli seçin.')
             except Exception as error:  # metin yoksa / okunamazsa sohbet kapali kalir
                 doc.note = 'Bu belgeye soru sorulamıyor: ' + str(error)
-            self._push_doc(doc)
+            push(doc)
 
         threading.Thread(target=work, name='aktar-doc-prepare', daemon=True).start()
 
     def doc_ask(self, question, think=None, template=None):
-        doc = self._doc
+        return self._ask_document(self._doc, question, think, template, self._push_doc)
+
+    def _ask_document(self, doc, question, think=None, template=None, push=None, extra='', before=None):
+        """Belge sohbetine soru (arka planda). `extra`: sablon talimatina eklenen metin; `before()`
+        sorudan hemen once cagrilir (F146: kitapta sayfa siniri)."""
         text = ' '.join(str(question or '').split())
         if doc is None or not text or not doc.ready or doc.asking or doc.session is None:
             return self._doc_chat(doc) if doc else None
         doc.asking = True
         doc.entries += [('user', text), ('pending', 'Cevap hazırlanıyor…')]
         instructions, name = chat_templates.instruction(template)
+        instructions = '\n'.join(part for part in (extra, instructions) if part)
 
         def work():
             turn, error = None, ''
             self._keep_chat_models()
             try:
+                if before:
+                    before()
                 turn = doc.session.ask(text, think=think, on_reasoning=reasoning_feed(
-                    lambda: doc.entries, lambda: self._push_doc(doc)),
+                    lambda: doc.entries, lambda: push(doc)),
                     instructions=instructions, template=name)
             except Exception as failure:  # baglanti/model hatasi sohbete yazilir
                 error = str(failure)
@@ -164,18 +174,20 @@ class DocumentMixin:
             if error:
                 self._log('[Belge] Cevap alınamadı: ' + error)
             doc.asking = False
-            self._push_doc(doc)
+            push(doc)
 
         threading.Thread(target=work, name='aktar-doc-ask', daemon=True).start()
         return self._doc_chat(doc)
 
     def doc_clear_chat(self):
         """Acik belgenin sohbetini ve kayitli gecmisini siler."""
-        doc = self._doc
+        return self._clear_document_chat(self._doc)
+
+    def _clear_document_chat(self, doc):
         if doc is None or doc.asking:
             return self._doc_chat(doc) if doc else None
         library.clear_chat(doc.key)
-        doc.entries = [('note', GREETING)]
+        doc.entries = [('note', doc.greeting)]
         doc.history = []
         if doc.session is not None:
             doc.session.history = []
@@ -222,8 +234,9 @@ class DocumentMixin:
         return True
 
     def _stop_document_for_close(self):
-        if self._doc is not None:
-            self._doc.cancelled.set()
+        for doc in (self._doc, getattr(self, '_book_chat', None)):   # F146: okuyucunun kitap sohbeti de
+            if doc is not None:
+                doc.cancelled.set()
 
 
 def renderer_size(renderer, index):

@@ -56,6 +56,9 @@ def index_path(video, session, cfg, base=None):
     visual = session.get('visual') or []
     if visual:  # F114: kare betimleri eklenince indeks yenilenir (betimsiz videolarin anahtari ayni kalir)
         parts.append(f'visual:{len(visual)}')
+    if session.get('speakers'):  # F146: konusmaci etiketleri (ve adlari) degisince de
+        import voice_split
+        parts.append('speakers:' + voice_split.signature(session['speakers']))
     key = digest('|'.join(parts))[:16]
     stem = re.sub(r'[^\w.-]+', '_', video.stem)[:40] or 'video'
     return index_dir(base) / f'{stem}.{key}.json'

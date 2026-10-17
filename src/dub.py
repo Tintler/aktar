@@ -9,7 +9,10 @@ Akis:
      `max_tempo`). Yine sigmazsa sonraki satirlar biraz kaydirilir; bosluklarda kayma sifirlanir.
   3. Satirlar tek bir dublaj izinde (WAV) zamanina yerlestirilir.
   4. FFmpeg ozgun sesi dublaj konusurken `background` duzeyine kisar (asendcmd ile yumusak gecis),
-     iki sesi karistirir; sonuc videonun yanina yazilir:
+     iki sesi karistirir. F146 'separate': ozgun ses once konusma ve muzik/efekt olarak ayrilir
+     (voice_split.py); muzik/efekt tam duzeyde kalir, yalnizca ozgun konusma kisilir. F146 konusmaci
+     ayrimi: satirlar konusmacilarina gore farkli seslerle okunur (her ses icin motor bir kez yuklenir).
+     Sonuc videonun yanina yazilir:
        - 'mkv': goruntu ve ozgun parcalar kopyalanir, dublaj ilk (varsayilan) ses parcasi olur;
        - 'm4a': yalniz karisik ses.
 Kaynak video SALT-OKUNUR. Is pencere icindeki is parcaciginda calisir; pencere kapaninca durur.
@@ -30,7 +33,8 @@ import media
 from app_core import GracefulStop
 
 FORMATS = ('mkv', 'm4a')
-DEFAULTS = {'background': 0.25, 'duck': True, 'max_tempo': 1.35, 'format': 'mkv', 'speed': 1.0, 'audio': None}
+DEFAULTS = {'background': 0.25, 'duck': True, 'max_tempo': 1.35, 'format': 'mkv', 'speed': 1.0, 'audio': None,
+            'separate': False, 'speakers': False}
 FADE = 0.25            # ozgun sesin kisilip acilma suresi (sn)
 FADE_STEPS = 5
 MERGE_GAP = 0.8        # bu kadardan kisa sessizliklerde ozgun ses kisik kalir
@@ -45,6 +49,8 @@ def options_of(values):
             options[key] = value
     options['background'] = min(1.0, max(0.0, float(options['background'] or 0)))
     options['duck'] = bool(options['duck'])
+    options['separate'] = bool(options['separate'])
+    options['speakers'] = bool(options['speakers'])
     options['max_tempo'] = min(2.0, max(1.0, float(options['max_tempo'] or 1)))
     options['speed'] = min(2.0, max(0.5, float(options['speed'] or 1)))
     options['format'] = options['format'] if options['format'] in FORMATS else 'mkv'
@@ -155,20 +161,27 @@ def atempo(frames, rate, tempo, folder):
         return clip.readframes(clip.getnframes())
 
 
-def mix_command(video, track, output, options, has_audio, duck_file=None):
-    """FFmpeg karistirma komutu. `track`: dublaj WAV'i; `duck_file`: calisma klasorundeki asendcmd dosyasi."""
+def mix_command(video, track, output, options, has_audio, duck_file=None, stems=None):
+    """FFmpeg karistirma komutu. `track`: dublaj WAV'i; `duck_file`: calisma klasorundeki asendcmd dosyasi;
+    `stems`: (ozgun konusma, muzik/efekt) dosyalari -- verilirse yalnizca konusma kisilir."""
     options = options_of(options)
     command = [media.ffmpeg_path(), '-hide_banner', '-nostdin', '-v', 'error', '-y', '-i', str(video), '-i', str(track)]
     dub = f'[1:a]aresample={MIX_RATE},aformat=channel_layouts=stereo[dub]'
+    stereo = f'aresample={MIX_RATE},aformat=channel_layouts=stereo'
     if has_audio:
-        original = f'0:{options["audio"]}' if options['audio'] is not None else '0:a:0'
         level = options['background']
         if options['duck'] and duck_file:
             duck = f'asendcmd=f={duck_file},volume@duck=1'
         else:
             duck = f'volume={level:.4f}'
-        graph = (f'[{original}]aresample={MIX_RATE},aformat=channel_layouts=stereo,{duck}[bg];{dub};'
-                 '[bg][dub]amix=inputs=2:duration=longest:normalize=0[out]')
+        if stems:
+            command += ['-i', str(stems[0]), '-i', str(stems[1])]
+            graph = (f'[2:a]{stereo},{duck}[voice];[3:a]{stereo}[music];{dub};'
+                     '[music][voice][dub]amix=inputs=3:duration=longest:normalize=0[out]')
+        else:
+            original = f'0:{options["audio"]}' if options['audio'] is not None else '0:a:0'
+            graph = (f'[{original}]{stereo},{duck}[bg];{dub};'
+                     '[bg][dub]amix=inputs=2:duration=longest:normalize=0[out]')
     else:
         graph = dub.replace('[dub]', '[out]')
     command += ['-filter_complex', graph]
@@ -186,10 +199,38 @@ def mix_command(video, track, output, options, has_audio, duck_file=None):
     return command + [str(output)]
 
 
+def resample(frames, rate, target, folder):
+    """16 bit mono PCM'i FFmpeg ile `target` Hz'e cevirir (farkli motorlarin sesleri ayni izde)."""
+    source, result = Path(folder) / 'rate-in.wav', Path(folder) / 'rate-out.wav'
+    with wave.open(str(source), 'wb') as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(rate)
+        out.writeframes(frames)
+    _run([media.ffmpeg_path(), '-hide_banner', '-nostdin', '-v', 'error', '-y', '-i', str(source),
+          '-ac', '1', '-ar', str(target), '-c:a', 'pcm_s16le', str(result)])
+    with wave.open(str(result)) as clip:
+        return clip.readframes(clip.getnframes())
+
+
+def voice_plan(lines, speakers, mapping):
+    """F146: her satirin sesi -- konusmacisinin `mapping`deki sesi ({'0': 'preset:x'}), yoksa None (ana ses)."""
+    import voice_split
+    turns = (speakers or {}).get('turns') or []
+    plan = []
+    for line in lines:
+        speaker = voice_split.speaker_of(line['start'], line['end'], turns) if turns else None
+        plan.append((mapping or {}).get(str(speaker)) or None if speaker is not None else None)
+    return plan
+
+
 def build(engines, video, segments, output, options=None, timing=None, language='tr', override=None,
-          duration=0.0, has_audio=True, can_speed=False, progress=None, cancelled=None, log=None):
+          duration=0.0, has_audio=True, can_speed=False, progress=None, cancelled=None, log=None,
+          plan=None, voices=None, load_voice=None, stems=None):
     """Dublaji yazar (bloklar). progress(done, total, stage): stage 'voice' (satir) ya da 'mix' (saniye).
-    Donen: {'output', 'lines', 'faster', 'shifted'}."""
+    F146: `plan` her satirin ses anahtari (None: ana ses), `voices` {anahtar: {'override', 'language',
+    'can_speed'}}, `load_voice(override, language)` motoru o sese hazirlar (bloklar); `stems` ayrilmis
+    (konusma, muzik/efekt) dosyalari. Donen: {'output', 'lines', 'faster', 'shifted', 'voices'}."""
     import clip   # klip kaydinin FFmpeg ilerleme okuyucusu
 
     options = options_of(options)
@@ -199,40 +240,50 @@ def build(engines, video, segments, output, options=None, timing=None, language=
         raise ValueError('Altyazıda seslendirilecek satır yok.')
     book = cache_id(video)
     room = slots(lines)
+    plan = list(plan or [])[:len(lines)]
+    plan += [None] * (len(lines) - len(plan))
+    main = {'override': override, 'language': language, 'can_speed': can_speed}
     folder = Path(tempfile.mkdtemp(prefix='aktar-dublaj-'))
-    voices, faster = [], 0
-    rate = None
+    voices_out, rates, faster, done = [b''] * len(lines), [None] * len(lines), 0, 0
+    order = list(dict.fromkeys(plan))   # her ses icin motor bir kez yuklenir
     try:
-        for index, line in enumerate(lines):
-            if cancelled and cancelled():
-                raise GracefulStop('Dublaj durduruldu.')
-            result = engines.say(line['text'], options['speed'], book, language, override)
-            if not result.get('audio'):
-                voices.append(b'')
-                continue
-            clip_rate, channels, width, frames = _clip(base64.b64decode(result['audio']))
-            if channels != 1 or width != 2:
-                raise RuntimeError('Ses motoru beklenmeyen biçimde ses döndürdü (16 bit mono değil).')
-            if rate is None:
-                rate = clip_rate
-            elif clip_rate != rate:
-                raise RuntimeError('Ses motoru satırlarda farklı örnekleme hızları döndürdü.')
-            length = _seconds(frames, rate)
-            need = length / room[index]
-            if need > 1.02:
-                tempo = min(options['max_tempo'], need)
-                if can_speed:
-                    quick = engines.say(line['text'], round(options['speed'] * tempo, 2), book, language, override)
-                    if quick.get('audio'):
-                        frames = _clip(base64.b64decode(quick['audio']))[3]
-                else:
-                    frames = atempo(frames, rate, tempo, folder)
-                faster += 1
-            voices.append(frames)
-            if progress:
-                progress(index + 1, len(lines), 'voice')
+        for key in order:
+            spec = (voices or {}).get(key) or main if key is not None else main
+            if load_voice and len(order) > 1:
+                load_voice(spec['override'], spec['language'])
+            for index in [i for i, item in enumerate(plan) if item == key]:
+                line = lines[index]
+                if cancelled and cancelled():
+                    raise GracefulStop('Dublaj durduruldu.')
+                result = engines.say(line['text'], options['speed'], book, spec['language'], spec['override'])
+                done += 1
+                if not result.get('audio'):
+                    continue
+                clip_rate, channels, width, frames = _clip(base64.b64decode(result['audio']))
+                if channels != 1 or width != 2:
+                    raise RuntimeError('Ses motoru beklenmeyen biçimde ses döndürdü (16 bit mono değil).')
+                length = _seconds(frames, clip_rate)
+                need = length / room[index]
+                if need > 1.02:
+                    tempo = min(options['max_tempo'], need)
+                    if spec['can_speed']:
+                        quick = engines.say(line['text'], round(options['speed'] * tempo, 2), book, spec['language'],
+                                            spec['override'])
+                        if quick.get('audio'):
+                            clip_rate, _channels, _width, frames = _clip(base64.b64decode(quick['audio']))
+                    else:
+                        frames = atempo(frames, clip_rate, tempo, folder)
+                    faster += 1
+                voices_out[index], rates[index] = frames, clip_rate
+                if progress:
+                    progress(done, len(lines), 'voice')
+        rate = next((item for item in rates if item), None)
         if rate is None:
             raise RuntimeError('Ses motoru hiçbir satır için ses üretmedi.')
+        for index, item in enumerate(rates):
+            if item and item != rate:
+                voices_out[index] = resample(voices_out[index], item, rate, folder)
+        voices = voices_out
         lengths = [_seconds(frames, rate) for frames in voices]
         placed = place([line['start'] for line in lines], lengths)
         shifted = sum(1 for at, line in zip(placed, lines) if at - line['start'] > 0.3)
@@ -261,7 +312,8 @@ def build(engines, video, segments, output, options=None, timing=None, language=
             'ses karıştırılıyor…')
         output = Path(output)
         partial = output.with_name(output.stem + '.part' + output.suffix)
-        command = mix_command(video, track.resolve(), partial.resolve(), options, has_audio, duck)
+        command = mix_command(video, track.resolve(), partial.resolve(), options, has_audio, duck,
+                              [Path(item).resolve() for item in stems] if stems and has_audio else None)
         total = float(duration or 0) or (written / rate)
         try:
             clip.run(command, total, cwd=str(folder), progress=lambda done, all_: progress and progress(done, all_, 'mix'),
@@ -285,7 +337,7 @@ def build(engines, video, segments, output, options=None, timing=None, language=
                 partial.unlink(missing_ok=True)
                 raise RuntimeError(str(again).replace('Klip kaydedilemedi', 'Dublaj kaydedilemedi')) from again
         os.replace(partial, output)
-        return {'output': str(output), 'lines': len(lines), 'faster': faster, 'shifted': shifted}
+        return {'output': str(output), 'lines': len(lines), 'faster': faster, 'shifted': shifted, 'voices': len(order)}
     finally:
         shutil.rmtree(folder, ignore_errors=True)
 

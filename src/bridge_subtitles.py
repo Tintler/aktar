@@ -8,6 +8,8 @@ Oynatici ve Altyazi Cevir sayfalarinin ortak araclari:
   - whisper_words: kelime zamanlari olmayan eski Whisper transkriptini yeniden cikarir.
   - clip_save: secilen araligi altyazili/altyazisiz klip olarak kaydeder.
   - dub_create: secili altyaziyi sesli okuma motoruyla seslendirip videoya dublaj parcasi ekler (dub.py).
+  - speakers_find / dub_speakers / speakers_rename (F146): konusmaci ayrimi (voice_split.py); dublajda
+    konusmaci basina ses, transkriptte ve soru-cevapta etiket.
 
 Altyazi kaynaklari oynaticinin anahtarlariyla verilir: 'stream:<index>', 'file:<yol>',
 'whisper', 'ocr:<index>'. Uzun isler tek bir arka plan is parcaciginda calisir ve 'subtool'
@@ -28,6 +30,7 @@ import subtitle
 import subtitle_export
 import subtitle_ocr
 import subtitle_sync
+import voice_split
 from app_core import GracefulStop, load_config, read
 from media import extract_subtitle, subtitle_streams
 
@@ -326,17 +329,69 @@ class SubtitleToolsMixin:
             self._push_player(player)
 
     # ------------------------------------------------------------------ dublaj (F141)
-    def dub_create(self, path, key, options=None, timing=None, voice=''):
+    def _dub_segments(self, path, key):
+        source = self._source(path, key)
+        if source.whisper:
+            return source.whisper['segments']
+        return qa.transcript_from_cues(subtitle.cues_of(source.kind, source.payload))
+
+    def _wait_voice(self, engines, language, device, override, cancel):
+        """Motoru verilen sese hazirlar (bloklar); durdurulursa GracefulStop."""
+        engines.load(language, device, override)
+        while engines.state == 'loading':
+            if cancel.is_set():
+                raise GracefulStop('Dublaj durduruldu.')
+            cancel.wait(0.2)
+        if engines.state != 'ready':
+            raise RuntimeError(engines.message or 'Ses motoru yüklenemedi.')
+
+    def _voice_spec(self, engines, ref, fallback_language='tr'):
+        override = self._voice_override(ref)
+        language = self._override_language(override, fallback_language)
+        engine_id, _voice = engines.choice(language, override)
+        can_speed = any(item['id'] == engine_id and item['speed'] for item in engines.engines())
+        return {'override': override, 'language': language, 'can_speed': can_speed}
+
+    def _auto_voices(self, speakers, main):
+        """Atanmamis konusmacilara farkli Turkce sesler: en cok konusan ana sesi alir, digerleri sirayla."""
+        specs = self._voice_specs()
+
+        def ready(value):   # kayitli onayar ya da her secenegi varsayilanli ses (klon gibi kayit isteyenler degil)
+            spec = specs.get(value)
+            return value.startswith('preset:') or (spec is not None and all(
+                str(option.get('default') or '').strip() for option in spec.get('options') or []))
+        same = {main}
+        if not str(main).startswith('preset:'):   # ana ses bos ya da motor sesiyse gercekte hangi ses oldugu
+            engine_id, voice_id = self._engines().choice('tr', self._voice_override(main))
+            same.add(f'{engine_id}/{voice_id}')
+        refs = [item['value'] for item in self.tts_voices()
+                if item.get('language') == 'tr' and item['value'] not in same and ready(item['value'])]
+        result, index = {}, 0
+        for number, item in enumerate(speakers):
+            if number == 0 or not refs:
+                result[str(item['id'])] = main or ''
+            else:
+                result[str(item['id'])] = refs[index % len(refs)]
+                index += 1
+        return result
+
+    def dub_create(self, path, key, options=None, timing=None, voice='', voices=None):
         """Secili altyaziyi seslendirip videonun yanina dublajli kopya (.dublaj.mkv) ya da ses (.m4a) yazar.
-        `voice`: '' (sesli okumanin Turkce sesi), 'preset:<kimlik>' ya da '<motor>/<ses>'."""
+        `voice`: '' (sesli okumanin Turkce sesi), 'preset:<kimlik>' ya da '<motor>/<ses>'.
+        F146: options.separate -> muzik/efekt korunur; options.speakers -> konusmaci basina ses
+        (`voices` {'0': ses}; verilmeyen konusmacilara farkli sesler otomatik atanir)."""
         path = Path(str(path))
         if not key:
             return {'error': 'Seslendirilecek altyazıyı seçin (CC menüsü).'}
+        options = dub.options_of(options)
+        if options['separate'] or options['speakers']:
+            ok, message = voice_split.available()
+            if not ok:
+                return {'error': message}
         try:
-            source = self._source(path, key)
+            segments = self._dub_segments(path, key)
         except (RuntimeError, ValueError, OSError) as error:
             return {'error': str(error)}
-        options = dub.options_of(options)
         override = self._voice_override(voice)
         language = self._override_language(override, 'tr')
         engines = self._engines()
@@ -344,36 +399,98 @@ class SubtitleToolsMixin:
         if engine_id is None:
             return {'error': 'Dublaj için kurulu ses motoru yok; Ayarlar → Ses → Sesli okuma bölümünden kurun.'}
         can_speed = any(item['id'] == engine_id and item['speed'] for item in engines.engines())
-        if source.whisper:
-            segments = source.whisper['segments']
-        else:
-            try:
-                segments = qa.transcript_from_cues(subtitle.cues_of(source.kind, source.payload))
-            except ValueError as error:
-                return {'error': str(error)}
         stem = path.stem + '.dublaj'
         target = _unique(path, stem, options['format'])
         player = getattr(self, '_player_video', None)
         info = player.info if player is not None and player.path == path and player.info else None
         device = self.ui_prefs().get('tts', {}).get('device', 'auto')
+        # '' otomatik (atanmaz), '=' ana ses, digerleri ses secimi
+        chosen = {str(k): (voice if str(v) == '=' else str(v)) for k, v in (voices or {}).items() if v}
+
+        def load_voice(cancel, progress):
+            def load(other, other_language):
+                progress(0, 0, 'engine')
+                self._wait_voice(engines, other_language, device, other, cancel)
+            return load
 
         def work(cancel, progress):
             probed = info or media_server.probe(path)
+            has_audio = bool(probed.get('audio'))
+            stems, plan, specs = None, None, None
+            if options['speakers']:
+                speakers = voice_split.diarize(path, options['audio'], log=self._log, progress=progress,
+                                               cancelled=cancel.is_set)
+                lines = dub.lines_of(segments, timing)
+                mapping = dict(self._auto_voices(voice_split.summary(speakers, lines), voice), **chosen)
+                plan = dub.voice_plan(lines, speakers, {k: v for k, v in mapping.items() if v and v != voice})
+                specs = {ref: self._voice_spec(engines, ref) for ref in set(plan) if ref}
+                self._log(f'Dublaj: {speakers["count"]} konuşmacı, {len(specs) + 1} ses.')
+            if options['separate'] and has_audio:
+                stems = voice_split.separate(path, options['audio'], log=self._log, progress=progress,
+                                             cancelled=cancel.is_set)
             progress(0, 0, 'engine')
-            engines.load(language, device, override)
-            while engines.state == 'loading':
-                if cancel.is_set():
-                    raise GracefulStop('Dublaj durduruldu.')
-                cancel.wait(0.2)
-            if engines.state != 'ready':
-                raise RuntimeError(engines.message or 'Ses motoru yüklenemedi.')
+            self._wait_voice(engines, language, device, override, cancel)
             self._log(f'Dublaj başlıyor: {path.name} ({len(segments)} satır) -> {target.name}')
             result = dub.build(engines, path, segments, target, options, timing, language, override,
-                               duration=probed.get('duration') or 0.0, has_audio=bool(probed.get('audio')),
-                               can_speed=can_speed, progress=progress, cancelled=cancel.is_set, log=self._log)
+                               duration=probed.get('duration') or 0.0, has_audio=has_audio,
+                               can_speed=can_speed, progress=progress, cancelled=cancel.is_set, log=self._log,
+                               plan=plan, voices=specs, stems=stems, load_voice=load_voice(cancel, progress))
             self._log('Dublaj kaydedildi: ' + result['output'])
             return dict(result, name=target.name)
         return self._start_tool('dub', path, work)
+
+    # ------------------------------------------------------------------ konusmacilar (F146)
+    def dub_speakers(self, path, key=None, timing=None):
+        """Konusmaci ayrimi hazirsa konusmacilar [{id, name, seconds, lines, sample}], yoksa bos liste."""
+        path = Path(str(path))
+        ok, message = voice_split.available()
+        try:
+            data = voice_split.load_speakers(path)
+        except OSError:
+            data = None
+        lines = []
+        if data and key:
+            try:
+                lines = dub.lines_of(self._dub_segments(path, key), timing)
+            except (RuntimeError, ValueError, OSError):
+                lines = []
+        return {'available': ok, 'message': message, 'ready': data is not None,
+                'speakers': voice_split.summary(data, lines)}
+
+    def speakers_find(self, path, audio=None, count=0):
+        """Konusmacilari (yeniden) ayirir: arka planda 'diarize' isi. `audio`: ses akisinin GLOBAL index'i,
+        `count`: konusmaci sayisi (0: otomatik)."""
+        path = Path(str(path))
+        ok, message = voice_split.available()
+        if not ok:
+            return {'error': message}
+        track = None if audio in (None, '') else int(audio)
+        count = max(0, min(20, int(count or 0)))
+
+        def work(cancel, progress):
+            data = voice_split.diarize(path, track, count, log=self._log, progress=progress,
+                                       cancelled=cancel.is_set, fresh=True)
+            self._after_speakers(path)
+            return {'speakers': data['count']}
+        return self._start_tool('diarize', path, work)
+
+    def speakers_rename(self, path, names):
+        path = Path(str(path))
+        try:
+            data = voice_split.save_names(path, names)
+        except (OSError, ValueError) as error:
+            return {'error': str(error)}
+        self._after_speakers(path)
+        return {'speakers': voice_split.summary(data)}
+
+    def _after_speakers(self, path):
+        """Konusmacilar degisti: kutuphane satiri (transkript etiketleri) yenilenir."""
+        refresh = getattr(self, '_refresh_entry', None)
+        if refresh is not None:
+            try:
+                refresh(path)
+            except Exception as error:  # kutuphane acik degilse onemsiz
+                self._log('Kütüphane satırı yenilenemedi: ' + str(error))
 
     # ------------------------------------------------------------------ klip
     def clip_save(self, path, start, end, options=None, key=None, timing=None, fmt='source', style=None):

@@ -396,7 +396,37 @@ def html_text(markup):
 
 
 def epub_pages(path):
-    """EPUB bolumleri okuma sirasiyla (spine); her bolum bir 'sayfa'."""
+    """EPUB bolumleri okuma sirasiyla (spine); her bolum bir 'sayfa'.
+
+    F146: numaralandirma okuyucununkiyle (book_reader.EpubBook) aynidir -- s.N okuyucuda N. bolum --
+    ve bos bolumler (kapak resmi vb.) bos sayfa olarak sirada kalir; icindekilerde baslangici olan
+    bolumun metni basligiyla baslar ("3. bolumde ne oldu?" sorulari icin)."""
+    try:
+        return _reader_epub_pages(path)
+    except Exception:  # okuyucunun acamadigi (bozuk) kitap: eski yol
+        return _spine_epub_pages(path)
+
+
+def _reader_epub_pages(path):
+    import book_reader
+    from epub_import import decode_document
+
+    book = book_reader.EpubBook(path)
+    titles = {}
+    for entry in book.toc:
+        titles.setdefault(entry['section'], entry['title'])
+    pages = []
+    with zipfile.ZipFile(path) as archive:
+        for number, section in enumerate(book.sections):
+            text = html_text(decode_document(archive.read(section['path']), section['path']))
+            title = ' '.join(str(titles.get(number, '')).split())
+            if text and title and not text.lstrip().startswith(title):
+                text = title + '\n\n' + text
+            pages.append(text)
+    return pages if any(pages) else ['']
+
+
+def _spine_epub_pages(path):
     with zipfile.ZipFile(path) as archive:
         container = ElementTree.fromstring(archive.read('META-INF/container.xml'))
         rootfile = next(container.iter(_CONTAINER + 'rootfile')).get('full-path')

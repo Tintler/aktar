@@ -42,6 +42,7 @@ LATEST_MIN_CHARS = 800  # her son belgeye en az bu kadar yer kalacak kadar belge
 UNDATED_MIN_SCORE = 10  # tarihsiz belge en az bu kadar tutar/bakiye izi tasirsa girer
 LATEST_SHARE = 0.5  # baglam butcesinin son belgelere ayrilan payi
 NOTES_SHARE = 0.1  # F113: baglam butcesinin kullanici notlarina ayrilan en fazla payi
+FOCUS_SHARE = 0.4  # F146: kitapta sorunun adini verdigi bolumlerin basina ayrilan pay
 _MONTH_WORDS = re.compile(r'\b(?:ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim'
                           r'|kasım|aralık|january|february|march|april|may|june|july|august'
                           r'|september|october|november|december)\w*')
@@ -174,18 +175,25 @@ class CollectionQA:
         self.base = base
         self.labels = video_labels(self.videos)
         self.history = []
-        self._lines = {}  # video anahtari -> (baslik, satirlar, sure)
+        self._lines = {}  # (video anahtari, sayfa siniri) -> (baslik, satirlar, sure)
+        # F146: kitapla sohbette "okudugum yere kadar": bu sayfadan sonrasi baglama girmez (None: sinir yok)
+        self.page_limit = None
+        # F146: sorunun adini verdigi bolumler (kitap): bu sayfalarin basi aramadan once baglama girer
+        self.focus_pages = []
 
     # yardimcilar
     def _video_lines(self, video):
-        key = _key(video)
+        key = (_key(video), self.page_limit)
         if key not in self._lines:
             session = search_index.primary_session(video, self.base)
             if session is None:
                 self._lines[key] = None
             else:
+                lines = qa.lines_of(session)
+                if self.page_limit is not None and qa.is_document(session):
+                    lines = [line for line in lines if line['start'] <= self.page_limit]
                 self._lines[key] = (session.get('title') or Path(video).stem,
-                                    qa.lines_of(session),
+                                    lines,
                                     float(session.get('duration') or 0.0),
                                     session['source'].get('kind') if qa.is_document(session)
                                     else False)
@@ -237,6 +245,14 @@ class CollectionQA:
         if sum(len(line['text']) + 12 for line in lines) > budget:
             return None
         return [{'video': str(self.videos[0]), 'start': lines[0]['start'], 'end': lines[-1]['end']}]
+
+    def focus_hits(self, cfg):
+        """F146: tek belgede `focus_pages` sayfalarinin basi (butcenin FOCUS_SHARE kadari, sayfalara bolunur)."""
+        pages = [page for page in self.focus_pages if self.page_limit is None or page <= self.page_limit]
+        if len(self.videos) != 1 or not pages:
+            return []
+        share = int(int(cfg.get('qa_context_chars', 24000)) * FOCUS_SHARE) // len(pages)
+        return [{'video': str(self.videos[0]), 'start': page, 'end': page, 'chars': share} for page in pages]
 
     def latest_documents(self, question, cfg=None):
         """Guncel durum sorusunda (F95) her serinin en son belgesi. Donen: [(tarih, yol)].
@@ -336,6 +352,11 @@ class CollectionQA:
             lines = data[1]
             indexes = [index for index, line in enumerate(lines)
                        if line['end'] >= hit['start'] and line['start'] <= hit['end']]
+            if data[3] and hit.get('text') and sum(len(lines[i]['text']) + 12 for i in indexes) > budget // 4:
+                # F146: tek sayfasi cok uzun belge (EPUB bolumu): sayfanin tamami butceyi asar ve atlanirdi;
+                # yalnizca isabet alan arama parcasinin satirlari girer.
+                inside = [index for index in indexes if lines[index]['text'] in hit['text']]
+                indexes = inside or indexes
             if hit.get('chars'):  # F96: buyuk sayfanin yalnizca basi (tablo basligi + toplamlar)
                 kept, size = [], 0
                 for index in indexes:
@@ -402,7 +423,7 @@ class CollectionQA:
         cfg = qa_config(self.config_provider(), think)  # F72: soru-cevap modeli
         client = client or Client(cfg, log=self.log)
         latest = [] if len(self.videos) == 1 else self.latest_documents(question, cfg)
-        hits = self.whole_hits(cfg) or (self.latest_hits(latest, cfg) + search_index.search(
+        hits = self.whole_hits(cfg) or (self.focus_hits(cfg) + self.latest_hits(latest, cfg) + search_index.search(
             self.videos, self._query(question), cfg, client, limit=HIT_LIMIT, base=self.base,
             log=self.log))
         if not hits:

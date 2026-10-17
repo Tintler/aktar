@@ -1,14 +1,15 @@
 // Altyazi araclari ve klip (F118): arka uctaki tek is yuvasinin durumu (bridge_subtitles 'subtool' olayi).
-// job: {kind: 'align'|'ocr'|'whisper'|'clip', path, state, stage, progress: {done, total}, message, result}
+// job: {kind: 'align'|'ocr'|'whisper'|'clip'|'dub'|'diarize', path, state, stage, progress: {done, total}, message, result}
 import { on } from './api.js';
 import { act, toast } from './state.svelte.js';
 import { confirm, notice } from './confirm.svelte.js';
 
 export const subtool = $state({ job: null });
 
-export const KIND_NAMES = { align: 'Otomatik hizalama', ocr: 'Altyazı OCR', whisper: 'Kelime zamanları', clip: 'Klip kaydı', dub: 'Dublaj' };
+export const KIND_NAMES = { align: 'Otomatik hizalama', ocr: 'Altyazı OCR', whisper: 'Kelime zamanları', clip: 'Klip kaydı', dub: 'Dublaj', diarize: 'Konuşmacı ayrımı' };
 const STAGE_NAMES = { whisper: 'Konuşmadan metin', frames: 'Altyazı görüntüleri', ocr: 'OCR', align: 'Hizalanıyor', clip: 'Klip kodlanıyor',
-  engine: 'Ses motoru hazırlanıyor', voice: 'Seslendiriliyor', mix: 'Ses karıştırılıyor' };
+  engine: 'Ses motoru hazırlanıyor', voice: 'Seslendiriliyor', mix: 'Ses karıştırılıyor',
+  download: 'Model indiriliyor', separate: 'Konuşma ve müzik ayrılıyor', diarize: 'Konuşmacılar ayrılıyor' };
 const listeners = new Set();
 
 // Is bitince (done/error/cancelled) cagrilir: fn(job). Donen fonksiyon dinlemeyi birakir.
@@ -41,6 +42,8 @@ on('subtool', async (data) => {
     toast(`Altyazı okundu (${result.lines} satır): ${result.name}`, 'ok');
   } else if (data.kind === 'whisper') {
     toast('Kelime zamanları hazır.', 'ok');
+  } else if (data.kind === 'diarize') {
+    toast(`Konuşmacılar ayrıldı: ${result.speakers} konuşmacı.`, 'ok');
   }
 });
 

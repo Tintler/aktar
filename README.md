@@ -31,7 +31,8 @@ Videolarınızı, belgelerinizi ve kitaplarınızı **yerel bir yapay zeka model
 - **Altyazı çevirisi:** SRT, ASS, SSA ve VTT biçimleri, zamanlamalar ve ASS etiketleri korunur. Dizi bölümleri arasında terim sözlüğü ve isim tutarlılığı sağlanır.
 - **Altyazısız videolar:** faster-whisper ile konuşma yerelde metne çevrilir (isteğe bağlı, NVIDIA GPU desteğiyle).
 - **Altyazı araçları:** Kaymış altyazı G/H ile, iki noktadan ya da Whisper'a göre otomatik hizalanır (kare hızı farkı dahil). Karaoke ASS (`\k`), kelime vurgulu SRT ve JSON çıktısı alınır. PGS/VobSub görüntü altyazıları OCR ile metne çevrilir.
-- **Türkçe dublaj:** Seçili altyazı ses motoruyla seslendirilir ve videoya varsayılan ses parçası olarak eklenir; dublaj konuşurken özgün ses kısılır.
+- **Türkçe dublaj:** Seçili altyazı ses motoruyla seslendirilir ve videoya varsayılan ses parçası olarak eklenir. İsteğe bağlı olarak müzik ve efektler ayrılıp korunur (yalnızca özgün konuşma kısılır) ve her konuşmacı ayrı bir sesle okunur.
+- **Konuşmacı ayrımı:** Videoda kimin ne zaman konuştuğu bulunur; transkript ve soru-cevap `K1:`, `K2:` (ya da verdiğiniz adlarla) etiketlenir.
 - **Klip:** Seçilen aralık MP4/MKV/GIF ya da ses olarak kaydedilir; altyazı ayrı dosya, gömülü ya da görüntüye yakılmış (karaoke dahil) eklenebilir.
 - **Yerleşik oynatıcı:** MKV, AC3/DTS gibi biçimler FFmpeg (ya da libmpv) ile oynatılır.
 
@@ -39,6 +40,7 @@ Videolarınızı, belgelerinizi ve kitaplarınızı **yerel bir yapay zeka model
 
 - **Kitap Çevir:** DRM'siz İngilizce EPUB'ları bölüm bölüm Türkçeye çevirir; terim sözlüğü, kalite denetimleri, kaldığı yerden sürme ve Türkçe EPUB çıktısı.
 - **Okuma:** EPUB kitaplığı; içindekiler, yer imleri, yazı ve sayfa ayarları, okuma konumu.
+- **Kitaba sor:** Okurken kitaba soru sorun ("3. bölümde ne oldu?"); cevaptaki bölüm atfı kitabı o bölüme götürür. **Okuduğum yere kadar** seçiliyse sonraki bölümler modele hiç gitmez.
 - **Sesli okuma ve sesli kitap:** Kitaplar yerel ses motorlarıyla (EMA Lightning, VoxCPM) cümle cümle okunur; tarifle tasarlanan ya da kayıttan klonlanan sesler kullanılabilir. Kitabın tamamı bölüm işaretli M4B ya da bölüm başına MP3 olarak kaydedilir.
 - **PDF'den kitap:** Taranmış PDF'ler OCR ile okunur, üst/alt bilgilerden ve bölünmüş kelimelerden temizlenir, bölümlere ayrılır ve EPUB'a dönüştürülür; sonuç **Gözden geçir** ekranında sayfa görüntüsünün yanında düzeltilir.
 
@@ -55,7 +57,7 @@ Videolarınızı, belgelerinizi ve kitaplarınızı **yerel bir yapay zeka model
 - Python 3.10+ ve Node.js (kaynak koddan çalıştırmak için)
 - FFmpeg (`bin\` klasörüne, bkz. [bin/README.txt](bin/README.txt))
 - Yerel sunucusu açık ve bir model yüklü [LM Studio](https://lmstudio.ai)
-- İsteğe bağlı: Whisper (`requirements-whisper.txt`), sesli okuma motorları (`requirements-tts.txt`), Tesseract OCR
+- İsteğe bağlı: Whisper ile ses ayırma ve konuşmacı ayrımı (`requirements-whisper.txt`), sesli okuma motorları (`requirements-tts.txt`), Tesseract OCR
 
 ---
 

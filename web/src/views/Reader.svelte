@@ -9,6 +9,7 @@
   import { player, play, pause, resume, stop, step, setSpeed, setSentences, setHooks, setPauses } from '../lib/player.svelte.js';
   import { resolvePauses, pauseAfter } from '../lib/pauses.js';
   import VoicePicker from '../components/VoicePicker.svelte';
+  import BookChat from '../components/BookChat.svelte';
 
   let { onclose } = $props();
 
@@ -17,6 +18,7 @@
   let loading = $state(false);
   let panel = $state('toc');          // 'toc' | 'bookmarks' | null
   let showAa = $state(false);
+  let chatOpen = $state(false);       // F146: Kitaba sor paneli
   let pageWrap = $state();
   let article = $state();
   let saveTimer = null;
@@ -379,6 +381,7 @@
       <button class="icon-btn" class:on={bookmarkHere} title={bookmarkHere ? 'Yer imini kaldır' : 'Yer imi ekle'} onclick={toggleBookmark}>
         <Icon name={bookmarkHere ? 'bookmarkOn' : 'bookmark'} /></button>
       <button class="icon-btn aa-btn" class:on={showAa} title="Görünüm" onclick={() => (showAa = !showAa)}><Icon name="type" /></button>
+      <button class="icon-btn" class:on={chatOpen} title="Kitaba sor" onclick={() => (chatOpen = !chatOpen)}><Icon name="message" /></button>
     </div>
 
     {#if showAa}
@@ -471,6 +474,7 @@
           {/if}
         </article>
       </div>
+      {#if chatOpen}<BookChat {book} {section} ongo={(n) => load(n)} onclose={() => (chatOpen = false)} />{/if}
     </div>
 
     <div class="player">
