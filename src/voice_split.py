@@ -201,6 +201,31 @@ def label(segments, data):
     return result
 
 
+def sample_turn(data, speaker, max_seconds=5.0):
+    """F148: konusmacinin ornek parcasi -- en uzun konusmasi (ust uste binen konusma az olsun diye), en fazla
+    `max_seconds`. None: konusmaci yok."""
+    turns = [turn for turn in (data or {}).get('turns') or [] if turn['speaker'] == speaker]
+    if not turns:
+        return None
+    best = max(turns, key=lambda turn: turn['end'] - turn['start'])
+    return {'start': best['start'], 'end': min(best['end'], best['start'] + max_seconds)}
+
+
+def clip_base64(video, start, end, audio_track=None):
+    """Videonun sesinden [start, end] araligi: 22 kHz mono WAV, base64 (arayuzde calinir)."""
+    import base64
+    import tempfile
+    track = '0:a:0' if audio_track is None else f'0:{int(audio_track)}'
+    with tempfile.TemporaryDirectory(prefix='aktar-ornek-') as folder:
+        target = Path(folder) / 'ornek.wav'
+        result = media._run([media.ffmpeg_path(), '-v', 'error', '-y', '-ss', f'{max(0.0, float(start)):.2f}',
+                             '-t', f'{max(0.3, float(end) - float(start)):.2f}', '-i', str(video), '-map', track,
+                             '-vn', '-ac', '1', '-ar', '22050', '-c:a', 'pcm_s16le', str(target)])
+        if result.returncode != 0 or not target.exists():
+            raise RuntimeError('Örnek ses çıkarılamadı: ' + (result.stderr or '').strip()[-300:])
+        return base64.b64encode(target.read_bytes()).decode('ascii')
+
+
 def signature(data):
     """Konusmaci verisinin kisa imzasi (arama indeksi anahtari icin; adlar degisince de degisir)."""
     if not data or not data.get('turns'):

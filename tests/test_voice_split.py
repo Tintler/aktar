@@ -82,6 +82,12 @@ class PureTests(unittest.TestCase):
                          [(0, 'K1', 1, 'Merhaba'), (1, 'K2', 1, 'Selam')])
         self.assertEqual(result[0]['seconds'], 5.0)
 
+    def test_sample_turn_takes_longest_turn_capped(self):
+        turns = TURNS + [{'start': 20.0, 'end': 32.0, 'speaker': 1}]
+        self.assertEqual(voice_split.sample_turn({'turns': turns}, 1), {'start': 20.0, 'end': 25.0})
+        self.assertEqual(voice_split.sample_turn({'turns': turns}, 0), {'start': 0.0, 'end': 4.0})
+        self.assertIsNone(voice_split.sample_turn({'turns': turns}, 7))
+
     def test_signature_changes_with_names(self):
         data = {'turns': TURNS, 'count': 2, 'names': {}}
         self.assertNotEqual(voice_split.signature(data), voice_split.signature(dict(data, names={'0': 'Ali'})))

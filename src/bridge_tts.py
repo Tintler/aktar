@@ -87,7 +87,9 @@ class TtsMixin:
         for value, spec in specs.items():
             name = spec.get('name') or value
             result.append({'value': value, 'label': spec['engine_name'] if name == spec['engine_name'] else f'{spec["engine_name"]} · {name}',
-                           'group': 'Ses motorları', 'language': spec.get('language', 'tr')})
+                           'group': 'Ses motorları', 'language': spec.get('language', 'tr'),
+                           # F148: tarif/kayit isteyen ses (kayitli ses olarak ayarlanir; dublaj konusmacilarinda gizli)
+                           'configurable': bool(spec.get('options'))})
         return result
 
     # ------------------------------------------------------------------ sesli kitap (F141)

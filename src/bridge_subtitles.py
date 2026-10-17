@@ -356,10 +356,9 @@ class SubtitleToolsMixin:
         """Atanmamis konusmacilara farkli Turkce sesler: en cok konusan ana sesi alir, digerleri sirayla."""
         specs = self._voice_specs()
 
-        def ready(value):   # kayitli onayar ya da her secenegi varsayilanli ses (klon gibi kayit isteyenler degil)
+        def ready(value):   # kayitli onayar ya da ayar istemeyen motor sesi (tarif/klon kayitli sesle kullanilir)
             spec = specs.get(value)
-            return value.startswith('preset:') or (spec is not None and all(
-                str(option.get('default') or '').strip() for option in spec.get('options') or []))
+            return value.startswith('preset:') or (spec is not None and not spec.get('options'))
         same = {main}
         if not str(main).startswith('preset:'):   # ana ses bos ya da motor sesiyse gercekte hangi ses oldugu
             engine_id, voice_id = self._engines().choice('tr', self._voice_override(main))
@@ -472,6 +471,23 @@ class SubtitleToolsMixin:
             self._after_speakers(path)
             return {'speakers': data['count']}
         return self._start_tool('diarize', path, work)
+
+    def speakers_sample(self, path, speaker, audio=None):
+        """F148: konusmacinin ozgun sesinden kisa ornek (kadin mi erkek mi anlasilsin): {'audio': base64 WAV}."""
+        path = Path(str(path))
+        try:
+            data = voice_split.load_speakers(path)
+            turn = voice_split.sample_turn(data, int(speaker))
+        except (OSError, ValueError, TypeError) as error:
+            return {'error': str(error)}
+        if turn is None:
+            return {'error': 'Bu konuşmacının konuştuğu yer bulunamadı.'}
+        track = None if audio in (None, '') else int(audio)
+        try:
+            return {'audio': voice_split.clip_base64(path, turn['start'], turn['end'], track),
+                    'start': turn['start'], 'end': turn['end']}
+        except (RuntimeError, ValueError, OSError) as error:
+            return {'error': str(error)}
 
     def speakers_rename(self, path, names):
         path = Path(str(path))

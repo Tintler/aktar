@@ -37,12 +37,42 @@
     const result = await call('speakers_rename', path, { ...Object.fromEntries((speakerInfo?.speakers ?? []).map((s) => [String(s.id), s.name])), [String(id)]: name });
     if (result && !result.error) loadSpeakers();
   }
+  // F148: konusmacinin ozgun sesinden kisa ornek (kadin mi erkek mi anlasilsin)
+  let sample = $state({ id: null, loading: false });
+  let player = null;
+  function stopSample() {
+    player?.pause();
+    player = null;
+    sample = { id: null, loading: false };
+  }
+  async function playSample(id) {
+    const same = sample.id === id;
+    stopSample();
+    if (same) return;
+    sample = { id, loading: true };
+    const result = await act('speakers_sample', path, id, audio);
+    if (sample.id !== id) return;
+    if (!result?.audio) return stopSample();
+    player = new Audio('data:audio/wav;base64,' + result.audio);
+    player.onended = stopSample;
+    sample = { id, loading: false };
+    player.play().catch(stopSample);
+  }
+  $effect(() => stopSample);
   const fmtSeconds = (s) => (s >= 60 ? `${Math.floor(s / 60)} dk ${Math.round(s % 60)} sn` : `${Math.round(s)} sn`);
   let voices = $state([]);
-  call('tts_voices').then((list) => { if (Array.isArray(list)) voices = list.filter((v) => v.language === 'tr'); });
+  let voicesLoaded = $state(false);
+  call('tts_voices').then((list) => {
+    if (Array.isArray(list)) voices = list.filter((v) => v.language === 'tr');
+    voicesLoaded = true;
+  });
+  // F148: konusmacilara tarif/kayit isteyen motor sesleri sunulmaz (onlar kayitli ses olarak ayarlanip kullanilir)
+  const speakerVoiceList = $derived(voices.filter((v) => !v.configurable));
+  const speakerGroups = $derived([...new Set(speakerVoiceList.map((v) => v.group))]);
   const groups = $derived([...new Set(voices.map((v) => v.group))]);
   const busy = $derived(!!subtool.job);
-  const noEngine = $derived(!app.engines.some((e) => e.mode && e.voices.some((v) => v.language === 'tr')));
+  // F148: app.engines yalnizca Ayarlar acilinca yuklenir; kontrol bu pencerenin kendi ses listesinden yapilir
+  const noEngine = $derived(voicesLoaded && !voices.length);
 
   const TEMPOS = [[1, 'Hızlandırma (satır kayabilir)'], [1.2, 'En fazla 1,2×'], [1.35, 'En fazla 1,35×'], [1.5, 'En fazla 1,5×'], [1.75, 'En fazla 1,75×']];
   const SPEEDS = [0.9, 1, 1.1, 1.2];
@@ -115,14 +145,16 @@
         <div class="speakers">
           {#each speakerInfo.speakers as s (s.id)}
             <div class="speaker">
+              <button class="icon-btn sm play" title={sample.id === s.id ? 'Durdur' : 'Özgün sesinden dinle'} onclick={() => playSample(s.id)}>
+                <Icon name={sample.id === s.id ? (sample.loading ? 'loader' : 'stop') : 'play'} size={14} spin={sample.id === s.id && sample.loading} /></button>
               <input class="field name" value={s.name} maxlength="40" title="Konuşmacının adı (transkriptte ve soru-cevapta da görünür)"
                 onchange={(e) => rename(s.id, e.currentTarget.value)} />
               <select class="field" bind:value={speakerVoices[String(s.id)]}>
                 <option value="">Otomatik</option>
                 <option value="=">Ana ses</option>
-                {#each groups as group}
+                {#each speakerGroups as group}
                   <optgroup label={group}>
-                    {#each voices.filter((v) => v.group === group) as v}<option value={v.value}>{v.label}</option>{/each}
+                    {#each speakerVoiceList.filter((v) => v.group === group) as v}<option value={v.value}>{v.label}</option>{/each}
                   </optgroup>
                 {/each}
               </select>
@@ -173,8 +205,9 @@
   .grow { flex: 1; font-size: 12.5px; }
   input[type='range'] { width: 100%; }
   .speakers { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow: auto; }
-  .speaker { display: grid; grid-template-columns: 120px 1fr; gap: 4px 8px; align-items: center; }
-  .speaker .meta { grid-column: 2; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .speaker { display: grid; grid-template-columns: 30px 110px 1fr; gap: 4px 8px; align-items: center; }
+  .speaker .play { width: 30px; height: 30px; }
+  .speaker .meta { grid-column: 3; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .find { display: flex; gap: 8px; align-items: center; }
   .find .count { width: auto; }
 </style>
