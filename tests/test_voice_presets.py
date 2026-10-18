@@ -14,7 +14,13 @@ from pathlib import Path
 from unittest import mock
 
 import bridge
+import media
 import voice_presets
+
+try:
+    FFMPEG = media.ffmpeg_path()
+except RuntimeError:
+    FFMPEG = None
 
 VOICES = {
     'ema-lightning/default': {'id': 'default', 'name': 'EMA', 'language': 'tr', 'options': []},
@@ -118,6 +124,7 @@ class BridgePresetTests(unittest.TestCase):
         self.assertEqual(self.bridge.tts_preset_delete(ident)['active'], '')
         self.assertIn('error', self.bridge.tts_preset_apply(ident))
 
+    @unittest.skipUnless(FFMPEG, 'FFmpeg yok')
     def test_preview_of_clone_preset_plays_its_recording(self):
         # F149: klon kaydi olan kayitli ses motor yuklenmeden kendi kaydindan dinletilir
         import wave

@@ -159,7 +159,8 @@ class DubVoicesTests(unittest.TestCase):
         self.assertEqual(plan, [None, 'preset:kadin', None])
         self.assertEqual(dub.voice_plan(lines, None, {'1': 'x'}), [None, None, None])
 
-    def test_mix_with_stems_ducks_only_speech(self):
+    @mock.patch.object(media, 'ffmpeg_path', return_value='ffmpeg')
+    def test_mix_with_stems_ducks_only_speech(self, _ffmpeg):
         command = dub.mix_command('v.mkv', 'd.wav', 'o.mkv', {'audio': 3}, True, 'duck.cmd', ('voc.m4a', 'bg.m4a'))
         graph = command[command.index('-filter_complex') + 1]
         self.assertIn('voc.m4a', command)

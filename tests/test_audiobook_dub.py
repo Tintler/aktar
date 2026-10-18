@@ -14,6 +14,7 @@ import unittest
 import wave
 from array import array
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'src'))
@@ -161,7 +162,8 @@ class DubPureTests(unittest.TestCase):
         self.assertEqual((options['background'], options['max_tempo'], options['format'], options['audio']), (1.0, 1.0, 'mkv', 2))
         self.assertNotIn('x', options)
 
-    def test_mix_command_keeps_original_tracks_and_marks_dub_default(self):
+    @mock.patch.object(media, 'ffmpeg_path', return_value='ffmpeg')
+    def test_mix_command_keeps_original_tracks_and_marks_dub_default(self, _ffmpeg):
         command = dub.mix_command('v.mkv', 'd.wav', 'o.mkv', {'audio': 3}, True, 'duck.cmd')
         graph = command[command.index('-filter_complex') + 1]
         self.assertIn('[0:3]', graph)

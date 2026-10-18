@@ -3,6 +3,7 @@
     <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
     <img src="assets/logo-light.svg" alt="Aktar" width="190">
   </picture>
+  <p><a href="https://github.com/Tintler/aktar/actions/workflows/tests.yml"><img src="https://github.com/Tintler/aktar/actions/workflows/tests.yml/badge.svg?branch=master" alt="Testler"></a></p>
 </div>
 
 ![aktar arayüzü](assets/preview.png)
