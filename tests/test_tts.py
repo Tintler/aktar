@@ -5,6 +5,7 @@ _sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / 'src'))
 import base64
 import importlib.util
 import io
+import itertools
 import json
 from pathlib import Path
 import shutil
@@ -18,6 +19,8 @@ import zipfile
 
 from bridge import Bridge
 from tts import Engines, Worker, language_key
+
+PACKAGE_NUMBERS = itertools.count()
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -230,7 +233,8 @@ class EnginesTests(unittest.TestCase):
                 archive.writestr(top + '_internal/lib.dll', b'x' * 10)
             for name, data in (extra or {}).items():
                 archive.writestr(name, data)
-        path = Path(self.temp.name) / f'{engine_id}-{time.time_ns()}.zip'
+        # time_ns() Windows'ta art arda cagrilarda ayni olabilir; ayni ad onceki paketi ezerdi.
+        path = Path(self.temp.name) / f'{engine_id}-{next(PACKAGE_NUMBERS)}.zip'
         path.write_bytes(buffer.getvalue())
         return path
 
