@@ -23,9 +23,9 @@ jobs:
         os: [windows-latest, ubuntu-latest]
         python: ['3.12', '3.14']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
 
@@ -44,9 +44,16 @@ jobs:
         run: choco install ffmpeg -y --no-progress
 
       - name: Testler
+        shell: bash
         env:
           PYTHONIOENCODING: utf-8
-        run: python -m unittest discover -s tests
+        run: python -m unittest discover -s tests 2>&1 | tee test-output.txt
+
+      # Loglar oturum acmadan gorunmez; basarisiz testlerin ozeti herkese acik not olarak yazilir.
+      - name: Basarisiz testleri not olarak goster
+        if: failure()
+        shell: bash
+        run: python tools/ci_annotate.py test-output.txt
 
   web:
     name: Arayuz derlemesi
@@ -55,9 +62,9 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
