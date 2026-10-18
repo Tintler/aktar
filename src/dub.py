@@ -3,13 +3,16 @@ parcasi olarak ekler.
 
 Akis:
   1. Her altyazi satiri seslendirilir (tts.Engines.say; video basina onbellek, durdurulup yeniden
-     baslatilinca hazir satirlar tekrar uretilmez).
+     baslatilinca hazir satirlar tekrar uretilmez). F149 'normalize': her satirin sesi ayni konusma
+     duzeyine getirilir (farkli kayitli sesler/motorlar arasinda duzey farki kalmaz).
   2. Satirin sesi kendi yerine (bir sonraki satira kadar) sigmazsa hizlandirilir: motor hiz
      destekliyorsa daha hizli yeniden okunur, yoksa FFmpeg atempo ile sikistirilir (en fazla
      `max_tempo`). Yine sigmazsa sonraki satirlar biraz kaydirilir; bosluklarda kayma sifirlanir.
+     F149 'overlap': hizlandirma ve kaydirma yapilmaz; cakisan satirlar kendi zamaninda ust uste calar.
   3. Satirlar tek bir dublaj izinde (WAV) zamanina yerlestirilir.
   4. FFmpeg ozgun sesi dublaj konusurken `background` duzeyine kisar (asendcmd ile yumusak gecis),
-     iki sesi karistirir. F146 'separate': ozgun ses once konusma ve muzik/efekt olarak ayrilir
+     iki sesi karistirir (F149: kisma araliklari altyazi satirlarinin zamanini da kapsar; dublaj ozgun
+     konusmadan kisa kalinca ozgun konusmanin kalani tam duzeyde duyuluyordu). F146 'separate': ozgun ses once konusma ve muzik/efekt olarak ayrilir
      (voice_split.py); muzik/efekt tam duzeyde kalir, yalnizca ozgun konusma kisilir. F146 konusmaci
      ayrimi: satirlar konusmacilarina gore farkli seslerle okunur (her ses icin motor bir kez yuklenir).
      Sonuc videonun yanina yazilir:
@@ -22,11 +25,15 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import math
+import operator
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import wave
+from array import array
 from pathlib import Path
 
 import media
@@ -34,12 +41,16 @@ from app_core import GracefulStop
 
 FORMATS = ('mkv', 'm4a')
 DEFAULTS = {'background': 0.25, 'duck': True, 'max_tempo': 1.35, 'format': 'mkv', 'speed': 1.0, 'audio': None,
-            'separate': False, 'speakers': False}
+            'separate': False, 'speakers': False, 'normalize': False, 'overlap': False}
 FADE = 0.25            # ozgun sesin kisilip acilma suresi (sn)
 FADE_STEPS = 5
 MERGE_GAP = 0.8        # bu kadardan kisa sessizliklerde ozgun ses kisik kalir
 SLOT_TAIL = 0.6        # satirin sesi, sonraki satira bosluk varsa bitisinden bu kadar tasabilir
 MIX_RATE = 48000
+DUCK_PAD = 0.2         # ozgun konusma altyazi satirinin bitisinden biraz tasabilir
+NORM_RMS = 32767 * 10 ** (-20 / 20)       # F149: konusma duzeyi hedefi (-20 dBFS; sessiz yerler sayilmaz)
+NORM_SILENCE = 32767 * 10 ** (-45 / 20)
+NORM_GAIN = (0.125, 8.0)
 
 
 def options_of(values):
@@ -51,6 +62,8 @@ def options_of(values):
     options['duck'] = bool(options['duck'])
     options['separate'] = bool(options['separate'])
     options['speakers'] = bool(options['speakers'])
+    options['normalize'] = bool(options['normalize'])
+    options['overlap'] = bool(options['overlap'])
     options['max_tempo'] = min(2.0, max(1.0, float(options['max_tempo'] or 1)))
     options['speed'] = min(2.0, max(0.5, float(options['speed'] or 1)))
     options['format'] = options['format'] if options['format'] in FORMATS else 'mkv'
@@ -113,6 +126,90 @@ def regions(placed, durations, gap=MERGE_GAP):
         else:
             merged.append([at, end])
     return [(a, b) for a, b in merged]
+
+
+def duck_spans(lines, placed, durations, pad=DUCK_PAD):
+    """Ozgun sesin kisilacagi araliklar: dublajin konustugu yerler ve altyazi satirlarinin kendisi."""
+    starts = [at for at, length in zip(placed, durations) if length > 0]
+    lengths = [length for length in durations if length > 0]
+    for line in lines:
+        starts.append(line['start'])
+        lengths.append(max(0.0, line['end'] - line['start']) + pad)
+    return regions(starts, lengths)
+
+
+def _samples(frames):
+    samples = array('h')
+    samples.frombytes(frames)
+    if sys.byteorder == 'big':   # WAV PCM kucuk sonludur
+        samples.byteswap()
+    return samples
+
+
+def _pcm(samples):
+    if sys.byteorder == 'big':
+        samples.byteswap()
+    return samples.tobytes()
+
+
+def normalize(frames, rate, target=NORM_RMS):
+    """F149: 16 bit mono PCM'in konusma duzeyini `target` RMS'e getirir. 20 ms'lik sessiz pencereler
+    sayilmaz; tepe kirpilmaz, kazanc NORM_GAIN ile sinirlidir."""
+    samples = _samples(frames)
+    if not samples:
+        return frames
+    window = max(1, int(rate) // 50)
+    floor = NORM_SILENCE ** 2
+    active = []
+    for begin in range(0, len(samples), window):
+        chunk = samples[begin:begin + window]
+        energy = sum(map(operator.mul, chunk, chunk)) / len(chunk)
+        if energy > floor:
+            active.append(energy)
+    if not active:
+        return frames
+    rms = math.sqrt(sum(active) / len(active))
+    peak = max(max(samples), -min(samples), 1)
+    gain = max(NORM_GAIN[0], min(target / rms, 0.97 * 32767 / peak, NORM_GAIN[1]))
+    if abs(gain - 1) < 0.03:
+        return frames
+    return _pcm(array('h', [int(value * gain) for value in samples]))
+
+
+def layers(placed, clips, rate):
+    """Seslerin izdeki yerleri: sirali, cakismasiz [(baslangic_ornegi, PCM)]; F149 cakisan sesler toplanir."""
+    items = sorted(((int(round(at * rate)), frames) for at, frames in zip(placed, clips) if frames),
+                   key=lambda item: item[0])
+    groups = []
+    for start, frames in items:
+        end = start + len(frames) // 2
+        if groups and start < groups[-1][1]:
+            groups[-1][1] = max(groups[-1][1], end)
+            groups[-1][2].append((start, frames))
+        else:
+            groups.append([start, end, [(start, frames)]])
+    result = []
+    for start, end, parts in groups:
+        if len(parts) == 1:
+            result.append((start, parts[0][1]))
+            continue
+        mix = array('i', [0]) * (end - start)
+        for at, frames in parts:
+            offset = at - start
+            for index, value in enumerate(_samples(frames)):
+                mix[offset + index] += value
+        result.append((start, _pcm(array('h', [32767 if v > 32767 else -32768 if v < -32768 else v for v in mix]))))
+    return result
+
+
+def overlaps(placed, durations):
+    """Onceki ses bitmeden baslayan ses sayisi."""
+    count, cursor = 0, None
+    for at, length in sorted((at, length) for at, length in zip(placed, durations) if length > 0):
+        if cursor is not None and at < cursor - 0.05:
+            count += 1
+        cursor = max(cursor or 0.0, at + length)
+    return count
 
 
 def duck_commands(spans, level, fade=FADE, steps=FADE_STEPS):
@@ -230,7 +327,7 @@ def build(engines, video, segments, output, options=None, timing=None, language=
     """Dublaji yazar (bloklar). progress(done, total, stage): stage 'voice' (satir) ya da 'mix' (saniye).
     F146: `plan` her satirin ses anahtari (None: ana ses), `voices` {anahtar: {'override', 'language',
     'can_speed'}}, `load_voice(override, language)` motoru o sese hazirlar (bloklar); `stems` ayrilmis
-    (konusma, muzik/efekt) dosyalari. Donen: {'output', 'lines', 'faster', 'shifted', 'voices'}."""
+    (konusma, muzik/efekt) dosyalari. Donen: {'output', 'lines', 'faster', 'shifted', 'overlapped', 'voices'}."""
     import clip   # klip kaydinin FFmpeg ilerleme okuyucusu
 
     options = options_of(options)
@@ -264,7 +361,7 @@ def build(engines, video, segments, output, options=None, timing=None, language=
                     raise RuntimeError('Ses motoru beklenmeyen biçimde ses döndürdü (16 bit mono değil).')
                 length = _seconds(frames, clip_rate)
                 need = length / room[index]
-                if need > 1.02:
+                if need > 1.02 and not options['overlap']:
                     tempo = min(options['max_tempo'], need)
                     if spec['can_speed']:
                         quick = engines.say(line['text'], round(options['speed'] * tempo, 2), book, spec['language'],
@@ -283,20 +380,24 @@ def build(engines, video, segments, output, options=None, timing=None, language=
         for index, item in enumerate(rates):
             if item and item != rate:
                 voices_out[index] = resample(voices_out[index], item, rate, folder)
+        if options['normalize']:
+            voices_out = [normalize(frames, rate) if frames else frames for frames in voices_out]
         voices = voices_out
         lengths = [_seconds(frames, rate) for frames in voices]
-        placed = place([line['start'] for line in lines], lengths)
-        shifted = sum(1 for at, line in zip(placed, lines) if at - line['start'] > 0.3)
+        if options['overlap']:
+            placed = [line['start'] for line in lines]
+            shifted, overlapped = 0, overlaps(placed, lengths)
+        else:
+            placed = place([line['start'] for line in lines], lengths)
+            shifted, overlapped = sum(1 for at, line in zip(placed, lines) if at - line['start'] > 0.3), 0
         track = folder / 'dublaj.wav'
         with wave.open(str(track), 'wb') as out:
             out.setnchannels(1)
             out.setsampwidth(2)
             out.setframerate(rate)
             written = 0
-            for at, frames in zip(placed, voices):
-                if not frames:
-                    continue
-                start = int(round(at * rate))
+            for start, frames in layers(placed, voices, rate):
+                start = max(start, written)
                 while written < start:
                     count = min(start - written, rate * 30)
                     out.writeframes(b'\x00\x00' * count)
@@ -305,11 +406,14 @@ def build(engines, video, segments, output, options=None, timing=None, language=
                 written += len(frames) // 2
         duck = None
         if has_audio and options['duck']:
-            spans = regions([at for at, n in zip(placed, lengths) if n > 0], [n for n in lengths if n > 0])
+            spans = duck_spans(lines, placed, lengths)
             (folder / 'duck.cmd').write_text(duck_commands(spans, options['background']), encoding='utf-8')
             duck = 'duck.cmd'
-        log(f'Dublaj: {len(lines)} satır seslendirildi ({faster} satır hızlandırıldı, {shifted} satır kaydırıldı); '
-            'ses karıştırılıyor…')
+        detail = (f'{overlapped} satır üst üste' if options['overlap']
+                  else f'{faster} satır hızlandırıldı, {shifted} satır kaydırıldı')
+        if options['normalize']:
+            detail += ', ses düzeyi eşitlendi'
+        log(f'Dublaj: {len(lines)} satır seslendirildi ({detail}); ses karıştırılıyor…')
         output = Path(output)
         partial = output.with_name(output.stem + '.part' + output.suffix)
         command = mix_command(video, track.resolve(), partial.resolve(), options, has_audio, duck,
@@ -337,7 +441,8 @@ def build(engines, video, segments, output, options=None, timing=None, language=
                 partial.unlink(missing_ok=True)
                 raise RuntimeError(str(again).replace('Klip kaydedilemedi', 'Dublaj kaydedilemedi')) from again
         os.replace(partial, output)
-        return {'output': str(output), 'lines': len(lines), 'faster': faster, 'shifted': shifted, 'voices': len(order)}
+        return {'output': str(output), 'lines': len(lines), 'faster': faster, 'shifted': shifted, 'overlapped': overlapped,
+                'voices': len(order)}
     finally:
         shutil.rmtree(folder, ignore_errors=True)
 

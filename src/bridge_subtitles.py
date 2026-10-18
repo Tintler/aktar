@@ -438,8 +438,9 @@ class SubtitleToolsMixin:
         return self._start_tool('dub', path, work)
 
     # ------------------------------------------------------------------ konusmacilar (F146)
-    def dub_speakers(self, path, key=None, timing=None):
-        """Konusmaci ayrimi hazirsa konusmacilar [{id, name, seconds, lines, sample}], yoksa bos liste."""
+    def dub_speakers(self, path, key=None, timing=None, voice=''):
+        """Konusmaci ayrimi hazirsa konusmacilar [{id, name, seconds, lines, sample}], yoksa bos liste.
+        F149 'auto': ana ses `voice` iken otomatik atanacak sesler {'0': ses} (onizleme icin)."""
         path = Path(str(path))
         ok, message = voice_split.available()
         try:
@@ -452,8 +453,13 @@ class SubtitleToolsMixin:
                 lines = dub.lines_of(self._dub_segments(path, key), timing)
             except (RuntimeError, ValueError, OSError):
                 lines = []
-        return {'available': ok, 'message': message, 'ready': data is not None,
-                'speakers': voice_split.summary(data, lines)}
+        speakers = voice_split.summary(data, lines)
+        try:
+            auto = self._auto_voices(speakers, voice) if speakers else {}
+        except Exception as error:  # ses listesi okunamazsa onizleme ana sesle yapilir
+            self._log('Dublaj: otomatik sesler hesaplanamadı: ' + str(error))
+            auto = {}
+        return {'available': ok, 'message': message, 'ready': data is not None, 'speakers': speakers, 'auto': auto}
 
     def speakers_find(self, path, audio=None, count=0):
         """Konusmacilari (yeniden) ayirir: arka planda 'diarize' isi. `audio`: ses akisinin GLOBAL index'i,

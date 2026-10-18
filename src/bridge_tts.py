@@ -9,12 +9,16 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 from pathlib import Path
 
 import audiobook
 import voice_presets
 from app_core import APP_DIR, ROOT
 from tts import Engines
+
+
+PREVIEW_TEXT = 'Merhaba, dublajda sesim böyle duyulacak.'   # F149 ses onizlemesi
 
 
 def _error(error):
@@ -47,6 +51,31 @@ class TtsMixin:
         try:
             override = self._voice_override(voice)
             return self._engines().say(text, speed, book, self._override_language(override, language), override)
+        except Exception as error:
+            return _error(error)
+
+    def tts_preview(self, voice='', text=''):
+        """F149: bir sesi dinletir (dublaj ses secicileri): motor o sese hazirlanir (bloklar), kisa bir
+        metin okunur. `text` bossa ornek cumle. Donen: tts_say gibi {'audio', 'duration'} ya da {'error'}."""
+        running = getattr(self, '_tool_running', None)
+        if (running is not None and running() and self._tool['kind'] == 'dub') or self._audiobook_running():
+            return {'error': 'Ses motoru şu an dublaj ya da sesli kitap için kullanılıyor.'}
+        try:
+            override = self._voice_override(voice)
+            language = self._override_language(override, 'tr')
+            engines = self._engines()
+            device = self.ui_prefs().get('tts', {}).get('device', 'auto')
+            for _attempt in range(3):   # baska bir ses yukleniyorsa o bitince yeniden istenir
+                engines.load(language, device, override)
+                deadline = time.monotonic() + 600
+                while engines.state == 'loading' and time.monotonic() < deadline:
+                    time.sleep(0.2)
+                if engines.state != 'ready':
+                    return {'error': engines.message or 'Ses motoru yüklenemedi.'}
+                if (engines.current.get('engine'), engines.current.get('voice')) == engines.choice(language, override):
+                    break
+            text = ' '.join(str(text or '').split())[:200] or PREVIEW_TEXT
+            return engines.say(text, 1.0, None, language, override)
         except Exception as error:
             return _error(error)
 

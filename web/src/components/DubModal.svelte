@@ -15,19 +15,21 @@
   const saved = app.prefs.dub ?? {};
   let voice = $state(saved.voice ?? '');
   let opts = $state({ background: 0.25, duck: true, max_tempo: 1.35, format: 'mkv', speed: 1, separate: false, speakers: false,
+    normalize: false, overlap: false,
     ...(saved.opts ?? {}) });
   // Konusmacilar (F146): {available, message, ready, speakers: [{id, name, seconds, lines, sample}]}
   let speakerInfo = $state(null);
   let speakerVoices = $state({});      // {'0': '' (otomatik) | '=' (ana ses) | ses}
   let speakerCount = $state(0);
   async function loadSpeakers() {
-    const info = await call('dub_speakers', path, source, timing);
+    const info = await call('dub_speakers', path, source, timing, voice);
     if (info && !info.error) {
       speakerInfo = info;
       for (const s of info.speakers) speakerVoices[String(s.id)] ??= '';
     }
   }
-  loadSpeakers();
+  // ana ses degisince otomatik atanacak sesler de degisir
+  $effect(() => { voice; loadSpeakers(); });
   const stopListening = onSubtool((job) => { if (job.kind === 'diarize' && job.path === path) loadSpeakers(); });
   $effect(() => stopListening);
   async function findSpeakers() {
@@ -37,7 +39,8 @@
     const result = await call('speakers_rename', path, { ...Object.fromEntries((speakerInfo?.speakers ?? []).map((s) => [String(s.id), s.name])), [String(id)]: name });
     if (result && !result.error) loadSpeakers();
   }
-  // F148: konusmacinin ozgun sesinden kisa ornek (kadin mi erkek mi anlasilsin)
+  // F148: konusmacinin ozgun sesinden kisa ornek (kadin mi erkek mi anlasilsin);
+  // F149: dublaj seslerinin onizlemesi de ayni oynaticiyla ('orig:<id>', 'voice:<id>', 'voice:main')
   let sample = $state({ id: null, loading: false });
   let player = null;
   function stopSample() {
@@ -45,12 +48,12 @@
     player = null;
     sample = { id: null, loading: false };
   }
-  async function playSample(id) {
+  async function play(id, fetch) {
     const same = sample.id === id;
     stopSample();
     if (same) return;
     sample = { id, loading: true };
-    const result = await act('speakers_sample', path, id, audio);
+    const result = await fetch();
     if (sample.id !== id) return;
     if (!result?.audio) return stopSample();
     player = new Audio('data:audio/wav;base64,' + result.audio);
@@ -58,6 +61,14 @@
     sample = { id, loading: false };
     player.play().catch(stopSample);
   }
+  const playSample = (id) => play('orig:' + id, () => act('speakers_sample', path, id, audio));
+  // Konusmacinin dublaj sesi: '=' ana ses, '' otomatik atanacak ses (dub_speakers 'auto'), digerleri secilen ses
+  function speakerVoice(id) {
+    const chosen = speakerVoices[String(id)] ?? '';
+    if (chosen === '=') return voice;
+    return chosen || (speakerInfo?.auto?.[String(id)] ?? voice);
+  }
+  const previewVoice = (key, ref, text = '') => play('voice:' + key, () => act('tts_preview', ref, text));
   $effect(() => stopSample);
   const fmtSeconds = (s) => (s >= 60 ? `${Math.floor(s / 60)} dk ${Math.round(s % 60)} sn` : `${Math.round(s)} sn`);
   let voices = $state([]);
@@ -73,6 +84,8 @@
   const busy = $derived(!!subtool.job);
   // F148: app.engines yalnizca Ayarlar acilinca yuklenir; kontrol bu pencerenin kendi ses listesinden yapilir
   const noEngine = $derived(voicesLoaded && !voices.length);
+  // F149: dublaj isi motoru kullanirken ses onizlemesi yapilmaz (motor baska sese gecerdi)
+  const voiceBusy = $derived(subtool.job?.kind === 'dub' || noEngine);
 
   const TEMPOS = [[1, 'Hızlandırma (satır kayabilir)'], [1.2, 'En fazla 1,2×'], [1.35, 'En fazla 1,35×'], [1.5, 'En fazla 1,5×'], [1.75, 'En fazla 1,75×']];
   const SPEEDS = [0.9, 1, 1.1, 1.2];
@@ -98,17 +111,25 @@
     <div class="warn"><Icon name="alert" size={16} /><span>Türkçe ses motoru kurulu değil. Ayarlar → Ses → Sesli okuma bölümünden kurun.</span></div>
   {/if}
 
-  <label class="stack">
+  {#snippet playButton(id, title, onclick, disabled = false)}
+    <button class="icon-btn sm play" title={sample.id === id ? 'Durdur' : title} disabled={disabled && sample.id !== id} {onclick}>
+      <Icon name={sample.id === id ? (sample.loading ? 'loader' : 'stop') : 'play'} size={14} spin={sample.id === id && sample.loading} /></button>
+  {/snippet}
+
+  <div class="stack">
     <span class="label">Ses</span>
-    <select class="field" bind:value={voice}>
-      <option value="">Sesli okuma sesi (Ayarlar → Ses)</option>
-      {#each groups as group}
-        <optgroup label={group}>
-          {#each voices.filter((v) => v.group === group) as v}<option value={v.value}>{v.label}</option>{/each}
-        </optgroup>
-      {/each}
-    </select>
-  </label>
+    <div class="pick">
+      <select class="field" bind:value={voice}>
+        <option value="">Sesli okuma sesi (Ayarlar → Ses)</option>
+        {#each groups as group}
+          <optgroup label={group}>
+            {#each voices.filter((v) => v.group === group) as v}<option value={v.value}>{v.label}</option>{/each}
+          </optgroup>
+        {/each}
+      </select>
+      {@render playButton('voice:main', 'Bu sesi dinle (ilk dinlemede ses motoru hazırlanır)', () => previewVoice('main', voice), voiceBusy)}
+    </div>
+  </div>
 
   <div class="grid">
     <label class="stack">
@@ -119,10 +140,17 @@
     </label>
     <label class="stack">
       <span class="label">Sığmayan satırlar</span>
-      <select class="field" bind:value={opts.max_tempo}>
+      <select class="field" bind:value={opts.max_tempo} disabled={opts.overlap}>
         {#each TEMPOS as [value, text]}<option {value}>{text}</option>{/each}
       </select>
     </label>
+  </div>
+
+  <div class="stack">
+    <Toggle bind:checked={opts.overlap} label="Çakışan satırları üst üste koy (hızlandırma ve kaydırma yok)" />
+    <Toggle bind:checked={opts.normalize} label="Ses düzeyini eşitle (her satır aynı yükseklikte)" />
+    <span class="hint">{opts.overlap ? 'Her satır kendi zamanında başlar; bir önceki bitmediyse ikisi birlikte duyulur. ' : ''}Eşitleme,
+      farklı kayıtlı seslerin ya da motorların birbirinden kısık kalmasını önler.</span>
   </div>
 
   <div class="stack">
@@ -145,10 +173,10 @@
         <div class="speakers">
           {#each speakerInfo.speakers as s (s.id)}
             <div class="speaker">
-              <button class="icon-btn sm play" title={sample.id === s.id ? 'Durdur' : 'Özgün sesinden dinle'} onclick={() => playSample(s.id)}>
-                <Icon name={sample.id === s.id ? (sample.loading ? 'loader' : 'stop') : 'play'} size={14} spin={sample.id === s.id && sample.loading} /></button>
+              {@render playButton('orig:' + s.id, 'Özgün sesinden dinle', () => playSample(s.id))}
               <input class="field name" value={s.name} maxlength="40" title="Konuşmacının adı (transkriptte ve soru-cevapta da görünür)"
                 onchange={(e) => rename(s.id, e.currentTarget.value)} />
+              <div class="pick">
               <select class="field" bind:value={speakerVoices[String(s.id)]}>
                 <option value="">Otomatik</option>
                 <option value="=">Ana ses</option>
@@ -158,6 +186,9 @@
                   </optgroup>
                 {/each}
               </select>
+              {@render playButton('voice:' + s.id, speakerVoices[String(s.id)] ? 'Dublaj sesini dinle' : 'Otomatik atanacak dublaj sesini dinle',
+                () => previewVoice(s.id, speakerVoice(s.id), s.sample), voiceBusy)}
+              </div>
               <span class="dim meta" title={s.sample}>{s.lines} satır · {fmtSeconds(s.seconds)}{s.sample ? ' · ' + s.sample : ''}</span>
             </div>
           {/each}
@@ -206,7 +237,9 @@
   input[type='range'] { width: 100%; }
   .speakers { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow: auto; }
   .speaker { display: grid; grid-template-columns: 30px 110px 1fr; gap: 4px 8px; align-items: center; }
-  .speaker .play { width: 30px; height: 30px; }
+  .play { width: 30px; height: 30px; flex: none; }
+  .pick { display: flex; gap: 6px; align-items: center; min-width: 0; }
+  .pick select { flex: 1; min-width: 0; }
   .speaker .meta { grid-column: 3; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .find { display: flex; gap: 8px; align-items: center; }
   .find .count { width: auto; }

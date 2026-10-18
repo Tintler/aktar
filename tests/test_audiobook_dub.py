@@ -12,6 +12,7 @@ import tempfile
 import threading
 import unittest
 import wave
+from array import array
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -132,6 +133,29 @@ class DubPureTests(unittest.TestCase):
         rows = [line.split()[0] + ' ' + line.split()[-1] for line in text.strip().splitlines()]
         self.assertEqual(rows, ['1.500 0.6000;', '1.750 0.2000;', '4.000 0.6000;', '4.250 1.0000;'])
 
+    def test_duck_spans_cover_original_lines(self):
+        # dublaj sesi (0,5 sn) satirdan (3 sn) kisa kalsa da ozgun konusma satir boyunca kisilir
+        lines = [{'start': 1.0, 'end': 4.0, 'text': 'a'}, {'start': 10.0, 'end': 11.0, 'text': 'b'}]
+        spans = dub.duck_spans(lines, [1.0, 10.0], [0.5, 0.0], pad=0.2)
+        self.assertEqual([(round(a, 2), round(b, 2)) for a, b in spans], [(1.0, 4.2), (10.0, 11.2)])
+
+    def test_normalize_levels_quiet_and_loud_clips(self):
+        def pcm(amplitude, count=4800):
+            return array('h', [amplitude if i % 2 else -amplitude for i in range(count)]).tobytes()
+        quiet = dub.normalize(pcm(800) + bytes(9600), 24000)
+        loud = dub.normalize(pcm(12000), 24000)
+        level = lambda data: max(array('h', data))
+        self.assertAlmostEqual(level(quiet), level(loud), delta=60)
+        self.assertAlmostEqual(level(loud), dub.NORM_RMS, delta=60)
+        self.assertEqual(dub.normalize(bytes(4800), 24000), bytes(4800))   # sessizlik oldugu gibi
+
+    def test_layers_mix_overlapping_clips(self):
+        a, b = array('h', [100] * 10).tobytes(), array('h', [50] * 10).tobytes()
+        result = dub.layers([0.0, 0.5, 3.0], [a, b, a], 10)
+        self.assertEqual([start for start, _ in result], [0, 30])
+        self.assertEqual(list(array('h', result[0][1])), [100] * 5 + [150] * 5 + [50] * 5)
+        self.assertEqual(dub.overlaps([0.0, 0.5, 3.0], [1.0, 1.0, 1.0]), 1)
+
     def test_options_are_clamped(self):
         options = dub.options_of({'background': 3, 'max_tempo': 0.2, 'format': 'avi', 'audio': '2', 'x': 1})
         self.assertEqual((options['background'], options['max_tempo'], options['format'], options['audio']), (1.0, 1.0, 'mkv', 2))
@@ -231,6 +255,15 @@ class EndToEndTests(unittest.TestCase):
         dub.build(self.engines, video, segments, self.folder / 'o.m4a', {'format': 'm4a', 'max_tempo': 1.3},
                   has_audio=True, can_speed=True)
         self.assertEqual([speed for _, speed in self.engines.calls], [1.0, 1.3])
+
+    def test_dub_overlap_keeps_timestamps_without_speeding(self):
+        video = self._video(4)
+        segments = [{'start': 0.2, 'end': 0.6, 'text': 'Oldukça uzun bir cümle burada.'},
+                    {'start': 0.8, 'end': 1.2, 'text': 'İkinci.'}]
+        result = dub.build(self.engines, video, segments, self.folder / 'u.m4a',
+                           {'format': 'm4a', 'overlap': True, 'normalize': True}, has_audio=True, can_speed=True)
+        self.assertEqual((result['faster'], result['shifted'], result['overlapped']), (0, 0, 1))
+        self.assertEqual([speed for _, speed in self.engines.calls], [1.0, 1.0])
 
     def test_dub_cancel(self):
         video = self._video(2)

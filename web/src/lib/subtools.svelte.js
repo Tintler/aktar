@@ -33,7 +33,8 @@ on('subtool', async (data) => {
     const extra = result.subtitle ? '\nAltyazı: ' + result.subtitle.split(/[\\/]/).pop() : '';
     if (await confirm({ title: 'Klip kaydedildi', message: result.name + extra, ok: 'Konumu aç', cancel: 'Kapat' })) act('reveal', result.output);
   } else if (data.kind === 'dub') {
-    const notes = [result.faster ? `${result.faster} satır sığması için hızlandırıldı` : '', result.shifted ? `${result.shifted} satır biraz kaydırıldı` : '']
+    const notes = [result.faster ? `${result.faster} satır sığması için hızlandırıldı` : '', result.shifted ? `${result.shifted} satır biraz kaydırıldı` : '',
+      result.overlapped ? `${result.overlapped} satır üst üste bindi` : '']
       .filter(Boolean).join(', ');
     if (await confirm({ title: 'Dublaj hazır', message: `${result.name} · ${result.lines} satır${notes ? '\n' + notes + '.' : ''}`, ok: 'Konumu aç', cancel: 'Kapat' })) {
       act('reveal', result.output);
