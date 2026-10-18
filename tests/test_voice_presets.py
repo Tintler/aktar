@@ -118,6 +118,25 @@ class BridgePresetTests(unittest.TestCase):
         self.assertEqual(self.bridge.tts_preset_delete(ident)['active'], '')
         self.assertIn('error', self.bridge.tts_preset_apply(ident))
 
+    def test_preview_of_clone_preset_plays_its_recording(self):
+        # F149: klon kaydi olan kayitli ses motor yuklenmeden kendi kaydindan dinletilir
+        import wave
+        recording = self.root / 'kayit.wav'
+        with wave.open(str(recording), 'wb') as out:
+            out.setnchannels(1)
+            out.setsampwidth(2)
+            out.setframerate(16000)
+            out.writeframes(b'\x00\x10' * 16000 * 20)
+        ident = self.bridge.tts_preset_save({'name': 'Klon', 'voice': 'voxcpm/clone',
+                                             'options': {'reference': str(recording), 'reference_text': 'X'}})['saved']['id']
+        with mock.patch.object(self.bridge, '_engines', side_effect=AssertionError('motor yuklenmemeli')):
+            result = self.bridge.tts_preview('preset:' + ident, 'Bu metin okunmaz.')
+        self.assertTrue(result.get('recording'), result)
+        with wave.open(io.BytesIO(base64.b64decode(result['audio']))) as clip:
+            self.assertAlmostEqual(clip.getnframes() / clip.getframerate(), 12.0, delta=0.1)   # en fazla 12 sn
+        design = self.bridge.tts_preset_save({'name': 'Tarif', 'voice': 'voxcpm/design', 'options': {'description': 'W'}})
+        self.assertIsNone(self.bridge._preset_recording('preset:' + design['saved']['id']))   # tarifli ses okunur
+
     def test_preset_of_missing_engine_cannot_be_applied(self):
         ident = self.bridge.tts_preset_save({'name': 'EMA', 'voice': 'ema-lightning/default'})['saved']['id']
         with mock.patch.object(self.bridge, '_voice_specs', return_value={}):

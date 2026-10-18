@@ -40,7 +40,7 @@
     if (result && !result.error) loadSpeakers();
   }
   // F148: konusmacinin ozgun sesinden kisa ornek (kadin mi erkek mi anlasilsin);
-  // F149: dublaj seslerinin onizlemesi de ayni oynaticiyla ('orig:<id>', 'voice:<id>', 'voice:main')
+  // F149: dublaj seslerinin onizlemesi de ayni oynaticiyla (klon kayitli seste kaydin kendisi) ('orig:<id>', 'voice:<id>', 'voice:main')
   let sample = $state({ id: null, loading: false });
   let player = null;
   function stopSample() {
@@ -127,7 +127,7 @@
           </optgroup>
         {/each}
       </select>
-      {@render playButton('voice:main', 'Bu sesi dinle (ilk dinlemede ses motoru hazırlanır)', () => previewVoice('main', voice), voiceBusy)}
+      {@render playButton('voice:main', 'Bu sesi dinle (kayıtlı seste kendi kaydı çalınır, diğerlerinde ses motoru hazırlanır)', () => previewVoice('main', voice), voiceBusy)}
     </div>
   </div>
 

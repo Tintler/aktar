@@ -19,6 +19,7 @@ from tts import Engines
 
 
 PREVIEW_TEXT = 'Merhaba, dublajda sesim böyle duyulacak.'   # F149 ses onizlemesi
+PREVIEW_RECORDING = 12.0   # kayitli sesin klon kaydindan calinan en uzun sure (sn)
 
 
 def _error(error):
@@ -56,7 +57,15 @@ class TtsMixin:
 
     def tts_preview(self, voice='', text=''):
         """F149: bir sesi dinletir (dublaj ses secicileri): motor o sese hazirlanir (bloklar), kisa bir
-        metin okunur. `text` bossa ornek cumle. Donen: tts_say gibi {'audio', 'duration'} ya da {'error'}."""
+        metin okunur. `text` bossa ornek cumle. Kayitli ses klon kaydi tasiyorsa motor yuklenmez, o kaydin
+        basi calinir. Donen: tts_say gibi {'audio', 'duration'} ya da {'error'}."""
+        recording = self._preset_recording(voice)
+        if recording is not None:
+            try:
+                import voice_split
+                return {'audio': voice_split.clip_base64(recording, 0, PREVIEW_RECORDING), 'recording': True}
+            except (RuntimeError, OSError) as error:
+                return _error(error)
         running = getattr(self, '_tool_running', None)
         if (running is not None and running() and self._tool['kind'] == 'dub') or self._audiobook_running():
             return {'error': 'Ses motoru şu an dublaj ya da sesli kitap için kullanılıyor.'}
@@ -78,6 +87,18 @@ class TtsMixin:
             return engines.say(text, 1.0, None, language, override)
         except Exception as error:
             return _error(error)
+
+    def _preset_recording(self, ref):
+        """Kayitli sesin (preset:<kimlik>) klon kaydi dosyasi; yoksa None (tarifli ses ya da motor sesi)."""
+        ref = str(ref or '')
+        if not ref.startswith('preset:'):
+            return None
+        preset = voice_presets.get(APP_DIR, ref[7:])
+        for value in ((preset or {}).get('options') or {}).values():
+            path = Path(str(value))
+            if path.suffix.lower() in voice_presets.AUDIO_TYPES and path.is_file():
+                return path
+        return None
 
     # ------------------------------------------------------------------ sayfa sesleri (F141)
     def _voice_override(self, ref):
