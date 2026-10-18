@@ -37,7 +37,10 @@ MAX_EVENT_SECONDS = 10.0   # silme komutu olmayan (DVD) altyazi en fazla bu kada
 MIN_HEIGHT = 90            # OCR icin yazi bu yukseklikten kucukse buyutulur
 SUBTITLE_PROMPT = ('Bu görüntü bir video altyazısı. Görüntüdeki yazıyı satır satır, olduğu gibi '
                    'yaz. Çevirme, açıklama ya da yorum ekleme. Yazı yoksa hiçbir şey yazma.')
-_INFO = re.compile(r'\bn:\s*(\d+).*?\bpts_time:\s*(-?[0-9.]+).*?\bchecksum:\s*([0-9A-Fa-f]+)')
+# pts_time FFmpeg 6.x'te %g ile yazilir (4.29497e+06, 1234.57): zaman pts * time_base ile hesaplanir.
+_INFO = re.compile(r'\bn:\s*(\d+)\s+pts:\s*(-?\d+)\s+pts_time:\s*(-?[0-9.]+(?:[eE][-+]?\d+)?)'
+                   r'.*?\bchecksum:\s*([0-9A-Fa-f]+)')
+_TIME_BASE = re.compile(r'\bconfig in time_base:\s*(\d+)/(\d+)')
 # ffprobe dil etiketi (ISO 639-2/1) -> Tesseract dil verisi
 TESSERACT_LANGS = {
     'eng': 'eng', 'en': 'eng', 'tur': 'tur', 'tr': 'tur', 'ger': 'deu', 'deu': 'deu', 'de': 'deu',
@@ -107,16 +110,20 @@ def render_frames(video, stream_index, folder, duration=0.0, progress=None, canc
     kwargs = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
     process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
                                encoding='utf-8', errors='replace', **kwargs)
-    infos, tail = [], []
+    infos, tail, time_base = [], [], None
     try:
         for line in process.stderr:
             if cancelled and cancelled():
                 process.kill()
                 raise GracefulStop('Altyazı okuma durduruldu.')
             match = _INFO.search(line) if 'showinfo' in line else None
-            if match:
-                seconds = float(match.group(2))
-                infos.append((int(match.group(1)), seconds, match.group(3).upper()))
+            base = _TIME_BASE.search(line) if 'showinfo' in line and not match else None
+            if base and int(base.group(2)):
+                time_base = (int(base.group(1)), int(base.group(2)))
+            elif match:
+                seconds = (int(match.group(2)) * time_base[0] / time_base[1] if time_base
+                           else float(match.group(3)))
+                infos.append((int(match.group(1)), seconds, match.group(4).upper()))
                 if progress and duration:
                     progress(min(seconds, duration), duration)
             else:

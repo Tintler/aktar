@@ -4,7 +4,6 @@ from __future__ import annotations
 import io
 import json
 import random
-import re
 import struct
 import subprocess
 import sys
@@ -62,19 +61,6 @@ def ffmpeg_available():
         return True
     except RuntimeError:
         return False
-
-
-def ffmpeg_major():
-    """Kurulu ffmpeg'in ana surumu (bilinmiyorsa 0; 'N-...' ya da tarihli git derlemeleri yeni sayilir)."""
-    try:
-        first = subprocess.run([media.ffmpeg_path(), '-version'], capture_output=True, text=True).stdout.split('\n')[0]
-    except (RuntimeError, OSError):
-        return 0
-    version = first.split('version ')[-1].lstrip('n')
-    if version.startswith('N-'):
-        return 99
-    major = re.match(r'\d+', version)
-    return 0 if not major else 99 if int(major.group()) > 100 else int(major.group())
 
 
 def whisper_result():
@@ -367,8 +353,24 @@ class OcrTests(unittest.TestCase):
         self.assertEqual(result.getpixel((0, 0)), 255)          # beyaz zemin
         self.assertEqual(result.getpixel((result.width // 2, result.height // 2)), 0)   # koyu yazi
 
+    def test_render_frames_reads_ffmpeg6_times(self):
+        # FFmpeg 6.x pts_time'i %g ile yazar: 4.29497e+06 ve 1234.57; zaman pts * time_base'den gelir.
+        lines = ['[Parsed_showinfo_0 @ 0] config in time_base: 1/1000, frame_rate: 0/1\n',
+                 '[Parsed_showinfo_0 @ 0] config out time_base: 0/0, frame_rate: 0/0\n',
+                 '[Parsed_showinfo_0 @ 0] n:   0 pts:   4000 pts_time:4       duration:      0 checksum:CFD66AA3 mean:[0]\n',
+                 '[Parsed_showinfo_0 @ 0] n:   1 pts:1234567 pts_time:1234.57 duration:      0 checksum:00000000 mean:[0]\n',
+                 '[Parsed_showinfo_0 @ 0] n:   2 pts:4294972295 pts_time:4.29497e+06 duration:      0 checksum:00000000\n']
+        process = mock.Mock(stderr=mock.MagicMock(), wait=mock.Mock(return_value=0))
+        process.stderr.__iter__.return_value = iter(lines)
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(media, 'ffmpeg_path', return_value='ffmpeg'), \
+                mock.patch.object(subtitle_ocr.subprocess, 'Popen', return_value=process):
+            for number in range(3):
+                (Path(folder) / f'{number + 1:06d}.png').write_bytes(b'')
+            frames = subtitle_ocr.render_frames('v.mkv', 1, folder)
+        self.assertEqual([(seconds, checksum) for seconds, checksum, _ in frames],
+                         [(4.0, 'CFD66AA3'), (1234.567, '00000000'), (4294972.295, '00000000')])
+
     @unittest.skipUnless(ffmpeg_available(), 'ffmpeg yok')
-    @unittest.skipIf(0 < ffmpeg_major() < 7, 'ffmpeg 6.x son PGS olayinin bitisini farkli veriyor (Ubuntu 24.04)')
     def test_recognize_pgs_stream(self):
         with tempfile.TemporaryDirectory() as folder:
             folder = Path(folder)
