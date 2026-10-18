@@ -17,6 +17,8 @@ jobs:
   python:
     name: Python ${{ matrix.python }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    env:
+      PYTHONIOENCODING: utf-8
     strategy:
       fail-fast: false
       matrix:
@@ -45,8 +47,6 @@ jobs:
 
       - name: Testler
         shell: bash
-        env:
-          PYTHONIOENCODING: utf-8
         run: python -m unittest discover -s tests 2>&1 | tee test-output.txt
 
       # Loglar oturum acmadan gorunmez; basarisiz testlerin ozeti herkese acik not olarak yazilir.

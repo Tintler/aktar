@@ -22,6 +22,7 @@ def escape(text):
 
 
 def main(path):
+    sys.stdout.reconfigure(encoding='utf-8')   # Windows konsolu cp1252; Turkce harfler cokertmesin
     text = Path(path).read_text(encoding='utf-8', errors='replace')
     found = list(blocks(text))
     for block in found[:10]:
