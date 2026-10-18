@@ -7,11 +7,11 @@
 
 ![aktar arayüzü](assets/preview.png)
 
-Videolarınızı, belgelerinizi ve kitaplarınızı **yerel bir yapay zeka modeliyle** işleyen masaüstü uygulaması: altyazıları ve EPUB kitapları Türkçeye çevirir, koleksiyonlarınıza soru sormanızı sağlar ve cevapları zaman damgalı kaynaklarla gösterir. Kitapları sesli okur, videolara Türkçe dublaj ekler.
+Videolarınızı, belgelerinizi ve kitaplarınızı **yerel bir yapay zeka modeliyle** işleyen masaüstü uygulaması: altyazıları ve e-kitapları Türkçeye (ya da seçtiğiniz başka bir dile) çevirir, koleksiyonlarınıza soru sormanızı sağlar ve cevapları zaman damgalı kaynaklarla gösterir. Kitapları sesli okur, videolara Türkçe dublaj ekler.
 
-> **Gizlilik:** Hiçbir veri internete gönderilmez. Tüm işlemler bilgisayarınızda ve LM Studio sunucunuzda yapılır; kaynak dosyalar yalnızca okunur, değiştirilmez.
+> **Gizlilik:** Bilgisayarınızdaki ya da yerel ağınızdaki bir model sunucusuyla (LM Studio, Ollama, llama.cpp…) hiçbir veri internete gönderilmez; kaynak dosyalar yalnızca okunur, değiştirilmez. İsterseniz internetteki OpenAI uyumlu bir sunucu da seçebilirsiniz; o zaman metinler o sunucuya gider ve Ayarlar bunu açıkça uyarır.
 
-> **English:** Aktar is a local-first desktop app (Windows, Linux) that translates video subtitles and EPUB books to Turkish, lets you chat with your videos and documents, reads books aloud and dubs videos, using an LLM served by LM Studio and local speech engines. Nothing leaves your machine.
+> **English:** Aktar is a local-first desktop app (Windows, Linux) that translates video subtitles and e-books (EPUB, MOBI, AZW3, FB2, PDF) between 18 languages (Turkish by default), lets you chat with your videos and documents, reads books aloud and dubs videos, using an LLM served by LM Studio or any OpenAI-compatible server (Ollama, llama.cpp, vLLM…) and local speech engines. With a local server nothing leaves your machine.
 
 ---
 
@@ -29,6 +29,7 @@ Videolarınızı, belgelerinizi ve kitaplarınızı **yerel bir yapay zeka model
 **Video ve altyazı**
 
 - **Altyazı çevirisi:** SRT, ASS, SSA ve VTT biçimleri, zamanlamalar ve ASS etiketleri korunur. Dizi bölümleri arasında terim sözlüğü ve isim tutarlılığı sağlanır.
+- **Çeviri dilleri:** Kaynak dil (ya da Otomatik) ve hedef dil 18 dil arasından seçilir; varsayılan İngilizce → Türkçe. Çıktı dosyası hedef dilin kodunu ek alır (`_TR`, `_DE`, `_JA`…).
 - **Altyazısız videolar:** faster-whisper ile konuşma yerelde metne çevrilir (isteğe bağlı, NVIDIA GPU desteğiyle).
 - **Altyazı araçları:** Kaymış altyazı G/H ile, iki noktadan ya da Whisper'a göre otomatik hizalanır (kare hızı farkı dahil). Karaoke ASS (`\k`), kelime vurgulu SRT ve JSON çıktısı alınır. PGS/VobSub görüntü altyazıları OCR ile metne çevrilir.
 - **Türkçe dublaj:** Seçili altyazı ses motoruyla seslendirilir ve videoya varsayılan ses parçası olarak eklenir. İsteğe bağlı olarak müzik ve efektler ayrılıp korunur (yalnızca özgün konuşma kısılır) ve her konuşmacı ayrı bir sesle okunur.
@@ -38,12 +39,12 @@ Videolarınızı, belgelerinizi ve kitaplarınızı **yerel bir yapay zeka model
 
 **Kitap**
 
-- **Kitap Çevir:** DRM'siz İngilizce EPUB'ları bölüm bölüm Türkçeye çevirir; terim sözlüğü, kalite denetimleri, kaldığı yerden sürme ve Türkçe EPUB çıktısı.
-- **Okuma:** EPUB kitaplığı; içindekiler, yer imleri, yazı ve sayfa ayarları, okuma konumu.
+- **Kitap Çevir:** DRM'siz e-kitapları (EPUB, MOBI, AZW3, FB2) bölüm bölüm seçilen dile çevirir; terim sözlüğü, kalite denetimleri, kaldığı yerden sürme ve EPUB çıktısı. MOBI/AZW3 için Calibre kuruluysa o kullanılır, yoksa yerleşik okuyucu.
+- **Okuma:** E-kitap kitaplığı (EPUB, MOBI, AZW3, FB2); içindekiler, yer imleri, yazı ve sayfa ayarları, okuma konumu.
 - **Kitapta ara:** Ctrl+F ile kelime ya da cümle tüm kitapta aranır; sonuca tıklayınca bölüm açılıp eşleşme vurgulanır.
 - **Kitaba sor:** Okurken kitaba soru sorun ("3. bölümde ne oldu?"); cevaptaki bölüm atfı kitabı o bölüme götürür. **Okuduğum yere kadar** seçiliyse okuduğunuz yerden (bölüm içindeki konum dahil) sonrası modele hiç gitmez.
 - **Sesli okuma ve sesli kitap:** Kitaplar yerel ses motorlarıyla (EMA Lightning, VoxCPM) cümle cümle okunur; tarifle tasarlanan ya da kayıttan klonlanan sesler kullanılabilir. Kitabın tamamı bölüm işaretli M4B ya da bölüm başına MP3 olarak kaydedilir.
-- **PDF'den kitap:** Taranmış PDF'ler OCR ile okunur, üst/alt bilgilerden ve bölünmüş kelimelerden temizlenir, bölümlere ayrılır ve EPUB'a dönüştürülür; sonuç **Gözden geçir** ekranında sayfa görüntüsünün yanında düzeltilir.
+- **PDF'den kitap:** Metin katmanı olan PDF'ler doğrudan, taranmış PDF'ler OCR ile (kitabın diliyle) okunur, üst/alt bilgilerden ve bölünmüş kelimelerden temizlenir, bölümlere ayrılır ve EPUB'a dönüştürülür; sonuç **Gözden geçir** ekranında sayfa görüntüsünün yanında düzeltilir.
 
 **Genel**
 
@@ -57,7 +58,8 @@ Videolarınızı, belgelerinizi ve kitaplarınızı **yerel bir yapay zeka model
 - Windows 10/11 veya Linux
 - Python 3.10+ ve Node.js (kaynak koddan çalıştırmak için)
 - FFmpeg (`bin\` klasörüne, bkz. [bin/README.txt](bin/README.txt))
-- Yerel sunucusu açık ve bir model yüklü [LM Studio](https://lmstudio.ai)
+- Bir model sunucusu: [LM Studio](https://lmstudio.ai) ya da OpenAI uyumlu başka bir sunucu (Ollama, llama.cpp, vLLM; internette OpenAI, OpenRouter). İlk açılıştaki **Bileşen denetimi** eksik olanları ve nasıl kurulacaklarını gösterir.
+- İsteğe bağlı: [Calibre](https://calibre-ebook.com) (MOBI/AZW3 için en iyi sonuç)
 - İsteğe bağlı: Whisper ile ses ayırma ve konuşmacı ayrımı (`requirements-whisper.txt`), sesli okuma motorları (`requirements-tts.txt`), Tesseract OCR
 
 ---
@@ -104,6 +106,12 @@ Açılan **Kütüphane** sayfasına bir klasör sürükleyin; koleksiyon oluşur
 - Cevaplar transkripte dayanır; videodaki görüntü yalnızca **Videoların görüntüsünü de oku** seçilerek hazırlanan videolarda, alınan karelerden görülür.
 - Uygulama kapalıyken arka planda hiçbir şey çalışmaz; klasör izleme ve e-posta kontrolü yalnızca uygulama açıkken yapılır.
 - Çeviri kalitesi seçilen modele bağlıdır.
+
+---
+
+## Sürümler
+
+Güncel sürüm `src/version.py` içindedir ve **Ayarlar → Gelişmiş**'te görünür; değişiklikler [CHANGELOG.md](CHANGELOG.md) dosyasındadır.
 
 ---
 

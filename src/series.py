@@ -103,7 +103,7 @@ def save_series(data, slug=None):
     return slug
 
 
-def create_series(title, folder_hints=None):
+def create_series(title, folder_hints=None, target_language='tr'):
     title = str(title).strip()
     if not title:
         raise ValueError('Seri başlığı boş olamaz.')
@@ -120,6 +120,9 @@ def create_series(title, folder_hints=None):
         'decisions': [],
         'episodes': [],
     }
+    if target_language and target_language != 'tr':
+        # Seri sozlugu tek hedef dile aittir (F151); Turkce seriler alani tasimaz.
+        data['target_language'] = target_language
     save_series(data, slug=slug)
     return data
 
@@ -182,6 +185,13 @@ def add_episode(slug, filename):
     data['episodes'] = episodes
     save_series(data, slug=slug)
     return data
+
+
+def series_language(slug):
+    """Serinin sozluk ve kararlarinin hedef dili (eski seriler: 'tr')."""
+    if not slug:
+        return 'tr'
+    return str(load_series(slug).get('target_language') or 'tr')
 
 
 def series_glossary(slug):

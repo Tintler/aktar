@@ -11,6 +11,7 @@ import threading
 from pathlib import Path
 
 import documents
+import languages
 import library
 import pdf_book
 from app_core import GracefulStop, load_config
@@ -66,7 +67,7 @@ class PdfMixin:
                 if documents.ocr_engine(cfg) == 'tesseract':
                     emit('Kitabın dili belirleniyor…')
                     language = pdf_book.sample_language(pdf, library.vision_reader(cfg, self._log))
-                    cfg['tesseract_lang'] = 'tur' if language == 'tr' else 'eng'
+                    cfg['tesseract_lang'] = languages.tesseract(language)
                     self._log(f'PDF: kitap dili {language}; Tesseract dili {cfg["tesseract_lang"]}.')
                 read = library.vision_reader(cfg, self._log)
                 folder = pdf_book.work_dir(pdf)
@@ -76,7 +77,8 @@ class PdfMixin:
                 emit('Kitap oluşturuluyor…')
                 epub, info = pdf_book.build_epub(pdf, folder, texts, title.strip() or None,
                                                  author.strip() if author is not None else None, log=self._log)
-                result = {'path': str(pdf), 'epub': str(epub), 'target': target, **info}
+                result = {'path': str(pdf), 'epub': str(epub), 'target': target, **info,
+                          'language_label': languages.label(info.get('language'))}
                 if target == 'reading':
                     added = self.shelf_add([str(epub)])
                     if added and added.get('added'):

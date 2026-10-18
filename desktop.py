@@ -2,6 +2,7 @@
 
     py -3 desktop.py          web/dist icindeki derlenmis arayuz
     py -3 desktop.py --dev    Vite gelistirme sunucusu (web klasorunde `npm run dev`)
+    py -3 desktop.py --version  surumu yazar (F155)
 
 Windows'ta WebView2, Linux'ta WebKitGTK (python3-gi + gir1.2-webkit2-4.1) kullanilir.
 """
@@ -56,6 +57,10 @@ class Dialogs:
 
 
 def main():
+    if '--version' in sys.argv:
+        from version import NAME, VERSION
+        print(f'{NAME} {VERSION}')
+        return
     dev = '--dev' in sys.argv
     index = ROOT / 'web' / 'dist' / 'index.html'
     if not dev and not index.exists():

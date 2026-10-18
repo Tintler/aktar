@@ -6,6 +6,7 @@
   import ReviewModal from './components/ReviewModal.svelte';
   import BookReviewModal from './components/BookReviewModal.svelte';
   import PdfImportModal from './components/PdfImportModal.svelte';
+  import SetupWizard from './components/SetupWizard.svelte';
   import Collections from './components/Collections.svelte';
   import ChatPanel from './components/ChatPanel.svelte';
   import MenuHost from './components/MenuHost.svelte';
@@ -87,7 +88,7 @@
   }
   const dropHint = $derived(app.view === 'translate' ? 'Videoyu açmak için bırakın'
     : app.view === 'books' ? 'EPUB, PDF ya da çeviri klasörünü açmak için bırakın'
-    : app.view === 'reading' ? "EPUB ya da taranmış PDF'yi kitaplığa eklemek için bırakın"
+    : app.view === 'reading' ? "E-kitabı (EPUB, MOBI, AZW3, FB2) ya da PDF'yi kitaplığa eklemek için bırakın"
     : app.view === 'files' ? 'İncelemek için bırakın'
     : app.view === 'subscriptions' ? 'Logo olarak eklemek için bırakın' : 'Koleksiyona eklemek için bırakın');
 
@@ -130,7 +131,7 @@
     <div class="lm" title={models.message || ''}>
       <div class="row">
         <span class="dot {models.state === 'probing' ? 'wait' : models.state === 'failed' ? 'bad' : modelListed ? '' : 'wait'}"></span>
-        <span class="st">{models.state === 'probing' ? 'LM Studio sorgulanıyor…' : models.state === 'failed' ? 'LM Studio bağlı değil' : modelListed ? 'LM Studio bağlı' : 'Model listede yok'}</span>
+        <span class="st">{models.state === 'probing' ? 'Model sunucusu sorgulanıyor…' : models.state === 'failed' ? 'Model sunucusu bağlı değil' : modelListed ? 'Model sunucusu bağlı' : 'Model listede yok'}</span>
         <button class="icon-btn sm" title="Yeniden sorgula" onclick={() => call('refresh_models')}><Icon name="refresh" size={14} /></button>
       </div>
     </div>
@@ -175,6 +176,7 @@
 {#if app.review}<ReviewModal data={app.review} onsubmit={submitReview} />{/if}
 {#if app.books.review}<BookReviewModal data={app.books.review} onsubmit={submitBookReview} />{/if}
 {#if app.pdfImport?.open}<PdfImportModal />{/if}
+{#if app.setup}<SetupWizard />{/if}
 <ConfirmHost />
 
 <div class="toasts">

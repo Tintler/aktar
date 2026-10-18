@@ -19,6 +19,8 @@ from pathlib import Path
 
 import backlog
 import fonts
+import languages
+import llm_provider
 import subtitle
 
 try:
@@ -39,6 +41,9 @@ EXE_SUFFIX = '.exe' if WINDOWS else ''
 
 DEFAULT_CONFIG = {
     'base_url': 'http://127.0.0.1:1234/v1',
+    # Sunucu turu (F152): 'lmstudio' ya da 'openai' (Ollama, llama.cpp, vLLM, OpenAI, OpenRouter ...).
+    # API anahtari config.json'a degil isletim sistemi deposuna yazilir (llm_provider).
+    'provider': 'lmstudio',
     'model': 'gemma-4-26b-a4b-it-qat@q4_k_xl',
     'batch_cues': 10,
     'max_tokens': 8192,
@@ -46,6 +51,9 @@ DEFAULT_CONFIG = {
     'timeout_seconds': 1800,
     'auto_retry_count': 2,
     'glossary_strict': False,
+    # Ceviri dil cifti (F151): kaynak 'auto' olabilir; varsayilan Ingilizce -> Turkce.
+    'source_language': 'en',
+    'target_language': 'tr',
     'analysis_chunk_chars': 12000,
     # Tum soru-cevaplar (genel sohbet, koleksiyon, belge, video): modele tek istekte
     # gidecek en fazla baglam karakteri. Asilirsa yalnizca soruyla ilgili parcalar gider.
@@ -119,7 +127,9 @@ def retryable_translation_error(error):
         return message.startswith(TRANSLATION_RESPONSE_ERROR_PREFIXES)
     if isinstance(error, RuntimeError):
         return (message.startswith(('LM Studio baglantisi kurulamadi',
-                                    'LM Studio istegi zaman asimina ugradi'))
+                                    'LM Studio istegi zaman asimina ugradi',
+                                    'Model sunucusuna baglanilamadi',
+                                    'Model sunucusu istegi zaman asimina ugradi'))
                 or bool(re.match(r'HTTP (?:408|429|5\d\d):', message)))
     return False
 
@@ -217,12 +227,10 @@ def load_config(path=None):
 
 
 def validate_config(cfg):
-    from urllib.parse import urlparse
-    parsed = urlparse(str(cfg['base_url']))
-    if parsed.scheme != 'http' or parsed.hostname not in ('localhost', '127.0.0.1', '::1'):
-        raise ValueError('base_url yalnızca yerel HTTP adresi olabilir.')
+    llm_provider.validate(cfg)
     if not str(cfg['model']).strip():
         raise ValueError('Model adı boş olamaz.')
+    languages.validate(cfg)
     for key in ('batch_cues', 'max_tokens', 'timeout_seconds', 'analysis_chunk_chars'):
         if int(cfg[key]) <= 0:
             raise ValueError(f'{key} sıfırdan büyük olmalı.')
@@ -294,6 +302,8 @@ def keep_loaded(client, names, log=None):
     icin sohbet modeli istenince her soruda biri bosaltilip digeri yuklenir. Acikca yuklenen model bu
     tahliyeye girmez. LM Studio disi sunucularda (REST API yok) sessizce bir sey yapmaz.
     Donen: bu cagrida yuklenen instance kimlikleri (uygulama kapanirken bosaltmak icin)."""
+    if not llm_provider.is_lmstudio(getattr(client, 'cfg', {})):
+        return []
     wanted = [name for name in dict.fromkeys(str(n or '').strip() for n in names) if name]
     if not wanted:
         return []
@@ -322,6 +332,8 @@ def keep_loaded(client, names, log=None):
 
 def unload_models(client, instances):
     """keep_loaded ile yuklenenleri bosaltir (uygulama kapanirken); hatalar yok sayilir."""
+    if not llm_provider.is_lmstudio(getattr(client, 'cfg', {})):
+        return
     for instance in instances:
         try:
             client.request('/api/v1/models/unload', {'instance_id': instance})
@@ -403,7 +415,7 @@ def _stem_variants(word):
     return variants
 
 
-def _target_search(target, text):
+def _target_search(target, text, language='tr'):
     """Glossary karsiligi ceviride Turkce cekimli olarak geciyor mu?
 
     Metindeki kelime, hedefin govde bicimlerinden biriyle baslamali ve geriye
@@ -411,6 +423,8 @@ def _target_search(target, text):
     hedeflerde onceki kelimeler aynen ve ardisik gecmeli; ek yalnizca son
     kelimeye gelir.
     """
+    if language != 'tr':
+        return languages.loose_search(target, text)
     target_words = re.findall(r'[^\W\d_]+', tr_lower(target))
     if not target_words:
         return False
@@ -429,7 +443,10 @@ def _target_search(target, text):
 
 def source_term_regex(term):
     """Ingilizce kaynak terimi tam kelime olarak arar; yalnizca -s/-es ve iyelik
-    's eklerine izin verir: "Ash" -> "Ash's" evet, "ashamed" hayir."""
+    's eklerine izin verir: "Ash" -> "Ash's" evet, "ashamed" hayir. Japonca/Cince gibi
+    bosluksuz yazilan kaynaklarda kelime siniri olmadigindan alt dize aranir."""
+    if languages.no_space(term):
+        return re.compile(re.escape(term), re.I)
     return re.compile(r'(?<!\w)' + re.escape(term) + r"(?:s|es|'s|’s)?(?!\w)", re.I)
 
 
@@ -497,7 +514,7 @@ def _clean_analysis_json(text):
     return value
 
 
-def parse_term_analysis(text, source_text, translated_text=None, existing=None):
+def parse_term_analysis(text, source_text, translated_text=None, existing=None, language='tr'):
     """LLM terim JSON'unu kaynaga dayali olarak dogrular ve normalize eder."""
     value = _clean_analysis_json(text)
     existing_keys = {str(item.get('source', '')).strip().casefold() for item in (existing or [])}
@@ -513,7 +530,7 @@ def parse_term_analysis(text, source_text, translated_text=None, existing=None):
         matches = list(source_term_regex(source).finditer(source_text))
         if not matches:
             continue
-        if translated_text is not None and not _target_search(target, translated_text):
+        if translated_text is not None and not _target_search(target, translated_text, language):
             continue
         seen.add(key)
         kind = str(item.get('type', 'term')).strip().lower()
@@ -613,7 +630,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class Client:
-    """LM Studio yerel sunucu istemcisi (yalnizca yerel HTTP, proxy yok)."""
+    """Model sunucusu istemcisi: LM Studio ya da OpenAI uyumlu sunucu (F152; proxy ve yonlendirme yok)."""
 
     def __init__(self, cfg, log=print):
         validate_config(cfg)
@@ -631,33 +648,34 @@ class Client:
         return base + route
 
     def request(self, route, payload=None):
-        headers = {'Content-Type': 'application/json'}
-        token = os.environ.get('LM_STUDIO_API_KEY')
-        if token:
-            headers['Authorization'] = 'Bearer ' + token
+        if route.startswith('/api/') and not llm_provider.is_lmstudio(self.cfg):
+            raise RuntimeError('Bu uç yalnızca LM Studio sunucusunda var: ' + route)
         request = urllib.request.Request(
             self._url(route),
             data=None if payload is None else json.dumps(payload).encode('utf-8'),
-            headers=headers,
+            headers=llm_provider.headers(),
         )
         try:
             with self.opener.open(request, timeout=self.cfg['timeout_seconds']) as response:
                 return json.loads(response.read().decode('utf-8'))
         except urllib.error.HTTPError as error:
-            raise RuntimeError(f'HTTP {error.code}: LM Studio istegi reddedildi.') from None
+            raise RuntimeError(llm_provider.http_error(error)) from None
         except urllib.error.URLError as error:
             if isinstance(error.reason, TimeoutError):
-                raise RuntimeError('LM Studio istegi zaman asimina ugradi.') from None
-            raise RuntimeError('LM Studio baglantisi kurulamadi: ' + str(self.cfg['base_url'])) from None
+                raise RuntimeError('Model sunucusu istegi zaman asimina ugradi.') from None
+            raise RuntimeError('Model sunucusuna baglanilamadi: ' + str(self.cfg['base_url'])) from None
         except TimeoutError:
-            raise RuntimeError('LM Studio istegi zaman asimina ugradi.') from None
+            raise RuntimeError('Model sunucusu istegi zaman asimina ugradi.') from None
 
     def _thinking(self, payload):
         """disable_thinking: LM Studio reasoning_effort='none' ile dusunmeyi kapatir
         (chat_template_kwargs LM Studio'da yok sayiliyor; vLLM/llama.cpp icin kalir).
 
         thinking=True (sohbet dugmesi, F100): dusunme acikca istenir; Gemma 4 API'de
-        parametresiz istekte hic dusunmuyor (LM Studio'nun kendi sohbetinde aciktir)."""
+        parametresiz istekte hic dusunmuyor (LM Studio'nun kendi sohbetinde aciktir).
+        Internetteki OpenAI uyumlu API'lere bu standart disi alanlar gonderilmez (F152)."""
+        if not llm_provider.sends_extensions(self.cfg):
+            return
         if self.cfg.get('thinking') is True:
             payload['reasoning_effort'] = 'medium'
             payload['chat_template_kwargs'] = {'enable_thinking': True}
@@ -736,7 +754,7 @@ class Client:
             raise ValueError(
                 'Boş veya kod bloğu içeren yanıt alındı: model metin döndürmedi '
                 f'(finish_reason={finish}, düşünce_uzunluğu={len(str(reasoning))}{extra}). '
-                'Model düşünme (reasoning) üretiyor olabilir: LM Studio model preset\'inde '
+                'Model düşünme (reasoning) üretiyor olabilir: sunucunun model ayarında '
                 'thinking/reasoning kapatın, config.json içindeki disable_thinking değerini '
                 'deneyin veya max_tokens değerini artırın.'
             )
@@ -761,12 +779,8 @@ class Client:
             'stream': True,
         }
         self._thinking(payload)
-        headers = {'Content-Type': 'application/json'}
-        token = os.environ.get('LM_STUDIO_API_KEY')
-        if token:
-            headers['Authorization'] = 'Bearer ' + token
         request = urllib.request.Request(self._url('/chat/completions'),
-                                         data=json.dumps(payload).encode('utf-8'), headers=headers)
+                                         data=json.dumps(payload).encode('utf-8'), headers=llm_provider.headers())
         text, finish, reasoning = '', None, ''
         self.last_reasoning = ''
         try:
@@ -798,13 +812,13 @@ class Client:
                             on_delta(text)
                     finish = choice.get('finish_reason') or finish
         except urllib.error.HTTPError as error:
-            raise RuntimeError(f'HTTP {error.code}: LM Studio istegi reddedildi.') from None
+            raise RuntimeError(llm_provider.http_error(error)) from None
         except urllib.error.URLError as error:
             if isinstance(error.reason, TimeoutError):
-                raise RuntimeError('LM Studio istegi zaman asimina ugradi.') from None
-            raise RuntimeError('LM Studio baglantisi kurulamadi: ' + str(self.cfg['base_url'])) from None
+                raise RuntimeError('Model sunucusu istegi zaman asimina ugradi.') from None
+            raise RuntimeError('Model sunucusuna baglanilamadi: ' + str(self.cfg['base_url'])) from None
         except TimeoutError:
-            raise RuntimeError('LM Studio istegi zaman asimina ugradi.') from None
+            raise RuntimeError('Model sunucusu istegi zaman asimina ugradi.') from None
         self.last_reasoning = reasoning_text({'reasoning_content': reasoning}, text)
         return text, finish
 
@@ -823,6 +837,11 @@ def reasoning_text(message, content=''):
 def prompt_path():
     external = APP_DIR / 'translation_prompt.txt'
     return external if external.exists() else ROOT / 'translation_prompt.txt'
+
+
+def translation_prompt(cfg=None):
+    """Altyazi ceviri istemi, secili dil ciftine uyarlanmis (en -> tr icin dosyadaki metin)."""
+    return languages.adapt(read(prompt_path()), cfg)
 
 
 def clean_response(text):
@@ -845,7 +864,7 @@ def clean_response(text):
     return value
 
 
-def glossary_missing(source_text, translated_text, glossary):
+def glossary_missing(source_text, translated_text, glossary, language='tr'):
     """Kaynaginda gecen ama ceviride karsiligi bulunmayan glossary girdileri.
 
     Denetim yalnizca kaynagi bu parcada GECEN terimler icin yapilir; kaynakta
@@ -854,7 +873,7 @@ def glossary_missing(source_text, translated_text, glossary):
     missing = []
     for item in glossary:
         if source_term_regex(item['source']).search(source_text):
-            if not _target_search(item['target'], translated_text):
+            if not _target_search(item['target'], translated_text, language):
                 missing.append(item)
     return missing
 
@@ -948,7 +967,8 @@ class TranslationEngine:
         if not chunks:
             return {'terms': [], 'decisions': []}
         mode = 'post' if translated_cues else 'pre'
-        system = POST_ANALYSIS_PROMPT if translated_cues else TERM_ANALYSIS_PROMPT
+        system = languages.adapt(POST_ANALYSIS_PROMPT if translated_cues else TERM_ANALYSIS_PROMPT, cfg)
+        language = languages.target(cfg)
         source_text = '\n'.join(visible_cue_text(cue) for cue in cues)
         translated_text = ('\n'.join(visible_cue_text(cue) for cue in translated_cues)
                            if translated_cues else None)
@@ -977,7 +997,7 @@ class TranslationEngine:
             def request_and_parse():
                 raw = client.generate(system, user, temperature=0.1,
                                       max_tokens=min(int(cfg['max_tokens']), 4096))
-                return parse_term_analysis(raw, source_text, translated_text, glossary)
+                return parse_term_analysis(raw, source_text, translated_text, glossary, language)
             # JSON/sema hatasi da configured retry politikasina tabidir.
             parsed = self._retry(cfg, request_and_parse)
             state.setdefault('parts', []).append(parsed)
@@ -1019,7 +1039,7 @@ class TranslationEngine:
             if not source.translatable:
                 continue
             missing = glossary_missing(visible_cue_text(source),
-                                       visible_cue_text(translated), glossary)
+                                       visible_cue_text(translated), glossary, languages.target(cfg))
             if not missing:
                 continue
             if pause:
@@ -1029,12 +1049,13 @@ class TranslationEngine:
             if visible is None:
                 continue
             fixed = self._retry(cfg, lambda: self._fix_texts(
-                client, [visible], missing, read(prompt_path())))[0]
+                client, [visible], missing, translation_prompt(cfg)))[0]
             rebuilt = subtitle.Cue(
                 subtitle.rebuild(analysis, fixed, note=self._note_reflow).split('\n'),
                 start=translated.start, end=translated.end, index=translated.index,
                 extra=translated.extra, prefix=translated.prefix)
-            still = glossary_missing(visible_cue_text(source), visible_cue_text(rebuilt), missing)
+            still = glossary_missing(visible_cue_text(source), visible_cue_text(rebuilt), missing,
+                                     languages.target(cfg))
             if still:
                 names = ', '.join(item['source'] for item in still)
                 if cfg.get('glossary_strict'):
@@ -1055,7 +1076,7 @@ class TranslationEngine:
         self.log(f'Model: {cfg["model"]} @ {cfg["base_url"]} (batch_cues={cfg["batch_cues"]})')
         glossary = _dedupe_glossary(glossary or [])
         decisions = [str(item).strip() for item in (decisions or []) if str(item).strip()]
-        prompt = prompt if prompt is not None else read(prompt_path())
+        prompt = prompt if prompt is not None else translation_prompt(cfg)
         items = subtitle.translatable(cues)
         if not items:
             return list(cues)
@@ -1192,7 +1213,7 @@ class TranslationEngine:
             lines.append(f'ID: {offset}')
             lines.append('TEXT: ' + text)
         user = '\n'.join(lines)
-        text = clean_response(client.generate(GLOSSARY_FIX_PROMPT, user))
+        text = clean_response(client.generate(languages.adapt(GLOSSARY_FIX_PROMPT, self.config_provider()), user))
         expected = list(range(1, len(texts) + 1))
         found = subtitle.parse_translation_response(text, expected)
         return [self._clean(found[index]) for index in expected]
@@ -1209,13 +1230,14 @@ class TranslationEngine:
         translated = self._retry(cfg, lambda: self._request_texts(
             client, [text for text in texts if text is not None], glossary, decisions, prompt))
         restored = self._assemble(analyses, texts, translated)
-        missing = glossary_missing(self._join(batch), self._join(restored), glossary)
+        language = languages.target(cfg)
+        missing = glossary_missing(self._join(batch), self._join(restored), glossary, language)
         if missing:
             fixed = self._retry(cfg, lambda: self._fix_texts(
                 client, translated, missing, prompt))
             translated = fixed
             restored = self._assemble(analyses, texts, fixed)
-            still = glossary_missing(self._join(batch), self._join(restored), glossary)
+            still = glossary_missing(self._join(batch), self._join(restored), glossary, language)
             if still:
                 names = ', '.join(item['source'] for item in still)
                 self.failed_fixes.append({'missing': [item['source'] for item in still]})
@@ -1269,8 +1291,9 @@ class TranslationEngine:
         return '\n'.join(cue.text for cue in cues)
 
 
-def render_output(kind, payload, cues, log=None):
-    """Ceviri ciktisini uretir; ASS/SSA'da Turkce desteklemeyen fontu Calibri yapar.
+def render_output(kind, payload, cues, log=None, language='tr'):
+    """Ceviri ciktisini uretir; ASS/SSA'da hedef dili (varsayilan Turkce) cizemeyen fontu
+    o dilin yedek fontuyla (Turkce icin Calibri) degistirir.
 
     Kaynak font Turkce karakterleri cizemiyorsa (kurulu degil veya glifleri
     yok) ciktidaki Fontname ve `\\fn` etiketleri `fonts.FALLBACK_FONT` ile
@@ -1280,13 +1303,17 @@ def render_output(kind, payload, cues, log=None):
     text = subtitle.render_by_kind(kind, payload, cues)
     if kind not in ('ass', 'ssa'):
         return text, {}
-    replacements = fonts.turkish_replacements(subtitle.ass_font_families(text))
+    sample = languages.FONT_SAMPLES.get(language)
+    if not sample:
+        return text, {}
+    chars, fallback = sample
+    replacements = fonts.replacements(subtitle.ass_font_families(text), chars, fallback)
     if not replacements:
         return text, {}
     text, changed = subtitle.apply_ass_font_fallback(text, replacements)
     if log and changed:
         pairs = ', '.join(f'{source} -> {target}'
                           for source, target in sorted(replacements.items()))
-        log(f'Font uyarısı: kaynak font Türkçe karakterleri desteklemiyor; '
-            f'{changed} yerde Calibri kullanıldı ({pairs}).')
+        log(f'Font uyarısı: kaynak font {languages.label(language)} karakterleri desteklemiyor; '
+            f'{changed} yerde {fallback} kullanıldı ({pairs}).')
     return text, replacements

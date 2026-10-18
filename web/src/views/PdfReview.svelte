@@ -10,6 +10,9 @@
   let summary = $state(review.summary);
   let chapters = $state(summary.chapters.map((c) => ({ ...c })));
   let meta = $state({ title: summary.title, author: summary.author, language: summary.language });
+  // F153: kitap dili listesi (ceviri dilleriyle ayni); liste gelene kadar mevcut dil gorunur.
+  let languageChoices = $state([{ code: summary.language, label: summary.language }]);
+  act('translation_languages').then((r) => { if (r) languageChoices = r.choices; });
   let saved = $state(snapshot());
   let view = $state(null);          // pdf_page sonucu
   let text = $state('');
@@ -114,7 +117,7 @@
     <input class="field meta" bind:value={meta.title} placeholder="Kitap adı" title="Kitap adı" />
     <input class="field meta small" bind:value={meta.author} placeholder="Yazar" title="Yazar" />
     <select class="field lang" bind:value={meta.language} title="Kitabın dili">
-      <option value="tr">Türkçe</option><option value="en">İngilizce</option>
+      {#each languageChoices as l}<option value={l.code}>{l.label}</option>{/each}
     </select>
     <span class="grow"></span>
     {#if dirty}<span class="unsaved">Kaydedilmemiş değişiklik</span>{/if}

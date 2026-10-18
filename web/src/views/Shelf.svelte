@@ -12,6 +12,7 @@
   async function add() {
     const result = await act('shelf_add');
     if (result) app.shelf = result.books;
+    if (result?.errors?.length) toast(result.errors.join(' · '), 'error');
   }
 
   async function remove(book) {
@@ -39,7 +40,7 @@
 <section class="page">
   <div class="page-head">
     <h1>Okuma</h1>
-    <button class="btn" onclick={() => openPdfImport(null, 'reading')} title="Taranmış PDF'yi okuyup EPUB kitap yapar"><Icon name="fileText" size={16} />PDF'den kitap</button>
+    <button class="btn" onclick={() => openPdfImport(null, 'reading')} title="PDF'yi (taranmış ya da metinli) okuyup EPUB kitap yapar"><Icon name="fileText" size={16} />PDF'den kitap</button>
     <button class="btn primary" onclick={add}><Icon name="plus" size={16} />Kitap ekle</button>
   </div>
 

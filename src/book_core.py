@@ -22,6 +22,9 @@ import threading
 import urllib.error
 import urllib.request
 
+import languages
+import llm_provider
+
 ROOT = Path(getattr(__import__('sys'), '_MEIPASS', Path(__file__).resolve().parent.parent))
 APP_DIR = Path(__import__('sys').executable).resolve().parent if getattr(__import__('sys'), 'frozen', False) else Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = {
@@ -45,7 +48,7 @@ DEFAULT_CONFIG = {
 
 # Aktar config.json'unun ust duzeyinden alinan ortak ayarlar; digerleri "book" bolumundedir.
 # glossary_strict bilerek ayri: kitap ve altyazi cevirisi kati sozlugu ayri kullanir.
-SHARED_CONFIG_KEYS = ('base_url', 'model', 'temperature', 'timeout_seconds', 'auto_retry_count')
+SHARED_CONFIG_KEYS = ('base_url', 'provider', 'model', 'temperature', 'timeout_seconds', 'auto_retry_count')
 
 ANALYSIS_VERSION = 2
 LIVE_RESUMABLE_CONFIG_KEYS = (
@@ -82,7 +85,8 @@ def retryable_translation_error(error):
     if isinstance(error, ValueError):
         return message.startswith(TRANSLATION_RESPONSE_ERROR_PREFIXES)
     if isinstance(error, RuntimeError):
-        return (message.startswith(('LM Studio baglantisi kurulamadi', 'LM Studio istegi zaman asimina ugradi')) or
+        return (message.startswith(('LM Studio baglantisi kurulamadi', 'LM Studio istegi zaman asimina ugradi',
+                                    'Model sunucusuna baglanilamadi', 'Model sunucusu istegi zaman asimina ugradi')) or
                 bool(re.match(r'HTTP (?:408|429|5\d\d):', message)))
     return False
 
@@ -236,12 +240,10 @@ def load_config(path=None):
 
 
 def validate_config(cfg):
-    from urllib.parse import urlparse
-    parsed = urlparse(str(cfg['base_url']))
-    if parsed.scheme != 'http' or parsed.hostname not in ('localhost', '127.0.0.1', '::1'):
-        raise ValueError('base_url yalnizca yerel HTTP adresi olabilir.')
+    llm_provider.validate(dict(cfg, base_url=cfg['base_url']))  # eksik alan KeyError: checkpoint korumasi
     if not str(cfg['model']).strip():
         raise ValueError('Model adi bos olamaz.')
+    languages.validate(cfg)
     for key in ('chunk_chars', 'max_tokens', 'notes_max_tokens', 'timeout_seconds', 'fallback_context_length'):
         if int(cfg[key]) <= 0:
             raise ValueError(f'{key} sifirdan buyuk olmali.')
@@ -740,6 +742,11 @@ def prompt_path():
     return external if external.exists() else ROOT / 'book_translation_prompt.txt'
 
 
+def book_prompt(cfg=None):
+    """Kitap ceviri istemi, kitabin dil ciftine uyarlanmis (en -> tr icin dosyadaki metin aynen)."""
+    return languages.adapt(read(prompt_path()), cfg)
+
+
 def digest(text):
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
@@ -801,7 +808,10 @@ def _word_regex(pattern, flags=0):
 
 def source_term_regex(term):
     """Ingilizce kaynak terimi tam kelime olarak arar (G17); yalnizca -s/-es ve
-    iyelik 's eklerine izin verir: "Ash" -> "Ash's" evet, "ashamed" hayir."""
+    iyelik 's eklerine izin verir: "Ash" -> "Ash's" evet, "ashamed" hayir.
+    Bosluksuz yazilan kaynak dillerde (Japonca, Cince; F151) alt dize aranir."""
+    if languages.no_space(term):
+        return re.compile(re.escape(term), re.I)
     return re.compile(r'(?<!\w)' + re.escape(term) + r"(?:s|es|'s|’s)?(?!\w)", re.I)
 
 
@@ -880,13 +890,16 @@ def _stem_variants(word):
     return variants
 
 
-def _target_search(target, text):
+def _target_search(target, text, language='tr'):
     """Glossary karsiliginin ceviride Turkce cekimli olarak gecip gecmedigini denetler.
 
     Metindeki kelime, hedefin govde bicimlerinden biriyle baslamali ve geriye
     kalan kisim yalnizca bilinen cekim eklerinden olusmali. Cok kelimeli
     hedeflerde onceki kelimeler aynen ve ardisik gecmeli; ek yalnizca son kelimeye gelir.
+    Hedef dil Turkce degilse (F151) languages.loose_search kullanilir.
     """
+    if language != 'tr':
+        return languages.loose_search(target, text)
     target_words = re.findall(r'[^\W\d_]+', tr_lower(target))
     if not target_words:
         return False
@@ -1417,28 +1430,26 @@ class Client:
         return base + route
 
     def request(self, route, payload=None):
-        headers = {'Content-Type': 'application/json'}
-        token = os.environ.get('LM_STUDIO_API_KEY')
-        if token:
-            headers['Authorization'] = 'Bearer ' + token
+        if route.startswith('/api/') and not llm_provider.is_lmstudio(self.cfg):
+            raise RuntimeError('Bu uc yalnizca LM Studio sunucusunda var: ' + route)
         request = urllib.request.Request(
             self._url(route),
             data=None if payload is None else json.dumps(payload).encode('utf-8'),
-            headers=headers,
+            headers=llm_provider.headers(),
         )
-        self.log(f'LM Studio istegi: {"POST" if payload is not None else "GET"} {route}')
+        self.log(f'Model sunucusu istegi: {"POST" if payload is not None else "GET"} {route}')
         try:
             with self.opener.open(request, timeout=int(self.cfg['timeout_seconds'])) as response:
                 result = json.load(response)
-                self.log(f'LM Studio yaniti: HTTP {getattr(response, "status", 200)} {route}')
+                self.log(f'Model sunucusu yaniti: HTTP {getattr(response, "status", 200)} {route}')
                 return result
         except urllib.error.HTTPError as error:
             detail = error.read().decode('utf-8', errors='replace')[:1500]
             raise RuntimeError(f'HTTP {error.code}: {detail}') from error
         except urllib.error.URLError as error:
-            raise RuntimeError(f'LM Studio baglantisi kurulamadi: {error.reason}') from error
+            raise RuntimeError(f'Model sunucusuna baglanilamadi: {error.reason}') from error
         except TimeoutError as error:
-            raise RuntimeError('LM Studio istegi zaman asimina ugradi.') from error
+            raise RuntimeError('Model sunucusu istegi zaman asimina ugradi.') from error
 
     def model_info(self):
         try:
@@ -1464,6 +1475,10 @@ class Client:
     def context_length(self):
         if self._context_cache is not None:
             return self._context_cache
+        if not llm_provider.is_lmstudio(self.cfg):
+            # OpenAI uyumlu sunucular yuklu modelin context uzunlugunu bildirmez (F152).
+            self._context_cache = (int(self.cfg['fallback_context_length']), 'config fallback')
+            return self._context_cache
         try:
             info, _ = self.model_info()
             if info and not info['loaded']:
@@ -1486,9 +1501,43 @@ class Client:
     def generate(self, system, user, max_tokens, require_marker=True, allow_json_fence=False):
         end_marker = '[[END_' + secrets.token_hex(12) + ']]'
         marker_instruction = '\nAfter completing ALL requested text, append this exact completion marker on its own final line: ' + end_marker
+        if not llm_provider.is_lmstudio(self.cfg):
+            # /chat/completions'ta modeller sistem iletisindeki isaret talimatini sik atliyor; kullanici
+            # iletisinin sonunda tekrarlaninca uyuyorlar (F152, gemma-4 ile denendi).
+            reminder = '\n\n---' + marker_instruction if require_marker else ''
+            text, output_count = self._generate_openai(system + (marker_instruction if require_marker else ''),
+                                                       user + reminder, max_tokens)
+        else:
+            text, output_count = self._generate_lmstudio(system + (marker_instruction if require_marker else ''), user, max_tokens)
+        if isinstance(output_count, (int, float)) and output_count >= int(max_tokens):
+            raise ValueError('Cikti token sinirina ulasti; eksik sonuc kaydedilmedi.')
+        return self._finish_text(text, end_marker, require_marker, allow_json_fence)
+
+    def _generate_openai(self, system, user, max_tokens):
+        """OpenAI uyumlu /chat/completions (F152): Ollama, llama.cpp, vLLM, OpenAI ..."""
+        response = self.request('/chat/completions', {
+            'model': self.cfg['model'],
+            'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
+            'temperature': float(self.cfg['temperature']),
+            'top_p': 0.9,
+            'max_tokens': int(max_tokens),
+            'stream': False,
+        })
+        usage = response.get('usage') or {}
+        self.log(f'Token: giris={usage.get("prompt_tokens", "?")}, cikti={usage.get("completion_tokens", "?")}')
+        try:
+            choice = response['choices'][0]
+            text = str(choice['message'].get('content') or '').strip()
+        except (KeyError, IndexError, TypeError, AttributeError):
+            raise ValueError('Beklenmeyen API cikti bicimi; sonuc kaydedilmedi.') from None
+        if choice.get('finish_reason') == 'length':
+            raise ValueError('Cikti token sinirina ulasti; eksik sonuc kaydedilmedi.')
+        return text, usage.get('completion_tokens')
+
+    def _generate_lmstudio(self, system, user, max_tokens):
         response = self.request('/api/v1/chat', {
             'model': self.cfg['model'],
-            'system_prompt': system + (marker_instruction if require_marker else ''),
+            'system_prompt': system,
             'input': user,
             'integrations': [],
             'store': False,
@@ -1505,8 +1554,9 @@ class Client:
         if any(item.get('type') not in ('message', 'reasoning') for item in outputs):
             raise ValueError('Beklenmeyen API cikti tipi; sonuc kaydedilmedi.')
         text = '\n'.join(str(item.get('content', '')) for item in outputs if item.get('type') == 'message').strip()
-        if isinstance(output_count, (int, float)) and output_count >= int(max_tokens):
-            raise ValueError('Cikti token sinirina ulasti; eksik sonuc kaydedilmedi.')
+        return text, output_count
+
+    def _finish_text(self, text, end_marker, require_marker, allow_json_fence):
         if text.endswith(end_marker) and text.count(end_marker) == 1:
             text = text[:-len(end_marker)].rstrip()
         elif require_marker:
@@ -1596,14 +1646,14 @@ class TranslationEngine:
     def _enforce_glossary(self, client, source, translated, glossary, max_tokens):
         # Kaynak: tam kelime (G17). Hedef: Turkce cekim/ses olayi toleransli (G24).
         def missing_in(text, items):
-            return [item for item in items if not _target_search(item['target'], text)]
+            return [item for item in items if not _target_search(item['target'], text, languages.target(client.cfg))]
 
         present = [item for item in glossary if source_term_regex(item['source']).search(source)]
         missing = missing_in(translated, present)
         if not missing:
             return translated
         self.log('Glossary denetimi: eksik terimler duzeltiliyor: ' + ', '.join(item['source'] for item in missing))
-        system = 'Return only the corrected Turkish translation. Preserve every sentence and Markdown. Change only terminology needed to obey the mandatory glossary.'
+        system = languages.adapt('Return only the corrected Turkish translation. Preserve every sentence and Markdown. Change only terminology needed to obey the mandatory glossary.', client.cfg)
         user = f'MANDATORY GLOSSARY:\n{glossary_text(missing)}\n\nSOURCE:\n{source}\n\nTRANSLATION TO CORRECT:\n{translated}'
         fixed = self._generate(
             client, system, user, max_tokens,
@@ -1656,7 +1706,7 @@ class TranslationEngine:
                 # Imza yalnızca analiz sonucunu gerçekten değiştirebilecek değerleri kapsar.
                 # temperature, model, max_tokens, timeout, base_url gibi çeviri kararlılığı
                 # dışı ayarlar değişirse mevcut analiz checkpointleri geçersiz olmaz.
-                signature = digest(source + '\0' + ANALYSIS_PROMPT + '\0' + json.dumps(
+                signature = digest(source + '\0' + languages.adapt(ANALYSIS_PROMPT, cfg) + '\0' + json.dumps(
                     {key: cfg[key] for key in ('notes_max_tokens', 'chunk_chars') if key in cfg},
                     sort_keys=True, ensure_ascii=False))
                 state = existing or {'analysis_version': ANALYSIS_VERSION, 'signature': signature, 'effective_config': cfg, 'parts': [], 'complete': False}
@@ -1684,7 +1734,7 @@ class TranslationEngine:
                             retry_notice = ''
                         try:
                             result = parse_analysis(self._generate(
-                                client, ANALYSIS_PROMPT, user + retry_notice, int(cfg['notes_max_tokens']),
+                                client, languages.adapt(ANALYSIS_PROMPT, cfg), user + retry_notice, int(cfg['notes_max_tokens']),
                                 require_marker=False, allow_json_fence=True,
                             ))
                             break
@@ -1800,7 +1850,7 @@ class TranslationEngine:
         client = Client(cfg, self.log)
         glossary = existing.get('glossary', []) if existing and 'glossary' in existing else load_glossary(book)
         chunks = split_source(source, int(cfg['chunk_chars']))
-        signature = digest(source + '\0' + read(prompt_path()) + '\0' + json.dumps(glossary, sort_keys=True, ensure_ascii=False))
+        signature = digest(source + '\0' + book_prompt(cfg) + '\0' + json.dumps(glossary, sort_keys=True, ensure_ascii=False))
         if existing and 'effective_config' not in existing:
             legacy_keys = ('base_url', 'model', 'chunk_chars', 'max_tokens', 'notes_max_tokens', 'temperature', 'timeout_seconds')
             legacy_cfg = {key: cfg[key] for key in legacy_keys}
@@ -1833,7 +1883,7 @@ class TranslationEngine:
             self.log(f'Yalnizca gorsel bolum modele gonderilmeden korundu: {filename}')
         save_json(state_path, state)
         reference = state['reference']
-        system = read(prompt_path())
+        system = book_prompt(cfg)
         for index in range(len(state['parts']), len(chunks)):
             self.controller.checkpoint()
             self.progress(filename=filename, part=index + 1, parts=len(chunks), phase='translation')
@@ -1923,7 +1973,7 @@ class TranslationEngine:
                 self.progress(filename=filename, part=index + 1, parts=len(chunks), phase='notes')
                 note = self._generate_retry(
                     client,
-                    'Return only concise Turkish Markdown continuity notes: new glossary pairs, address-form decisions, names, and a two-sentence plot summary. Preserve existing decisions. Do not invent facts.',
+                    languages.adapt('Return only concise Turkish Markdown continuity notes: new glossary pairs, address-form decisions, names, and a two-sentence plot summary. Preserve existing decisions. Do not invent facts.', cfg),
                     f'EXISTING REFERENCE:\n{reference}\n\nSOURCE:\n{chunks[index]}\n\nTRANSLATION:\n{state["parts"][index]}',
                     int(cfg['notes_max_tokens']),
                     'Bolum notu',
@@ -2019,14 +2069,14 @@ class TranslationEngine:
             if state.get('decisions_batch') != names:
                 # G23: once kalici kararlar ayiklanir, sonra olay ozeti sikistirilir.
                 decisions_text = self._generate_retry(
-                    client, DECISIONS_PROMPT, f'EXISTING DECISIONS:\n{decisions_text}\n\nNEW NOTES:\n{new_notes}',
+                    client, languages.adapt(DECISIONS_PROMPT, client.cfg), f'EXISTING DECISIONS:\n{decisions_text}\n\nNEW NOTES:\n{new_notes}',
                     int(client.cfg['notes_max_tokens']), 'Karar listesi', require_marker=False)
                 atomic(decisions_path, decisions_text.strip() + '\n')
                 state['decisions_batch'] = names
                 save_json(book_state_path, state)
             self.controller.checkpoint()
             prior_text = self._generate_retry(
-                client, COMPRESS_PROMPT, f'PREVIOUS COMPRESSED SUMMARY:\n{prior_text}\n\nNEW NOTES:\n{new_notes}',
+                client, languages.adapt(COMPRESS_PROMPT, client.cfg), f'PREVIOUS COMPRESSED SUMMARY:\n{prior_text}\n\nNEW NOTES:\n{new_notes}',
                 int(client.cfg['notes_max_tokens']), 'Baglam ozeti', require_marker=False)
             atomic(summary_path, prior_text.strip() + '\n')
             state['compressed_notes'] = sorted(set(state['compressed_notes']) | set(names))

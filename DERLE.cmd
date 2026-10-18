@@ -26,9 +26,14 @@ call npm run build
 if errorlevel 1 (popd & echo HATA: Arayuz derlenemedi. & exit /b 1)
 popd
 
+rem Surum bilgisi (F155): src\version.py -> Aktar.exe dosya ozellikleri
+py -3 tools\version_info.py build\version_info.txt
+if errorlevel 1 (echo HATA: Surum bilgisi uretilemedi. & exit /b 1)
+
 py -3 -m PyInstaller ^
     --noconfirm --clean --onefile --windowed ^
     --name Aktar ^
+    --version-file build\version_info.txt ^
     --paths src ^
     %ICON_ARG% ^
     --add-data "bin\ffmpeg.exe;bin" --add-data "bin\ffprobe.exe;bin" ^

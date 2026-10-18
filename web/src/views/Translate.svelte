@@ -3,6 +3,7 @@
   import Toggle from '../components/Toggle.svelte';
   import GlossaryModal from '../components/GlossaryModal.svelte';
   import SubtitleExportModal from '../components/SubtitleExportModal.svelte';
+  import LanguagePair from '../components/LanguagePair.svelte';
   import { subtool, jobText, cancelJob } from '../lib/subtools.svelte.js';
   import { app, act, setTranslate, onDrop, toast, go } from '../lib/state.svelte.js';
   import { prompt, choose, confirm } from '../lib/confirm.svelte.js';
@@ -21,6 +22,8 @@
   const ocrJob = $derived(subtool.job?.kind === 'ocr' && subtool.job.path === t.video?.path ? subtool.job : null);
   const streamKey = (s) => (s.whisper ? 'whisper' : `stream:${s.index}`);
   const selected = $derived(t.streams.find((s) => s.index === view.stream && s.supported));
+  const targetName = $derived(t.languages?.choices.find((c) => c.code === t.languages.target)?.label ?? 'Türkçe');
+  const targetTag = $derived('_' + (t.languages?.target ?? 'tr').toUpperCase());
 
   async function readImage(s) {
     await act('subtitle_ocr', t.video.path, s.index);
@@ -152,7 +155,7 @@
         <span class="tile"><Icon name="film" size={30} /></span>
         <b>Videoyu buraya bırakın</b>
         <span class="dim">ya da tıklayıp seçin · {VIDEO.join(' ')}</span>
-        <span class="note">Seçilen metin altyazı LM Studio'daki modelle Türkçeye çevrilir ve videonun yanına <span class="mono">_TR</span> ekiyle yazılır. Altyazısı olmayan videoda önce Whisper ile altyazı oluşturulabilir. Kaynak video değiştirilmez.</span>
+        <span class="note">Seçilen metin altyazı seçili modelle hedef dile ({targetName}) çevrilir ve videonun yanına <span class="mono">{targetTag}</span> ekiyle yazılır. Altyazısı olmayan videoda önce Whisper ile altyazı oluşturulabilir. Kaynak video değiştirilmez.</span>
       </button>
     {:else}
       <div class="hero card">
@@ -223,6 +226,7 @@
     <button class="btn ghost" onclick={editChapterGlossary} disabled={t.running}>
       <Icon name="dict" size={16} />Bölüm terimleri{t.chapter_glossary.length ? ' · ' + t.chapter_glossary.length : ''}</button>
     <Toggle bind:checked={view.analysis} disabled={t.running} label="Ön analiz yap" />
+    <LanguagePair value={t.languages} disabled={t.running} onchange={(languages) => setTranslate({ ...t, languages })} />
     <div class="progress">
       <span class="mono count">{whisperJob ? clock(t.progress.done) + ' / ' + clock(t.progress.total) : t.progress.done + ' / ' + t.progress.total}</span>
       <div class="track"><i style:width="{percent}%"></i></div>

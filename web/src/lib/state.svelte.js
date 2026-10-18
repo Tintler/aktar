@@ -31,6 +31,8 @@ export const app = $state({
   bookChat: null,             // F146: okuyucudaki kitap sohbeti {book, chat} (bridge_reader.reader_chat_open)
   // PDF'den kitap (bridge_pdf): acik pencere ve calisan is (pencere kapansa da is surer).
   pdfImport: null,            // {open, info, title, author, target, running, progress, result}
+  setup: false,               // F154: bilesen denetimi penceresi acik
+  version: '',                // F155: uygulama surumu (src/version.py)
   pdfReview: null,            // gozden gecirme: {path, target, summary} (bridge_pdf.pdf_review)
   settingsTab: 'models',      // Ayarlar sayfasinin acik kategorisi (ui.json 'settings_tab')
   // Sesli okuma (bridge_tts): motor durumu, kurulu motorlar, hazirlama/kayit ilerlemesi, tercihler (ui.json 'tts').
@@ -335,6 +337,7 @@ export async function init() {
 
   const start = await call('startup');
   app.platform = start.platform;
+  app.version = start.version ?? '';
   app.themes = start.themes;
   setTheme(start.prefs?.theme ?? 'system', false);
   if (start.prefs?.view && VIEWS.includes(start.prefs.view)) app.view = start.prefs.view;
@@ -352,6 +355,7 @@ export async function init() {
   call('shelf_list').then((books) => { if (Array.isArray(books)) app.shelf = books; });
   call('tts_status').then((status) => { if (status?.state) app.tts = status; });
   call('refresh_models');
+  if (!app.prefs.setup_seen) app.setup = true;   // F154: ilk acilista bilesen denetimi
   // Komut satirindan ("Birlikte ac") gelen video Altyazi Cevir'de acilir.
   if (start.open?.length) openInTranslate(start.open[0]);
 }

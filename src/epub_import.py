@@ -9,6 +9,8 @@ from urllib.parse import quote, unquote
 import xml.etree.ElementTree as ET
 import zipfile
 
+import languages
+
 
 EXTERNAL_LINK = re.compile(r'^(?:https?:|mailto:)', re.I)
 VOID_TAGS = {'area','base','br','col','embed','hr','img','input','link','meta','source','track','wbr'}
@@ -366,7 +368,7 @@ def chapter_files(z,opf,manifest,spine,package,slug_chars=SLUG_CHARS):
     return result,mode,link_map
 
 
-def prepare(epub, workspace_parent=None):
+def prepare(epub, workspace_parent=None, source_language='en', target_language='tr'):
     epub=Path(epub).resolve()
     raw=epub.read_bytes(); fingerprint=hashlib.sha256(raw).hexdigest()
     parent=Path(workspace_parent).resolve() if workspace_parent else epub.parent
@@ -415,11 +417,14 @@ def prepare(epub, workspace_parent=None):
         if not chapters:raise ValueError('EPUB icinde okunabilir metin bulunamadi; taranmis kitap/OCR desteklenmiyor.')
     book.mkdir();(book/'source').mkdir();(book/'translation').mkdir()
     for name,text in chapters:(book/'source'/name).write_text(text,encoding='utf-8')
+    # Dil cifti (F151) proje basina saklanir; yarim kalan kitap ayar degisse de kendi diliyle surer.
+    source_name='source language' if source_language==languages.AUTO else languages.name(source_language)
+    target_name=languages.name(target_language)
     context=f'''# 00-CONTEXT
 ## Metadata
 - **Title:** {title}
 - **Author:** {author}
-- **Direction:** English → Turkish
+- **Direction:** {source_name} → {target_name}
 ## Workflow State
 - **Style approved:** yes
 - **Last completed file:** none
@@ -430,20 +435,24 @@ def prepare(epub, workspace_parent=None):
     context+='\n'.join(f'| `{n}` | {"next" if i==0 else ""} |' for i,(n,_) in enumerate(chapters))
     context+='''
 ## Tone and Style
-- Follow the source narrator, tense, register and tone; use natural literary Turkish.
+- Follow the source narrator, tense, register and tone; use natural literary {target_name}.
 - Preserve profanity, ambiguity and deliberate repetition. No unit conversion.
 - Address form: infer from the source relationship, then keep it consistent.
 - Automatic initial defaults for unattended translation; not a recorded human style review.
 ## Proper Nouns
-Preserve original names unless a conventional Turkish form is clearly established.
+Preserve original names unless a conventional {target_name} form is clearly established.
 ## Glossary
 No initial glossary. Follow decisions recorded in Translation notes.
 ## Recurring Phrases
 Preserve consistency.
 ## Section Summaries
 '''
+    context=context.replace('{target_name}',target_name)
     (book/'00-CONTEXT.md').write_text(context,encoding='utf-8')
-    marker.write_text(json.dumps({'import_version':4,'toc_mode':mode,'sha256':fingerprint,'epub':str(epub),
-                                  'files':[n for n,t in chapters],'link_map':link_map},ensure_ascii=False,indent=2),encoding='utf-8')
+    meta={'import_version':4,'toc_mode':mode,'sha256':fingerprint,'epub':str(epub),
+          'files':[n for n,t in chapters],'link_map':link_map}
+    if (source_language,target_language)!=(languages.DEFAULT_SOURCE,languages.DEFAULT_TARGET):
+        meta.update(source_language=source_language,target_language=target_language)
+    marker.write_text(json.dumps(meta,ensure_ascii=False,indent=2),encoding='utf-8')
     print(f'EPUB ayrildi: {len(chapters)} metin dosyasi. Klasor: {book}',flush=True)
     return book

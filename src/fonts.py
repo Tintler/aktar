@@ -30,7 +30,7 @@ FALLBACK_FONT = 'Calibri'
 _support_cache = {}
 
 
-def _gdi_missing(family):
+def _gdi_missing(family, chars=TURKISH_CHARS):
     """Kurulu bir font ailesinde eksik Turkce glifleri dondurur (Windows GDI).
 
     Donen: eksik karakter listesi. Font kurulu degilse GDI yine de bir yedek
@@ -81,12 +81,12 @@ def _gdi_missing(family):
     dc = gdi32.CreateCompatibleDC(None)
     previous = gdi32.SelectObject(dc, font)
     try:
-        buffer = ctypes.create_unicode_buffer(TURKISH_CHARS)
-        indices = (ctypes.c_ushort * len(TURKISH_CHARS))()
+        buffer = ctypes.create_unicode_buffer(chars)
+        indices = (ctypes.c_ushort * len(chars))()
         # GGI_MARK_NONEXISTING_GLYPHS = 1
-        gdi32.GetGlyphIndicesW(dc, buffer, len(TURKISH_CHARS), indices, 1)
+        gdi32.GetGlyphIndicesW(dc, buffer, len(chars), indices, 1)
         # 0xFFFF = glif yok, 0 = .notdef; ikisi de "cizilemez" demektir.
-        return [char for position, char in enumerate(TURKISH_CHARS)
+        return [char for position, char in enumerate(chars)
                 if indices[position] in (0xFFFF, 0)]
     finally:
         gdi32.SelectObject(dc, previous)
@@ -111,7 +111,7 @@ def _parse_charset(text):
     return ranges
 
 
-def _fontconfig_missing(family):
+def _fontconfig_missing(family, chars=TURKISH_CHARS):
     """Kurulu bir font ailesinde eksik Turkce glifleri dondurur (fontconfig / fc-list).
 
     Ailenin herhangi bir yuzu tum harfleri iceriyorsa liste bos doner. Aile kurulu
@@ -127,41 +127,53 @@ def _fontconfig_missing(family):
                             errors='replace', timeout=15)
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or 'fc-list basarisiz')
-    best = list(TURKISH_CHARS)
+    best = list(chars)
     for line in result.stdout.splitlines():
         ranges = _parse_charset(line)
         if not ranges:
             continue
-        missing = [char for char in TURKISH_CHARS
+        missing = [char for char in chars
                    if not any(start <= ord(char) <= end for start, end in ranges)]
         if len(missing) < len(best):
             best = missing
     return best
 
 
-def supports_turkish(family):
-    """Font Turkce karakterleri cizebiliyor mu? Bilinemiyorsa True doner."""
+def supports_chars(family, chars):
+    """Font verilen karakterlerin hepsini cizebiliyor mu? Bilinemiyorsa True doner."""
     name = str(family or '').strip()
     if not name:
         return True
-    if name in _support_cache:
-        return _support_cache[name]
+    key = (name, chars)
+    if key in _support_cache:
+        return _support_cache[key]
     try:
-        supported = not (_gdi_missing(name) if os.name == 'nt' else _fontconfig_missing(name))
+        supported = not (_gdi_missing(name, chars) if os.name == 'nt' else _fontconfig_missing(name, chars))
     except Exception:
         supported = True
-    _support_cache[name] = supported
+    _support_cache[key] = supported
     return supported
 
 
-def turkish_replacements(families, fallback=FALLBACK_FONT):
-    """Türkçe desteklemeyen fontlari `fallback`e esler.
+def supports_turkish(family):
+    """Font Turkce karakterleri cizebiliyor mu? Bilinemiyorsa True doner."""
+    return supports_chars(family, TURKISH_CHARS)
+
+
+def replacements(families, chars=TURKISH_CHARS, fallback=FALLBACK_FONT):
+    """`chars` karakterlerini (hedef dilin ornek harfleri, F151) cizemeyen fontlari `fallback`e esler.
 
     Donen: {kaynak_font: hedef_font}. Bos veya zaten hedef olan adlar atlanir.
     """
-    replacements = {}
+    supported = supports_turkish if chars == TURKISH_CHARS else (lambda name: supports_chars(name, chars))
+    result = {}
     for family in families or []:
         name = str(family or '').strip()
-        if name and name != fallback and not supports_turkish(name):
-            replacements[name] = fallback
-    return replacements
+        if name and name != fallback and not supported(name):
+            result[name] = fallback
+    return result
+
+
+def turkish_replacements(families, fallback=FALLBACK_FONT):
+    """Türkçe desteklemeyen fontlari `fallback`e esler."""
+    return replacements(families, TURKISH_CHARS, fallback)

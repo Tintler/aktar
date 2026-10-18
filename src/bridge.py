@@ -22,7 +22,11 @@ from datetime import datetime
 from pathlib import Path
 
 import documents
+import languages
+import llm_provider
 import media_server
+import setup_check
+from version import VERSION
 import themes
 from app_core import (APP_DIR, DEFAULT_CONFIG, WINDOWS, Client, keep_loaded, load_config, qa_config, read, save_json,
                       unload_models, validate_config)
@@ -51,8 +55,9 @@ OCR_ENGINES = [('auto', 'Otomatik (Tesseract > OCR modeli > görü modeli)'),
                ('model', 'OCR modeli (LM Studio)'),
                ('vision', 'Görü modeli')]
 # Ceviri surerken degistirilemeyen ayarlar (calisan isin modeli/baglantisi).
-LOCKED_WHILE_RUNNING = ('base_url', 'model', 'batch_cues', 'max_tokens', 'temperature', 'timeout_seconds',
-                        'auto_retry_count', 'glossary_strict', 'analysis_chunk_chars', 'disable_thinking')
+LOCKED_WHILE_RUNNING = ('base_url', 'provider', 'model', 'batch_cues', 'max_tokens', 'temperature', 'timeout_seconds',
+                        'auto_retry_count', 'glossary_strict', 'analysis_chunk_chars', 'disable_thinking',
+                        'source_language', 'target_language')
 
 
 def _error(error):
@@ -109,7 +114,7 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         return {'prefs': self.ui_prefs(), 'themes': themes.list_themes(),
                 'translate': self.translate_state(), 'books': self.book_snapshot(),
                 'library': self.library_open(), 'models': self._models,
-                'platform': 'windows' if WINDOWS else sys.platform, 'open': paths}
+                'platform': 'windows' if WINDOWS else sys.platform, 'open': paths, 'version': VERSION}
 
     def ui_prefs(self):
         path = APP_DIR / UI_FILE
@@ -226,7 +231,30 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
                 'whisper_models': list(dict.fromkeys(WHISPER_MODELS + (str(value.get('whisper_model', '')),))),
                 'ocr_engines': [{'id': key, 'label': label} for key, label in OCR_ENGINES],
                 'cuda_markers': list(CUDA_MARKERS),
-                'video_encoders': self._video_encoders(), 'mpv': self._native is not None}
+                'video_encoders': self._video_encoders(), 'mpv': self._native is not None,
+                'languages': languages.choices(),
+                'llm': {'presets': list(llm_provider.PRESETS), 'api_key_set': bool(llm_provider.api_key())}}
+
+    def setup_check(self):
+        """Ilk acilis bilesen denetimi (F154): [{'id', 'label', 'required', 'state', 'detail', 'hint', ...}]."""
+        try:
+            engines = self._engines().engines()
+        except Exception:  # motor listesi okunamadi: ses motoru 'yok' gorunur
+            engines = []
+        return setup_check.run(engines, self._native is not None)
+
+    def llm_scope(self, url):
+        """Sunucu adresi nerede: 'local' | 'lan' | 'internet' (Ayarlar'daki gizlilik uyarisi, F152)."""
+        return {'scope': llm_provider.scope(url)}
+
+    def llm_set_api_key(self, value):
+        """Model sunucusu API anahtarini isletim sistemi deposuna yazar; bos deger siler."""
+        try:
+            llm_provider.set_api_key(value)
+        except Exception as error:  # depo yok (Linux'ta secret-tool) ya da yazilamadi
+            return {'error': 'API anahtarı kaydedilemedi: ' + str(error)}
+        self.refresh_models()
+        return {'api_key_set': bool(llm_provider.api_key())}
 
     def save_settings(self, values):
         try:
@@ -256,7 +284,7 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         except (RuntimeError, ValueError, OSError) as error:
             return {'error': 'Ayarlar kaydedilemedi: ' + str(error)}
         self._log('Ayarlar kaydedildi.')
-        if any(current.get(key) != value.get(key) for key in ('base_url', 'model')):
+        if any(current.get(key) != value.get(key) for key in ('base_url', 'provider', 'model')):
             self.refresh_models()
         return {'config': value}
 

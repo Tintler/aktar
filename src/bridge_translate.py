@@ -14,6 +14,7 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
+import languages
 import series
 import speech
 import subtitle
@@ -128,7 +129,26 @@ class TranslateMixin:
             'running': self._running(), 'paused': bool(self._pause and self._pause.pause_requested),
             'progress': self._progress, 'job': self._job if self._running() else '',
             'whisper_available': speech.available()[0],
+            'languages': self.translation_languages(),
         }
+
+    def translation_languages(self):
+        """Secili ceviri dil cifti ve secenekler (Altyazi Cevir ve Kitap Cevir sayfalari)."""
+        try:
+            source, target = languages.pair(load_config())
+        except (OSError, ValueError):
+            source, target = languages.DEFAULT_SOURCE, languages.DEFAULT_TARGET
+        return {'source': source, 'target': target, 'choices': languages.choices()}
+
+    def set_translation_languages(self, source, target):
+        """Altyazi ve yeni kitap cevirileri icin dil ciftini config.json'a yazar (F151).
+        Acik kitap projeleri kendi dil ciftini (epub-import.json) korur."""
+        if self._running():
+            return {'error': 'Çeviri sürerken dil değiştirilemez.'}
+        result = self.save_settings({'source_language': str(source or ''), 'target_language': str(target or '')})
+        if result.get('error'):
+            return result
+        return self.translation_languages()
 
     def _push_translate(self):
         self._emit('translate', self.translate_state())
@@ -283,7 +303,7 @@ class TranslateMixin:
             return {'error': 'Seri başlığı boş olamaz.'}
         hints = [self._video.parent.name] if self._video is not None else []
         try:
-            data = series.create_series(title, hints)
+            data = series.create_series(title, hints, languages.target(load_config()))
         except (ValueError, RuntimeError) as error:
             return {'error': str(error)}
         self._series_slug = series.slugify(title)
@@ -358,10 +378,17 @@ class TranslateMixin:
             return {'error': 'Desteklenmeyen altyazı codec: ' + stream['codec']}
         glossary = list(self._chapter_glossary)
         decisions = []
-        if self._series_slug:
+        slug = self._series_slug
+        target = languages.target(load_config())
+        if slug and series.series_language(slug) != target:
+            # Seri sozlugu baska bir hedef dile ait: karsiliklari bu ceviriye uymaz (F151).
+            self._log(f'UYARI: seri sözlüğü {languages.label(series.series_language(slug))} '
+                      f'çeviriler içindir; {languages.label(target)} çeviride kullanılmadı.')
+            slug = None
+        if slug:
             # Bolum terimleri seri terimlerini EZER (sonraki katman kazanir).
-            glossary = merge_glossaries(series.series_glossary(self._series_slug), glossary)
-            decisions = series.series_decisions(self._series_slug)
+            glossary = merge_glossaries(series.series_glossary(slug), glossary)
+            decisions = series.series_decisions(slug)
         self._pause = PauseController()
         self._cancelled = False
         self._job = 'translate'
@@ -370,7 +397,7 @@ class TranslateMixin:
         self._analysis_text = ''
         self._worker = threading.Thread(
             target=self._run_translation, name='aktar-translate', daemon=True,
-            args=(self._video, stream, glossary, decisions, bool(do_analysis), self._series_slug))
+            args=(self._video, stream, glossary, decisions, bool(do_analysis), slug))
         self._worker.start()
         return self.translate_state()
 
@@ -509,8 +536,9 @@ class TranslateMixin:
                 translated = engine.enforce_episode_terms(cues, translated, learned, pause=self._pause)
             if self._cancelled:
                 raise GracefulStop('Çeviri iptal edildi.')
-            target = unique_output_path(video, kind)
-            text, _ = render_output(kind, payload, translated, log=self._log)
+            cfg = load_config()
+            target = unique_output_path(video, kind, languages.output_tag(cfg))
+            text, _ = render_output(kind, payload, translated, log=self._log, language=languages.target(cfg))
             target.write_text(text, encoding='utf-8', newline='\n')
             output = str(target)
         except GracefulStop as stop:

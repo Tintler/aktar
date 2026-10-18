@@ -2,7 +2,7 @@
   // Okuma (Cevirgec): kitaplik ya da acik kitap.
   import Shelf from './Shelf.svelte';
   import Reader from './Reader.svelte';
-  import { app, act, onDrop, openPdfImport } from '../lib/state.svelte.js';
+  import { app, act, onDrop, openPdfImport, toast } from '../lib/state.svelte.js';
   import { presetDrop } from '../components/VoicePresetModal.svelte';
 
   // Pencereye birakilan EPUB'lar kitapliga eklenir.
@@ -12,6 +12,7 @@
     if (pdf) return openPdfImport(pdf, 'reading');              // F138: taranmis PDF'den kitap
     const result = await act('shelf_add', paths);
     if (result) app.shelf = result.books;
+    if (result?.errors?.length) toast(result.errors.join(' · '), 'error');
   });
 
   async function open(entry) {

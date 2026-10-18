@@ -13,7 +13,7 @@
   let frames = $state(false);   // F114: video goruntuleri (koleksiyonun son secimi hatirlanir)
   let speakers = $state(false); // F146: konusmaci ayrimi (koleksiyonun son secimi hatirlanir)
   let ocr = $state('');   // bos: Ayarlardaki motor (F85: yalnizca bu hazirlik icin degistirilebilir)
-  const ENGINES = { tesseract: 'Tesseract (yerel)', model: 'OCR modeli (LM Studio)', vision: 'Görü modeli' };
+  const ENGINES = { tesseract: 'Tesseract (yerel)', model: 'OCR modeli (model sunucusu)', vision: 'Görü modeli' };
 
   app.prepare = { loading: true };
   act('prepare_plan').then((info) => {

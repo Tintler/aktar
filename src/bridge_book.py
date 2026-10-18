@@ -24,6 +24,8 @@ from book_core import (DEFAULT_CONFIG as BOOK_DEFAULTS, SHARED_CONFIG_KEYS, Clie
                        chapters_containing, first_heading, load_analysis_selection, read, render_analysis, rows,
                        save_json, validate_rerun)
 from epub_import import prepare
+import ebook_convert
+import languages
 from epub_meta import book_info
 
 # Kitaba ozel ayarlar (config.json "book" bolumu); digerleri ust duzeyden gelir.
@@ -48,7 +50,7 @@ def validate_glossary_rows(items):
         if source:
             result.append({'source': source, 'target': target})
     if len({item['source'].casefold() for item in result}) != len(result):
-        raise ValueError('Aynı İngilizce terim birden fazla kez girilmiş.')
+        raise ValueError('Aynı kaynak terim birden fazla kez girilmiş.')
     return result
 
 
@@ -180,7 +182,7 @@ class BookMixin:
         epub = self._bk_epub
         card = {'epub': str(epub) if epub else '', 'folder': str(self._bk_work_parent) if self._bk_work_parent else '',
                 'project': str(self._bk_book) if self._bk_book else '', 'title': '', 'author': '', 'cover': None,
-                'chars': 0}
+                'chars': 0, 'languages': None}
         if epub and Path(epub).exists():
             card.update(book_info(epub))
         elif self._bk_book:
@@ -194,6 +196,9 @@ class BookMixin:
             # Uretilen Turkce EPUB (epub_output.output_path: "<ad> TR.epub", varsa "<ad> TR 2.epub"...)
             outputs = sorted(self._bk_book.glob('*.epub'), key=lambda path: path.stat().st_mtime)
             card['output'] = str(outputs[-1]) if outputs else ''
+            source, target = languages.book_pair(self._bk_book)
+            card['languages'] = {'source': source, 'target': target,
+                                 'label': f'{languages.label(source)} → {languages.label(target)}'}
         return card
 
     def _book_detach(self):
@@ -223,20 +228,26 @@ class BookMixin:
 
     # ------------------------------------------------------------------ secim
     def book_choose_epub(self, path=None):
-        """path: pencereye birakilan EPUB; verilmezse dosya penceresi acilir."""
+        """path: pencereye birakilan e-kitap; verilmezse dosya penceresi acilir.
+        MOBI/AZW3/FB2 once EPUB'a donusturulur (F153); calisma klasoru ozgun dosyanin yanidir."""
         blocked = self._book_idle_error('seçim değiştirilemez')
         if blocked:
             return blocked
-        value = path or self._dialog('open_file', 'Kaynak EPUB seç', ('EPUB (*.epub)',))
+        value = path or self._dialog('open_file', 'Kaynak e-kitap seç', (ebook_convert.DIALOG_FILTER,))
         if not value:
             return None
-        if Path(value).suffix.lower() != '.epub' or not Path(value).is_file():
-            return {'error': 'EPUB dosyası değil: ' + str(value)}
+        original = Path(value)
+        if not original.is_file() or not (original.suffix.lower() == '.epub' or ebook_convert.supported(original)):
+            return {'error': 'Desteklenmeyen e-kitap (EPUB, MOBI, AZW3, FB2): ' + str(value)}
+        try:
+            epub = ebook_convert.ensure_epub(original, self._book_log)
+        except (ValueError, OSError) as error:
+            return _error(error)
         with self._bk_lock:
             self._book_detach()
-            self._bk_epub = Path(value)
+            self._bk_epub = epub
             if not self._bk_work_parent:
-                self._bk_work_parent = self._bk_epub.parent
+                self._bk_work_parent = original.parent
         return self.book_snapshot()
 
     def book_choose_folder(self):
@@ -294,7 +305,8 @@ class BookMixin:
                 if not self._bk_work_parent or not self._bk_epub:
                     return {'error': 'Önce kaynak EPUB dosyasını ve çalışma klasörünü seçin.'}
                 try:
-                    self._bk_book = prepare(self._bk_epub, self._bk_work_parent)
+                    source, target = languages.pair(book_core.load_config())
+                    self._bk_book = prepare(self._bk_epub, self._bk_work_parent, source, target)
                 except Exception as error:
                     self._bk_book = None
                     return _error(error)
@@ -329,9 +341,9 @@ class BookMixin:
         models = getattr(self, '_models', {}) or {}
         names = models.get('names') or []
         if models.get('state') == 'ok' and names and configured not in names:
-            return {'block': 'Ayarlar sayfasından LM Studio’nun sunduğu modellerden birini seçin.'}
+            return {'block': 'Ayarlar sayfasından model sunucusunun sunduğu modellerden birini seçin.'}
         if models.get('state') != 'ok':
-            return {'warn': 'LM Studio model listesi sorgulanamadı. Sunucunun açık olduğunu doğrulayın; '
+            return {'warn': 'Model sunucusunun model listesi sorgulanamadı. Sunucunun açık olduğunu doğrulayın; '
                             'aksi hâlde çeviri istekleri başarısız olabilir.'}
         return {}
 
@@ -423,6 +435,14 @@ class BookMixin:
             self._bk_thread.start()
         self._book_push_status()
 
+    @staticmethod
+    def _book_config(book):
+        """Kitap ayarlari + projenin kendi dil cifti (F151; config.json'daki secim yalnizca yeni projelere)."""
+        cfg = book_core.load_config()
+        cfg['source_language'], cfg['target_language'] = languages.book_pair(book)
+        book_core.validate_config(cfg)
+        return cfg
+
     def _book_ensure_model_loaded(self):
         """Model yuklu degilse once yuklenir; ceviri gercek context uzunlugunu gorur."""
         cfg = book_core.load_config()
@@ -435,7 +455,7 @@ class BookMixin:
         outcome, message = 'failed', ''
         try:
             self._book_ensure_model_loaded()
-            engine = TranslationEngine(book_core.load_config, self._bk_controller, self._book_log,
+            engine = TranslationEngine(lambda: self._book_config(book), self._bk_controller, self._book_log,
                                        self._book_on_progress)
             if analysis_files is not None:
                 engine.run_analysis(book, analysis_files)

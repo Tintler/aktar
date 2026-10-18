@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import documents
+import languages
 
 WORK_SUFFIX = '-pdf'
 SPREAD_RATIO = 1.2          # genislik/yukseklik bundan buyukse cift sayfa taramasi
@@ -194,13 +195,43 @@ HEADER_LIMIT = 80           # ust/alt bilgi sayilacak paragrafin en fazla uzunlu
 FOOTNOTE = re.compile(r'^(?:[*°†‡]+|[¹²³⁴⁵⁶⁷⁸⁹]+)\s*[^\W\d_]')   # sayfa sonu dipnotu
 
 
+# Latin alfabeli diller icin sik kelimeler (F153). Turkce/Ingilizce puani eskisi gibidir; baska bir dil
+# ancak ikisinden belirgin yuksek puan alirsa secilir.
+STOPWORDS = {
+    'de': ('der', 'die', 'und', 'das', 'nicht', 'ist', 'ich', 'sie'),
+    'fr': ('le', 'les', 'et', 'est', 'une', 'pas', 'que', 'dans'),
+    'es': ('el', 'los', 'que', 'una', 'por', 'con', 'para', 'las'),
+    'it': ('il', 'che', 'non', 'una', 'per', 'della', 'sono', 'gli'),
+    'pt': ('não', 'uma', 'os', 'com', 'para', 'que', 'mais', 'das'),
+    'nl': ('het', 'een', 'niet', 'van', 'ik', 'zijn', 'dat', 'en'),
+    'pl': ('nie', 'się', 'jest', 'że', 'na', 'to', 'jak', 'ale'),
+}
+# (ilk, son kod noktasi, en az harf orani, dil)
+SCRIPTS = ((0x3040, 0x30FF, 0.05, 'ja'), (0xAC00, 0xD7AF, 0.2, 'ko'), (0x4E00, 0x9FFF, 0.2, 'zh'),
+           (0x0400, 0x04FF, 0.3, 'ru'), (0x0600, 0x06FF, 0.3, 'ar'), (0x0370, 0x03FF, 0.3, 'el'),
+           (0x0900, 0x097F, 0.3, 'hi'))
+
+
 def detect_language(text):
-    """'tr' ya da 'en': Turkceye ozgu harfler ve sik kelimelerle."""
-    sample = text[:200000].lower()
+    """Kitabin dili (languages kodu): once yazi sistemi, sonra sik kelimeler; belirsizse 'tr' ya da 'en'."""
+    sample = text[:200000]
+    letters = [char for char in sample[:50000] if char.isalpha()]
+    for first, last, share, code in SCRIPTS:
+        if letters and sum(first <= ord(char) <= last for char in letters) / len(letters) >= share:
+            if code == 'ru' and any(char in sample for char in 'їєґ'):
+                return 'uk'
+            if code == 'ar' and sum(sample.count(char) for char in 'پچژگ') > len(letters) * 0.005:
+                return 'fa'
+            return code
+    sample = sample.lower()
     letters = sum(sample.count(ch) for ch in 'ğışİ')
     words = Counter(WORD.findall(sample))
     turkish = letters / max(1, len(sample)) * 1000 + sum(words[w] for w in ('ve', 'bir', 'bu', 'da', 'de', 'için'))
     english = sum(words[w] for w in ('the', 'and', 'of', 'to', 'was', 'he'))
+    scores = {code: sum(words[w] for w in values) for code, values in STOPWORDS.items()}
+    best = max(scores, key=scores.get)
+    if scores[best] > max(turkish, english) * 1.5 and scores[best] >= 5:
+        return best
     return 'tr' if turkish > english else 'en'
 
 
@@ -873,7 +904,7 @@ def write_epub(path, chapters, title, author, language, cover=None):
     if cover:
         manifest.append('<item id="cover" href="images/kapak.jpg" media-type="image/jpeg" properties="cover-image"/>')
         cover_meta = '<meta name="cover" content="cover"/>'
-    heading = 'İçindekiler' if language == 'tr' else 'Contents'
+    heading = languages.TOC_TITLES.get(language, 'Contents')
     nav_doc = _xhtml(title, f'<nav epub:type="toc" id="toc"><h1>{heading}</h1><ol>' + ''.join(nav) + '</ol></nav>', language)
     opf = ('<?xml version="1.0" encoding="utf-8"?>\n'
            '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">'
@@ -973,7 +1004,7 @@ def save_book(work, data):
         raise ValueError('En az bir bölüm olmalı.')
     chapters.sort(key=lambda item: (item['page'], item['ordinal']))
     value = {'title': ' '.join(str(data.get('title', '')).split()), 'author': ' '.join(str(data.get('author', '')).split()),
-             'language': 'en' if data.get('language') == 'en' else 'tr', 'chapters': chapters, 'auto': bool(data.get('auto'))}
+             'language': data.get('language') if data.get('language') in languages.LANGUAGES else 'tr', 'chapters': chapters, 'auto': bool(data.get('auto'))}
     path = Path(work) / BOOK_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix('.tmp')

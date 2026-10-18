@@ -5,6 +5,7 @@
   import Toggle from '../components/Toggle.svelte';
   import BookGlossaryModal from '../components/BookGlossaryModal.svelte';
   import BookAnalysisModal from '../components/BookAnalysisModal.svelte';
+  import LanguagePair from '../components/LanguagePair.svelte';
   import { app, act, applyBookSnapshot, onDrop, openInReader, openPdfImport, savePref, toast } from '../lib/state.svelte.js';
   import { call } from '../lib/api.js';
   import { confirm, notice } from '../lib/confirm.svelte.js';
@@ -21,6 +22,13 @@
   const idle = $derived(runtime === 'idle');
   const hasBook = $derived(Boolean(ui.book.epub || ui.book.project));
   const progress = $derived(ui.status.progress);
+  // Dil cifti (F151): yeni projeler secili cifti alir; acik projenin cifti epub-import.json'dadir.
+  let pair = $state(null);
+  act('translation_languages').then((value) => { if (value) pair = value; });
+  const bookPair = $derived(ui.book.languages);
+  const langName = (code) => pair?.choices.find((c) => c.code === code)?.label ?? (code === 'auto' ? 'Kaynak' : code);
+  const sourceName = $derived(langName(bookPair?.source ?? pair?.source ?? 'en'));
+  const targetName = $derived(langName(bookPair?.target ?? pair?.target ?? 'tr'));
 
   // ---- secim
   async function chooseEpub(path = null) {
@@ -38,7 +46,7 @@
     if (!idle) return toast('Çalışan çeviri tamamlanmadan seçim değiştirilemez.', 'error');
     const path = paths[0];
     if (/\.pdf$/i.test(path)) openPdfImport(path, 'books');   // F138: taranmis PDF once EPUB'a cevrilir
-    else if (/\.epub$/i.test(path)) chooseEpub(path);
+    else if (/\.(epub|mobi|azw3?|prc|fb2|fbz|fb2\.zip)$/i.test(path)) chooseEpub(path);   // F153
     else openProject(path);
   });
 
@@ -69,7 +77,7 @@
     }
     const check = await call('book_model_check');
     if (check.block) { await notice('Model seçilmedi', check.block); return; }
-    if (check.warn) await notice('LM Studio bağlantısı doğrulanamadı', check.warn);
+    if (check.warn) await notice('Model sunucusu bağlantısı doğrulanamadı', check.warn);
     let files = null;
     if (ui.preAnalysis) {
       const candidates = await act('book_analysis_candidates');
@@ -190,20 +198,25 @@
 <section class="page">
   <div class="page-head">
     <h1>Kitap Çevir</h1>
+    {#if bookPair}
+      <span class="chip static" title="Bu projenin dil çifti (proje oluşturulurken seçildi)">{bookPair.label}</span>
+    {:else}
+      <LanguagePair value={pair} disabled={!idle} onchange={(value) => (pair = value)} />
+    {/if}
     <button class="btn" disabled={!idle} onclick={() => openProject()} title="Daha önce oluşturulmuş {'{'}KitapAdı{'}'}-ceviri klasörünü açar ve kayıtlı kontrol noktalarından devam eder.">
       <Icon name="history" size={16} />Projeyi sürdür</button>
-    <button class="btn" disabled={!idle} onclick={() => openPdfImport(null, 'books')} title="Taranmış PDF'yi okuyup EPUB yapar, sonra burada açar"><Icon name="fileText" size={16} />PDF'den</button>
-    <button class="btn" disabled={!idle} onclick={() => chooseEpub()}><Icon name="book" size={16} />EPUB aç</button>
+    <button class="btn" disabled={!idle} onclick={() => openPdfImport(null, 'books')} title="PDF'yi (taranmış ya da metinli) okuyup EPUB yapar, sonra burada açar"><Icon name="fileText" size={16} />PDF'den</button>
+    <button class="btn" disabled={!idle} onclick={() => chooseEpub()} title="EPUB, MOBI, AZW3 ya da FB2"><Icon name="book" size={16} />E-kitap aç</button>
   </div>
 
   <div class="page-body body">
     {#if !hasBook}
       <button class="drop card" onclick={() => chooseEpub()}>
         <span class="tile"><Icon name="book" size={30} /></span>
-        <b>EPUB'u buraya bırakın</b>
+        <b>E-kitabı buraya bırakın</b>
         <span class="dim">ya da tıklayıp seçin · çeviri klasörü bırakılırsa proje sürdürülür</span>
-        <span class="note">DRM içermeyen bir EPUB bölümlerine ayrılır ve LM Studio'daki modelle Türkçeye çevrilir. Terim sözlüğü, isteğe bağlı ön analiz ve
-          bölüm notlarıyla tutarlılık korunur; her parça kaydedildiği için çeviri kaldığı yerden sürer. Sonuç Türkçe EPUB olarak yazılır, kaynak dosya değiştirilmez.</span>
+        <span class="note">DRM içermeyen bir e-kitap (EPUB, MOBI, AZW3, FB2) bölümlerine ayrılır ve seçili modelle hedef dile ({targetName}) çevrilir. Terim sözlüğü, isteğe bağlı ön analiz ve
+          bölüm notlarıyla tutarlılık korunur; her parça kaydedildiği için çeviri kaldığı yerden sürer. Sonuç {targetName} EPUB olarak yazılır, kaynak dosya değiştirilmez.</span>
       </button>
     {:else}
       <div class="card book">
@@ -220,7 +233,7 @@
               <Icon name="folder" size={14} /><span class="selectable">{ui.book.folder || 'Çalışma klasörü seçin'}</span></button>
             {#if ui.book.output}
               <button class="path" onclick={() => openInReader(ui.book.output)} title={ui.book.output}>
-                <Icon name="book" size={14} /><span>Türkçe EPUB'u oku</span></button>
+                <Icon name="book" size={14} /><span>{targetName} EPUB'u oku</span></button>
             {/if}
             {#if ui.book.project}
               <button class="path" onclick={() => act('reveal', ui.book.project)} title="Çeviri klasörünü dosya yöneticisinde aç">
@@ -255,7 +268,7 @@
 
         <div class="card col">
           <div class="tabs">
-            {#each [['preview', 'Kaynak / Türkçe'], ['status', 'Durum'], ['analysis', 'Ön analiz'], ['console', 'Günlük']] as [key, label]}
+            {#each [['preview', 'Kaynak / Çeviri'], ['status', 'Durum'], ['analysis', 'Ön analiz'], ['console', 'Günlük']] as [key, label]}
               <button class="chip" class:on={ui.tab === key} onclick={() => (ui.tab = key)}>{label}</button>
             {/each}
           </div>
@@ -263,9 +276,9 @@
           {#if ui.tab === 'preview'}
             {#if preview}
               <div class="pv">
-                <div><div class="lbl"><span>Kaynak · İngilizce</span><span>{fmt(preview.source_chars)} karakter</span></div>
+                <div><div class="lbl"><span>Kaynak · {sourceName}</span><span>{fmt(preview.source_chars)} karakter</span></div>
                   <div class="txt selectable">{@html sourceHtml}</div></div>
-                <div><div class="lbl"><span>Çeviri · Türkçe</span><span>{fmt(preview.translation_chars)} karakter</span></div>
+                <div><div class="lbl"><span>Çeviri · {targetName}</span><span>{fmt(preview.translation_chars)} karakter</span></div>
                   <div class="txt selectable tr">{#if preview.translated}{@html translationHtml}{:else}<span class="muted">Henüz çevrilmedi.</span>{/if}</div></div>
               </div>
             {:else}
@@ -323,6 +336,7 @@
 {/if}
 
 <style>
+  .chip.static { display: inline-flex; align-items: center; cursor: default; }
   .body { display: flex; flex-direction: column; gap: 16px; overflow: hidden; }
 
   .drop { flex: 1; min-height: 320px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;

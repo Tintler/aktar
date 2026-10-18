@@ -16,6 +16,7 @@ import webbrowser
 import zipfile
 
 import book_core
+import ebook_convert
 from book_reader import Library
 
 BOOK_GREETING = ('Bu kitaba soru sorun: "3. bölümde ne oldu?", "X kimdir?" gibi. Cevaptaki bölüm atfına '
@@ -87,12 +88,20 @@ class ReaderMixin:
         return self._reading(self._shelf().list)
 
     def shelf_add(self, paths=None):
-        """EPUB ekler (yol verilmezse coklu secim penceresi acilir)."""
+        """E-kitap ekler (yol verilmezse coklu secim penceresi acilir); MOBI/AZW3/FB2 EPUB'a cevrilir (F153)."""
         if paths is None:
-            paths = self._dialog('open_files', 'Kitaplığa EPUB ekle', ('EPUB (*.epub)',))
+            paths = self._dialog('open_files', 'Kitaplığa e-kitap ekle', (ebook_convert.DIALOG_FILTER,))
             if not paths:
                 return None
-        result = self._reading(self._shelf().add, list(paths))
+        converted, failures = [], []
+        for raw in paths:
+            try:
+                converted.append(str(ebook_convert.ensure_epub(raw, self._log)) if ebook_convert.supported(raw) else raw)
+            except (ValueError, OSError) as error:
+                failures.append(f'{Path(raw).name}: {error}')
+        result = self._reading(self._shelf().add, converted)
+        if failures and 'error' not in result:
+            result['errors'] = failures + list(result.get('errors') or [])
         if 'error' not in result:
             result['books'] = self._shelf().list()
             self._emit('shelf', result)

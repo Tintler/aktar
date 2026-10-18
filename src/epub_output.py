@@ -16,6 +16,7 @@ import uuid
 import xml.etree.ElementTree as ET
 import zipfile
 
+import languages
 from book_core import first_heading, markdown_spans, read
 
 OPF = 'http://www.idpf.org/2007/opf'
@@ -170,7 +171,7 @@ def _markdown_table(lines):
     return rows
 
 
-def markdown_xhtml(markdown, title, asset_map, hide_first_heading=False, link_map=None, current_href=''):
+def markdown_xhtml(markdown, title, asset_map, hide_first_heading=False, link_map=None, current_href='', lang='tr'):
     if hide_first_heading:
         markdown = without_first_heading(markdown)
     blocks = re.split(r'\n\s*\n', markdown.strip())
@@ -214,18 +215,18 @@ def markdown_xhtml(markdown, title, asset_map, hide_first_heading=False, link_ma
         body.append('<p>' + '<br/>'.join(inline_markup(line, asset_map, link_map, current_href) for line in lines) + '</p>')
     return ('<?xml version="1.0" encoding="utf-8"?>\n'
             '<!DOCTYPE html>\n'
-            f'<html xmlns="{XHTML}" lang="tr" xml:lang="tr"><head><title>{html.escape(title)}</title>'
+            f'<html xmlns="{XHTML}" lang="{lang}" xml:lang="{lang}"><head><title>{html.escape(title)}</title>'
             '<link rel="stylesheet" type="text/css" href="../style.css"/></head><body>'
             + ''.join(body) + '</body></html>')
 
 
-def output_path(book, original):
-    base = book / f'{original.stem} TR.epub'
+def output_path(book, original, tag='TR'):
+    base = book / f'{original.stem} {tag}.epub'
     if not base.exists():
         return base
     index = 2
     while True:
-        candidate = book / f'{original.stem} TR-{index}.epub'
+        candidate = book / f'{original.stem} {tag}-{index}.epub'
         if not candidate.exists():
             return candidate
         index += 1
@@ -318,6 +319,8 @@ def run_epubcheck(path, configured_path='', log=print):
 def build_translated_epub(book, log=print, validation_config=None):
     book = Path(book)
     marker = json.loads(read(book / 'epub-import.json'))
+    lang = languages.pair(marker)[1]
+    tag = lang.upper()
     source_epub = Path(marker['epub'])
     if not source_epub.is_file():
         raise ValueError('Kaynak EPUB bulunamadi: ' + str(source_epub))
@@ -374,7 +377,7 @@ def build_translated_epub(book, log=print, validation_config=None):
         for child in metadata_source:
             cloned = copy.deepcopy(child)
             if local(cloned.tag) == 'language':
-                cloned.text = 'tr'
+                cloned.text = lang
                 has_language = True
             if local(cloned.tag) == 'identifier':
                 has_identifier = True
@@ -384,13 +387,13 @@ def build_translated_epub(book, log=print, validation_config=None):
             )
             if is_target_title:
                 original_title = (cloned.text or '').strip()
-                cloned.text = original_title + ('' if original_title.endswith(' TR') else ' TR')
+                cloned.text = original_title + ('' if original_title.endswith(' ' + tag) else ' ' + tag)
                 title_updated = True
             if local(cloned.tag) == 'meta' and cloned.attrib.get('property') == 'dcterms:modified':
                 cloned.text = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
             metadata.append(cloned)
         if not has_language:
-            ET.SubElement(metadata, f'{{{DC}}}language').text = 'tr'
+            ET.SubElement(metadata, f'{{{DC}}}language').text = lang
         # EPUB 3 cover-image meta: manifest'te cover-image property'li varliga
         # refines eden <meta property="cover-image"> olmazsa kutuphane/gorsel
         # okuyucular kapaği bulamaz. Kaynak metadata'daki eski cover meta'lari
@@ -438,12 +441,13 @@ def build_translated_epub(book, log=print, validation_config=None):
             href = href_by_filename.get(mapped.get('filename'))
             if href:
                 link_map[key] = {'href': href, 'id': mapped.get('id', '')}
-        navigation = '<?xml version="1.0" encoding="utf-8"?><html xmlns="%s" xmlns:epub="http://www.idpf.org/2007/ops" lang="tr"><head><title>İçindekiler</title></head><body><nav epub:type="toc" id="toc"><h1>İçindekiler</h1><ol>%s</ol></nav></body></html>' % (XHTML, ''.join(f'<li><a href="{chapter["href"]}">{html.escape(chapter["title"])}</a></li>' for chapter in toc_chapters))
+        toc_title = html.escape(languages.TOC_TITLES.get(lang, 'Contents'))
+        navigation = '<?xml version="1.0" encoding="utf-8"?><html xmlns="%s" xmlns:epub="http://www.idpf.org/2007/ops" lang="%s"><head><title>%s</title></head><body><nav epub:type="toc" id="toc"><h1>%s</h1><ol>%s</ol></nav></body></html>' % (XHTML, lang, toc_title, toc_title, ''.join(f'<li><a href="{chapter["href"]}">{html.escape(chapter["title"])}</a></li>' for chapter in toc_chapters))
         identifier_text = next((node.text for node in metadata if local(node.tag) == 'identifier' and node.text), 'urn:uuid:' + str(uuid.uuid4()))
-        ncx = '<?xml version="1.0" encoding="utf-8"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="%s"/></head><docTitle><text>İçindekiler</text></docTitle><navMap>%s</navMap></ncx>' % (html.escape(identifier_text, quote=True), ''.join(f'<navPoint id="nav-{index}" playOrder="{index}"><navLabel><text>{html.escape(chapter["title"])}</text></navLabel><content src="{chapter["href"]}"/></navPoint>' for index, chapter in enumerate(toc_chapters, 1)))
+        ncx = '<?xml version="1.0" encoding="utf-8"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="%s"/></head><docTitle><text>%s</text></docTitle><navMap>%s</navMap></ncx>' % (html.escape(identifier_text, quote=True), toc_title, ''.join(f'<navPoint id="nav-{index}" playOrder="{index}"><navLabel><text>{html.escape(chapter["title"])}</text></navLabel><content src="{chapter["href"]}"/></navPoint>' for index, chapter in enumerate(toc_chapters, 1)))
         container_xml = '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'
         style = 'body{font-family:serif;line-height:1.45;margin:5%;}h1,h2,h3{text-align:left;}img{max-width:100%;height:auto;}.image{text-align:center;}p{text-indent:1.2em;margin:.35em 0;}h1+p,h2+p,h3+p{ text-indent:0;}.scene-break{text-align:center;text-indent:0;margin:1em 0;}blockquote{margin:1em 1.5em;}blockquote p{text-indent:0;}table{border-collapse:collapse;width:100%;margin:1em 0;}th,td{border:1px solid #888;padding:.35em;text-align:left;vertical-align:top;}'
-        destination = output_path(book, source_epub)
+        destination = output_path(book, source_epub, tag)
         temporary = destination.with_suffix('.epub.tmp')
         with zipfile.ZipFile(temporary, 'w') as output:
             output.writestr(zipfile.ZipInfo('mimetype'), 'application/epub+zip', compress_type=zipfile.ZIP_STORED)
@@ -459,7 +463,7 @@ def build_translated_epub(book, log=print, validation_config=None):
                 output.writestr('OEBPS/' + target, source.read(original))
         validate_epub_archive(temporary)
         temporary.replace(destination)
-    log(f'EPUB metadata dili tr olarak ayarlandi; {len(asset_entries)} kaynak varlik kopyalandi.')
+    log(f'EPUB metadata dili {lang} olarak ayarlandi; {len(asset_entries)} kaynak varlik kopyalandi.')
     cfg = validation_config or {}
     if cfg.get('epubcheck_enabled', False):
         run_epubcheck(destination, cfg.get('epubcheck_path', ''), log)

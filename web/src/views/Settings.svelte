@@ -48,6 +48,23 @@
     call('check_cuda_dir', path).then((r) => (cuda = r ?? { message: '' }));
   });
 
+  // F152: model sunucusu; API anahtari isletim sistemi deposunda, adresin yeri gizlilik uyarisi icin.
+  let apiKey = $state('');
+  let serverScope = $state('local');
+  $effect(() => {
+    if (!cfg) return;
+    const url = cfg.base_url;
+    call('llm_scope', url).then((r) => (serverScope = r?.scope ?? 'local'));
+  });
+  function applyPreset(id) {
+    const preset = info.llm.presets.find((p) => p.id === id);
+    if (preset) { cfg.base_url = preset.base_url; cfg.provider = preset.provider; }
+  }
+  async function saveApiKey(value) {
+    const r = await act('llm_set_api_key', value);
+    if (r) { info.llm.api_key_set = r.api_key_set; apiKey = ''; toast(value ? 'API anahtarı kaydedildi.' : 'API anahtarı silindi.', 'ok'); }
+  }
+
   // F89: Gmail uygulama sifresi config.json'a degil isletim sistemi deposuna yazilir.
   let mail = $state({ address: '', has_password: false });
   let mailPassword = $state('');
@@ -95,9 +112,9 @@
   // baska sayfa app.settingsTab'i ayarlayip buraya gelerek ilgili kategoriyi acabilir.
   // keys: kategori basina "kaydedilmemis degisiklik" noktasi icin config anahtarlari ('book.' = "book" bolumu).
   const CATS = [
-    { id: 'models', label: 'Modeller', icon: 'cpu', keys: ['base_url', 'model', 'qa_model', 'disable_thinking'] },
+    { id: 'models', label: 'Modeller', icon: 'cpu', keys: ['base_url', 'provider', 'model', 'qa_model', 'disable_thinking'] },
     { id: 'appearance', label: 'Görünüm', icon: 'palette', keys: [] },
-    { id: 'subtitles', label: 'Altyazı çevirisi', icon: 'languages', keys: ['glossary_strict', 'auto_retry_count', 'batch_cues', 'analysis_chunk_chars'] },
+    { id: 'subtitles', label: 'Altyazı çevirisi', icon: 'languages', keys: ['source_language', 'target_language', 'glossary_strict', 'auto_retry_count', 'batch_cues', 'analysis_chunk_chars'] },
     { id: 'books', label: 'Kitap çevirisi', icon: 'bookA', keys: ['auto_retry_count', 'book.'] },
     { id: 'library', label: 'Kütüphane ve belgeler', icon: 'library', keys: ['embedding_model', 'vision_model', 'ocr_engine', 'ocr_model', 'tesseract_path', 'tesseract_lang'] },
     { id: 'chat', label: 'Sohbet', icon: 'message', keys: ['qa_context_chars'] },
@@ -169,13 +186,13 @@
     ['chunk_chars', 'Parça boyutu (karakter)', 'Bölümler bu uzunlukta parçalara bölünerek çevrilir.', 1, 1000000],
     ['max_tokens', 'Çıktı token payı', 'Bir çeviri yanıtı için ayrılan en fazla token.', 1, 262144],
     ['notes_max_tokens', 'Not çıktı tokenı', 'Bölüm notları yanıtı için en fazla token.', 1, 32768],
-    ['fallback_context_length', 'Yedek context', 'LM Studio context bilgisini veremezse kullanılır.', 1, 1048576],
+    ['fallback_context_length', 'Yedek context', 'Sunucu context bilgisini veremezse (LM Studio dışı sunucularda her zaman) kullanılır.', 1, 1048576],
     ['context_safety_tokens', 'Güvenlik payı', 'Context hesabında boş bırakılan token.', 1, 65536],
   ];
 
   const advanced = [
     ['max_tokens', 'Çıktı token payı', 'Bir model yanıtı için ayrılan en fazla token.', 1, 262144, 1],
-    ['timeout_seconds', 'Zaman aşımı (sn)', 'Tek bir LM Studio isteği için beklenecek en uzun süre.', 1, 86400, 1],
+    ['timeout_seconds', 'Zaman aşımı (sn)', 'Tek bir model sunucusu isteği için beklenecek en uzun süre.', 1, 86400, 1],
     ['temperature', 'Temperature', 'Düşük değer daha tutarlı çeviri verir.', 0, 2, 0.05],
   ];
 </script>
@@ -208,11 +225,39 @@
       <div class="cat-body" data-cat="models" hidden={!searching && tab !== 'models'}>
         {#if searching}<div class="cat-label">{CATS.find((c) => c.id === 'models').label}</div>{/if}
           <section>
-            <h2>LM Studio ve model</h2>
+            <h2>Model sunucusu</h2>
             {#if info.locked.length}<div class="warn"><Icon name="alert" size={16} />Çeviri sürerken model ve bağlantı ayarları değiştirilemez.</div>{/if}
             <div class="fr">
-              <div class="l">Sunucu adresi<small>Yalnızca yerel HTTP adresi (localhost / 127.0.0.1).</small></div>
+              <div class="l">Hazır ayar<small>Adresi ve sunucu türünü doldurur; sonra değiştirebilirsiniz.</small></div>
+              <select class="field w" value="" disabled={locked('base_url')} onchange={(e) => { applyPreset(e.currentTarget.value); e.currentTarget.value = ''; }}>
+                <option value="">Seçin…</option>
+                {#each info.llm?.presets ?? [] as p}<option value={p.id}>{p.label} · {p.base_url}</option>{/each}
+              </select>
+            </div>
+            <div class="fr">
+              <div class="l">Sunucu türü<small>LM Studio'da modeller kalıcı yüklenir ve gerçek bağlam uzunluğu okunur. OpenAI uyumlu türde (Ollama, llama.cpp, vLLM, OpenAI, OpenRouter…) yalnızca standart istekler gönderilir; kitap çevirisinde bağlam uzunluğu Kitap çevirisi ayarlarındaki yedek değerdir.</small></div>
+              <select class="field w" bind:value={cfg.provider} disabled={locked('provider')}>
+                <option value="lmstudio">LM Studio</option>
+                <option value="openai">OpenAI uyumlu</option>
+              </select>
+            </div>
+            <div class="fr">
+              <div class="l">Sunucu adresi<small>Bu bilgisayar ve yerel ağ için http, internetteki sunucular için https.</small></div>
               <input class="field w" bind:value={cfg.base_url} disabled={locked('base_url')} placeholder="http://127.0.0.1:1234/v1" />
+            </div>
+            {#if serverScope === 'internet'}
+              <div class="warn"><Icon name="alert" size={16} />Çevrilen, sorulan ve özetlenen metinler bu bilgisayardan çıkıp internetteki bu sunucuya gönderilir. "Hiçbir veri internete gönderilmez" güvencesi bu sunucu için geçerli değildir.</div>
+            {:else if serverScope === 'lan'}
+              <div class="note-row"><Icon name="info" size={16} />Metinler yerel ağdaki bu sunucuya gönderilir; internete çıkmaz.</div>
+            {/if}
+            <div class="fr">
+              <div class="l">API anahtarı<small>Gerekiyorsa (OpenAI, OpenRouter ya da anahtar isteyen yerel sunucu). İşletim sisteminin şifre deposunda saklanır, config.json'a yazılmaz.</small>
+                {#if info.llm?.api_key_set}<small class="okc">Kayıtlı</small>{/if}</div>
+              <div class="pick">
+                <input class="field w2" type="password" bind:value={apiKey} placeholder={info.llm?.api_key_set ? '••••••••••••' : 'sk-…'} autocomplete="off" />
+                <button class="btn sm" disabled={!apiKey.trim()} onclick={() => saveApiKey(apiKey.trim())}>Kaydet</button>
+                {#if info.llm?.api_key_set}<button class="btn sm ghost" onclick={() => saveApiKey('')} title="Anahtarı sil">Sil</button>{/if}
+              </div>
             </div>
             <div class="fr">
               <div class="l">Analiz modeli<small>Çeviri, dosya özetleri, ekstre okuma ve analiz için kullanılan model.</small></div>
@@ -220,7 +265,7 @@
                 <select class="field w" bind:value={cfg.model} disabled={locked('model')}>
                   {#each withCurrent(chatNames, cfg.model) as m}<option value={m}>{m}</option>{/each}
                 </select>
-                <button class="icon-btn" title="Modelleri LM Studio'dan yeniden getir" disabled={app.models.state === 'probing'}
+                <button class="icon-btn" title="Modelleri sunucudan yeniden getir" disabled={app.models.state === 'probing'}
                   onclick={() => call('refresh_models')}><Icon name="refresh" size={16} spin={app.models.state === 'probing'} /></button>
               </div>
             </div>
@@ -270,6 +315,19 @@
         {#if searching}<div class="cat-label">{CATS.find((c) => c.id === 'subtitles').label}</div>{/if}
           <section>
             <h2>Altyazı çevirisi</h2>
+            <div class="fr">
+              <div class="l">Kaynak dil<small>Altyazının ve yeni kitap projelerinin dili. Otomatik seçilirse dili model tanır. Açık kitap projeleri oluşturuldukları dil çiftini korur.</small></div>
+              <select class="field" bind:value={cfg.source_language} disabled={locked('source_language')}>
+                <option value="auto">Otomatik</option>
+                {#each info.languages ?? [] as l}<option value={l.code}>{l.label}</option>{/each}
+              </select>
+            </div>
+            <div class="fr">
+              <div class="l">Hedef dil<small>Çeviri dili. Çıktı dosyası bu dilin kodunu ek olarak alır (_TR, _DE, _JA…). Seri sözlükleri tek hedef dile aittir.</small></div>
+              <select class="field" bind:value={cfg.target_language} disabled={locked('target_language')}>
+                {#each info.languages ?? [] as l}<option value={l.code}>{l.label}</option>{/each}
+              </select>
+            </div>
             <div class="fr">
               <div class="l">Katı sözlük<small>Açıkken uygulanamayan terimde çeviri durur; kapalıyken uyarı günlüğe yazılır ve çeviri sürer. Yalnızca altyazı çevirisi için.</small></div>
               <Toggle bind:checked={cfg.glossary_strict} disabled={locked('glossary_strict')} />
@@ -515,6 +573,14 @@
         {#if searching}<div class="cat-label">{CATS.find((c) => c.id === 'advanced').label}</div>{/if}
           <section>
             <h2>Gelişmiş</h2>
+            <div class="fr">
+              <div class="l">Sürüm<small>Değişiklikler depodaki CHANGELOG.md dosyasındadır.</small></div>
+              <span class="mono selectable">Aktar {app.version || '?'}</span>
+            </div>
+            <div class="fr">
+              <div class="l">Bileşen denetimi<small>Model sunucusu, FFmpeg, Whisper, ses motorları, Tesseract, libmpv ve Calibre kurulu mu; eksikse nasıl kurulur.</small></div>
+              <button class="btn sm" onclick={() => (app.setup = true)}><Icon name="check" size={14} />Denetle</button>
+            </div>
             <div class="warn"><Icon name="alert" size={16} />Bu ayarlar deneyseldir; ne yaptığınızdan emin değilseniz değiştirmeyin.</div>
             {#each advanced as [key, title, hint, min, max, step]}
               <div class="fr">
@@ -574,6 +640,7 @@
   .pick { display: flex; align-items: center; gap: 6px; }
   .pick .field.w { width: 296px; }
   .hint-line { color: var(--dim); font-size: 12px; margin: 2px 0 4px; }
+  .note-row { display: flex; gap: 8px; align-items: center; color: var(--dim); font-size: 12px; padding: 4px 0; margin: 6px 0; }
   .warn { display: flex; gap: 8px; align-items: center; color: var(--warning); font-size: 12px; background: color-mix(in srgb, var(--warning) 10%, transparent); padding: 8px 12px; border-radius: 8px; margin: 6px 0; }
   .err { color: var(--danger); }
   .small { font-size: 12px; }

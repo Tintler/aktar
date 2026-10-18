@@ -24,7 +24,7 @@
     {#if job.result.error}
       <div class="err"><Icon name="alert" size={16} /><span class="selectable">{job.result.error}</span></div>
     {:else}
-      <div class="ok"><Icon name="check" size={16} />Kitap hazır: {job.result.chapters.length} bölüm · dil {job.result.language === 'tr' ? 'Türkçe' : 'İngilizce'}</div>
+      <div class="ok"><Icon name="check" size={16} />Kitap hazır: {job.result.chapters.length} bölüm · dil {job.result.language_label ?? job.result.language}</div>
       <div class="chapters">{#each job.result.chapters as title, i}<span>{i + 1}. {title}</span>{/each}</div>
       {#if job.result.warnings?.length}
         <div class="warn-box">

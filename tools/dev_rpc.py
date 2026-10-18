@@ -4,7 +4,7 @@
     (web klasorunde) npm run dev  ->  http://localhost:5173/?rpc=http://127.0.0.1:8765
 
 --app-dir: config.json, library/ ve work_files/ icin baska klasor (gercek verilere dokunmadan
-deneme). --allow-lan: LM Studio adresinde yerel ag adresine izin verir (yalnizca deneme).
+deneme). --allow-lan: adres denetimini tamamen kapatir (F152'den beri yerel ag adresleri zaten gecerli).
 Yalnizca 127.0.0.1'i dinler. Dosya pencereleri bu kipte acilmaz (None doner); --save-dir verilirse
 kayit penceresi onerilen adi o klasore yazilacak yol olarak dondurur (disa aktarma/klip denemesi).
 """

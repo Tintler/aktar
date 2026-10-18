@@ -34,11 +34,21 @@ Aktar\bin\ffprobe.exe
 
 FFmpeg'i [ffmpeg.org](https://ffmpeg.org/download.html) üzerinden indirip `bin` klasörüne kopyalayabilirsiniz. Sistem geneline kurmak zorunlu değildir.
 
-### 1.3 LM Studio
+### 1.3 Model sunucusu (LM Studio, Ollama, llama.cpp, OpenAI…)
 
+**LM Studio** (varsayılan):
 1. LM Studio'yu açın ve kullanmak istediğiniz modeli yükleyin.
 2. **Developer / Local Server** sekmesinden yerel sunucuyu başlatın (varsayılan `http://127.0.0.1:1234`).
 3. Modeli **thinking/reasoning kapalı** olacak şekilde ayarlayın (aşağıda 6.2'ye bakın).
+
+**OpenAI uyumlu sunucular:** **Ayarlar → Modeller → Hazır ayar** listesinden Ollama (`http://127.0.0.1:11434/v1`), llama.cpp `llama-server` (`http://127.0.0.1:8080/v1`), vLLM, OpenAI ya da OpenRouter seçilir. Bu, adresi ve **Sunucu türünü** (*OpenAI uyumlu*) doldurur. Anahtar isteyen sunucular için **API anahtarı** alanına anahtarı girip **Kaydet**'e basın. Anahtar config.json'a yazılmaz; Windows Kimlik Bilgileri'nde (Linux'ta Secret Service) `Aktar/llm-api-key` adıyla saklanır. `AKTAR_API_KEY` ya da `LM_STUDIO_API_KEY` ortam değişkeni de kullanılabilir.
+
+- Bu bilgisayar ve yerel ağ (`192.168.x.x`, `10.x.x.x`, `.local`, tek parçalı makine adı, Tailscale `100.64.x.x`) için `http`, internetteki sunucular için `https` zorunludur.
+- İnternetteki bir sunucu seçilince Ayarlar'da metinlerin bilgisayardan çıkacağı uyarısı görünür.
+- OpenAI uyumlu türde LM Studio'ya özgü istekler (modeli kalıcı yükleme, yüklü modelin bağlam uzunluğu) yapılmaz. Kitap çevirisi bağlam uzunluğu olarak **Ayarlar → Kitap çevirisi → Yedek context** değerini kullanır. İnternetteki sunuculara düşünme (thinking) için standart dışı alanlar gönderilmez.
+- Küçük modeller (1–2 milyar parametre) altyazıyı çevirebilir, ama kitap çevirisinde bitiş işaretini sık atlar. Kitap için en az 4 milyar parametreli bir model ya da **Ayarlar → Kitap çevirisi**'nde bitiş işaretinin kapatılması önerilir.
+
+**Bileşen denetimi:** İlk açılışta model sunucusu, FFmpeg, embedding modeli, Whisper, ses motoru, Tesseract, libmpv ve Calibre denetlenir; eksik olanların nasıl kurulacağı ve ilgili ayar gösterilir. **Ayarlar → Gelişmiş → Bileşen denetimi** ile yeniden açılır.
 
 ### 1.4 aktar.exe derlemesi
 1. İsterseniz `bin` klasörüne `ffmpeg.exe` ve `ffprobe.exe` dosyalarını yerleştirdikten sonra uygulamayı .exe olarak derleyebilirsiniz. FFmpeg lisansından dolayı GitHub sayfasında derlenmiş .exe sunulmuyor.
@@ -131,7 +141,10 @@ Uygulama dizinindeki `config.json` dosyası ayarları tutar. Yoksa `DEFAULT_CONF
 ```json
 {
   "base_url": "http://127.0.0.1:5000/v1",
+  "provider": "lmstudio",
   "model": "gemma-4-26b-a4b-it-qat@q4_k_xl",
+  "source_language": "en",
+  "target_language": "tr",
   "batch_cues": 10,
   "max_tokens": 8192,
   "temperature": 0.2,
@@ -149,7 +162,10 @@ Uygulama dizinindeki `config.json` dosyası ayarları tutar. Yoksa `DEFAULT_CONF
 
 | Alan | Açıklama |
 | --- | --- |
-| `base_url` | LM Studio yerel sunucu adresi. **Yalnızca yerel** (`localhost` / `127.0.0.1` / `::1`) HTTP adresi kabul edilir. |
+| `base_url` | Model sunucusunun OpenAI uyumlu adresi (`.../v1`). Bu bilgisayar ve yerel ağ için `http`, internet için `https`. |
+| `provider` | Sunucu türü: `lmstudio` (varsayılan; modeller kalıcı yüklenir, gerçek bağlam uzunluğu okunur, kitap çevirisi LM Studio REST API'siyle) ya da `openai` (Ollama, llama.cpp, vLLM, OpenAI, OpenRouter…; yalnızca standart istekler). |
+| `source_language` | Çeviri kaynak dili: `auto` ya da `en`, `ja`, `de`, `fr`, `es`, `it`, `pt`, `nl`, `pl`, `ru`, `uk`, `el`, `ar`, `fa`, `hi`, `ko`, `zh`, `tr`. Altyazılar ve **yeni** kitap projeleri için geçerlidir. |
+| `target_language` | Çeviri hedef dili (aynı kodlar, `auto` hariç; varsayılan `tr`). Çıktı dosyası bu dilin kodunu ek alır (`_TR`, `_DE`…). |
 | `model` | **Analiz modeli**: çeviri, dosya/koleksiyon özetleri ve analiz için LM Studio model kimliği (boş olamaz). |
 | `qa_model` | **Soru-cevap modeli**: koleksiyon, belge ve video sohbetinde soruları cevaplayan model. Boş: analiz modeli. Ayrı bir model seçmek, LM Studio'da analiz/embedding/sohbet modelleri arasında yükle-boşalt beklemesini azaltır (LM Studio'nun aynı anda birden çok modeli bellekte tutabilmesi gerekir). |
 | `batch_cues` | Bir istekte modele gönderilecek altyazı girdisi sayısı. Thinking açıkken küçük tutun (örn. 10). |
@@ -176,7 +192,14 @@ Uygulama dizinindeki `config.json` dosyası ayarları tutar. Yoksa `DEFAULT_CONF
 
 Bu ayarların hepsi **Ayarlar** penceresinden de değiştirilebilir.
 
-> `base_url` **yalnızca yerel** olabilir; uzak adres reddedilir (gizlilik ilkesi).
+> İnternetteki `http` adresleri reddedilir; internetteki sunucular `https` olmalıdır.
+
+**Çeviri dilleri:** Altyazı Çevir ve Kitap Çevir sayfalarının başındaki iki seçici (kaynak → hedef) ya da **Ayarlar → Altyazı çevirisi** dil çiftini değiştirir. İstemler İngilizce → Türkçe yazılmıştır. Başka bir çift seçilince dil adları değişir ve Türkçeye özgü yönergeler (sen/siz, özel isimlere kesme işaretiyle ek) yalnızca hedef Türkçe iken kalır. Varsayılan çiftte istem bayt bayt aynıdır, eski kontrol noktaları geçerli kalır.
+
+- Kitap projeleri dil çiftini oluşturuldukları anda `epub-import.json`'a yazar ve hep o çiftle sürer; sayfadaki seçici yalnızca yeni projeleri etkiler.
+- Seri sözlükleri tek hedef dile aittir. Başka dilde açılan serinin sözlüğü o çeviride kullanılmaz; günlüğe uyarı yazılır.
+- Sözlük denetimi Türkçede çekim eklerini tanır. Diğer dillerde son kelimenin kökünü (birkaç harf ek payıyla) arar; Japonca, Çince ve Korece gibi boşluksuz dillerde alt dize arar.
+- ASS/SSA çıktısında font hedef dilin harflerini çizemiyorsa o dilin yedek fontu kullanılır (Türkçe/Latin/Kiril: Calibri, Japonca: Yu Gothic, Çince: Microsoft YaHei, Korece: Malgun Gothic).
 
 ---
 
@@ -377,15 +400,19 @@ Sohbet, Koleksiyona sor, Bu videoya sor ve Bu belgeye sor kutularındaki **mikro
 
 Ses hiçbir yere gönderilmez: kayıt `work_files\qa` altına geçici bir WAV olarak yazılır, metne çevrilir ve hemen silinir. Mikrofon izni yalnızca uygulamanın kendi sayfasına verilir. Whisper kurulu değilse (bkz. 1.5) düğme soluk görünür ve üzerine gelince nedenini söyler. Linux'ta mikrofon WebKitGTK'nin GStreamer eklentileriyle alınır; mikrofon bulunamıyorsa `gstreamer1.0-pulseaudio` (PipeWire'da `gstreamer1.0-pipewire`) paketini kurun.
 
-### 3.13 Kitap Çevir (EPUB)
-Sol menüdeki **Kitap Çevir**, DRM içermeyen İngilizce EPUB kitapları Türkçeye çevirir (Çevirgeç'in çeviri motoru; kurallar ve kalite denetimleri aynen korunur). EPUB'u sayfaya sürükleyin ya da **EPUB aç** ile seçin; çalışma klasörü varsayılan olarak EPUB'un klasörüdür (yol satırına tıklayıp değiştirilebilir). **Çeviriyi başlat** önce kitabı bölümlerine ayırıp `<KitapAdı>-ceviri` klasörünü oluşturur ve ilk çalıştırmada **terim sözlüğünü** sorar (boş bırakılabilir). **Ön analiz** açıksa önce analize girecek bölümler seçilir; analiz bitince model terim önerileri sunar, onaylananlar sözlüğe eklenir.
+### 3.13 Kitap Çevir (EPUB, MOBI, AZW3, FB2)
+Sol menüdeki **Kitap Çevir**, DRM içermeyen e-kitapları sayfanın başında seçilen dile çevirir (varsayılan İngilizce → Türkçe; Çevirgeç'in çeviri motoru, kurallar ve kalite denetimleri aynen korunur). Kitabı sayfaya sürükleyin ya da **E-kitap aç** ile seçin.
 
-Her parça kaydedildiği için çeviri **Duraklat**, **Durdur** ya da uygulama kapanınca kaldığı yerden sürer: yarım projeyi **Projeyi sürdür** ile (ya da `-ceviri` klasörünü sayfaya bırakarak) açın. Soldaki listede bölüm durumları görünür; bir bölüme tıklayınca kaynak ve çeviri yan yana, sözlük terimleri vurgulu gösterilir, sağ tık **Bu bölümü yeniden çevir** seçeneğini açar. **Terim sözlüğü** sonradan düzenlenirse değişen terimlerin geçtiği çevrilmiş bölümlerin yeniden çevrilmesi önerilir. Bitince klasörde `TAM-CEVIRI.md` ve `<KitapAdı> TR.epub` oluşur; ayrıntılı kayıt `translation.log` dosyasında ve sayfanın **Günlük** sekmesindedir.
+**MOBI, AZW3, AZW, PRC ve FB2 (FB2.ZIP, FBZ)** önce EPUB'a dönüştürülür. Dönüştürülen EPUB uygulama klasöründeki `work_files\ebooks` altına yazılır; kaynak dosyaya dokunulmaz. MOBI/AZW3 için Calibre kuruluysa (`ebook-convert`) o kullanılır. Yoksa yerleşik okuyucu metni, başlıkları, görselleri, kapağı, yazarı ve dili okur, ama biçimlendirme yaklaşıktır. DRM'li kitaplar ve KFX biçimi açılmaz.
+
+ çalışma klasörü varsayılan olarak EPUB'un klasörüdür (yol satırına tıklayıp değiştirilebilir). **Çeviriyi başlat** önce kitabı bölümlerine ayırıp `<KitapAdı>-ceviri` klasörünü oluşturur ve ilk çalıştırmada **terim sözlüğünü** sorar (boş bırakılabilir). **Ön analiz** açıksa önce analize girecek bölümler seçilir; analiz bitince model terim önerileri sunar, onaylananlar sözlüğe eklenir.
+
+Her parça kaydedildiği için çeviri **Duraklat**, **Durdur** ya da uygulama kapanınca kaldığı yerden sürer: yarım projeyi **Projeyi sürdür** ile (ya da `-ceviri` klasörünü sayfaya bırakarak) açın. Soldaki listede bölüm durumları görünür; bir bölüme tıklayınca kaynak ve çeviri yan yana, sözlük terimleri vurgulu gösterilir, sağ tık **Bu bölümü yeniden çevir** seçeneğini açar. **Terim sözlüğü** sonradan düzenlenirse değişen terimlerin geçtiği çevrilmiş bölümlerin yeniden çevrilmesi önerilir. Bitince klasörde `TAM-CEVIRI.md` ve `<KitapAdı> TR.epub` (hedef dil başkaysa `DE`, `JA`…) oluşur; ayrıntılı kayıt `translation.log` dosyasında ve sayfanın **Günlük** sekmesindedir.
 
 Sunucu, model, temperature, zaman aşımı, otomatik tekrar ve katı sözlük ortak ayarlardan gelir; parça boyutu, token payları, bitiş işareti ve EPUBCheck **Ayarlar → Kitap çevirisi** bölümündedir (`config.json` içinde `"book"` anahtarı). Komut satırından aynı motor `py -3 src/book_cli.py --epub kitap.epub` ile çalışır.
 
 ### 3.14 Okuma (EPUB kitaplığı)
-Sol menüdeki **Okuma**, EPUB kitaplarınızı uygulama içinde okumanızı sağlar (Çevirgeç'in okuyucusu). **Kitap ekle** ile ya da EPUB'ları sayfaya sürükleyerek kitaplığa ekleyin; dosyalar taşınmaz, yalnızca yolları `book_library.json` dosyasına yazılır. DRM'li EPUB'lar açılmaz. Kitap Çevir sayfasında çeviri bitince **Türkçe EPUB'u oku** çıktıyı kitaplığa ekleyip doğrudan açar.
+Sol menüdeki **Okuma**, EPUB kitaplarınızı uygulama içinde okumanızı sağlar (Çevirgeç'in okuyucusu). **Kitap ekle** ile ya da e-kitapları (EPUB, MOBI, AZW3, FB2) sayfaya sürükleyerek kitaplığa ekleyin (EPUB dışındakiler önce dönüştürülür, bkz. 3.13); dosyalar taşınmaz, yalnızca yolları `book_library.json` dosyasına yazılır. DRM'li EPUB'lar açılmaz. Kitap Çevir sayfasında çeviri bitince **Türkçe EPUB'u oku** çıktıyı kitaplığa ekleyip doğrudan açar.
 
 Okurken üstteki liste düğmesi **İçindekiler** ve **Yer imleri** panelini açar; yer imi düğmesi bulunduğunuz yeri işaretler. Bölüm sonunda **Sonraki bölüm**'e basın ya da kaydırmaya devam edin; **Alt+←/→** bölümler arasında geçer. **Aa** düğmesi yazı boyutu, yazı tipi (Literata serif / Inter), satır aralığı, sütun genişliği ve sayfa rengini (tema, koyu, sepya, açık) değiştirir; seçimler `ui.json`'da saklanır. Okuma konumu kendiliğinden kaydedilir ve kitaplıkta ilerleme yüzdesi olarak görünür. Kitaptaki web bağlantıları sistem tarayıcısında açılır; betikler, stiller ve dış kaynaklar kitaptan hiç yüklenmez.
 
@@ -498,7 +525,7 @@ Kaynak ASS/SSA fontu Türkçe karakterleri desteklemiyor olabilir. Aktar bu duru
 ### 6.9 `Yanıt doğrulanamadı; ... parti ... bölünüyor`
 Model çoklu istekte ID'leri düşürmüş, girdileri eksik döndürmüş veya token sınırına ulaşmış olabilir. Program aynı partiyi daha küçük parçalara ayırıp tekrar dener; gerekirse tek girdiye iner. Başarılı alt partiler kaydedilir. Tek girdide de hata sürerse işlem durur; konsoldaki hatayı ve LM Studio'nun ham yanıtını inceleyin. Bu mekanizma yanlış sıralanmış cevapları sessizce kabul etmez; çevirinin anlamsal doğruluğunu otomatik olarak garanti etmez.
 
-### 6.10 Soru Sor: `HTTP 400: LM Studio istegi reddedildi`
+### 6.10 Soru Sor: `HTTP 400: model sunucusu isteği reddetti`
 Transkript modelin bağlam uzunluğuna sığmıyor. LM Studio'da modelin **Context Length** ayarını artırın (varsayılan `qa_context_chars` 24000 için en az ~12k token önerilir) veya Ayarlar → Gelişmiş → **Soru-cevap bağlam karakteri** değerini düşürün.
 
 ### 6.11 Soru Sor: Whisper GPU kullanmıyor / çok yavaş
@@ -532,15 +559,17 @@ py -3 src/cevir.py translate "C:\video\Movie.ass" --series game-of-thrones --glo
 - `check` — ffmpeg/ffprobe bulunabilirliği ve yapılandırma geçerliliği.
 - `streams` — videodaki altyazı akışlarını listeler.
 - `extract --stream N` — seçilen global stream index'i çıkarır.
-- `translate` — altyazıyı Türkçeye çevirir; `--series` ve `--glossary Kaynak=Karşılık` (çoklanabilir).
+- `translate` — altyazıyı `config.json`'daki dil çiftiyle (varsayılan Türkçeye) çevirir; `--series` ve `--glossary Kaynak=Karşılık` (çoklanabilir).
+
+`py -3 desktop.py --version` uygulamanın sürümünü yazar.
 
 ---
 
 ## 8. Gizlilik ve veri
 
-- Tüm çeviri ve soru-cevap yerel LM Studio sunucusunda yapılır; **internete veri gitmez**.
+- Çeviri ve soru-cevap seçtiğiniz model sunucusunda yapılır. Sunucu bu bilgisayardaysa ya da yerel ağdaysa **internete veri gitmez**. İnternetteki bir sunucu (OpenAI, OpenRouter…) seçerseniz çevrilen ve sorulan metinler o sunucuya gönderilir; Ayarlar bunu açıkça uyarır.
 - Konuşmadan metin (Whisper) tamamen bilgisayarınızda çalışır. Yalnızca modelin kendisi ilk kullanımda Hugging Face'ten indirilir; video, ses veya metin gönderilmez.
-- `base_url` yalnızca yerel adres olabilir.
+- İnternetteki sunucular yalnızca `https` ile kullanılabilir; API anahtarı config.json'a değil işletim sisteminin şifre deposuna yazılır.
 - Kaynak video **salt-okunur**: kopyalanmaz, taşınmaz, değiştirilmez, yeniden encode edilmez.
 - Seri sözlükleri uygulama dizinindeki `series\` klasöründe tutulur (kullanıcı verisi; sürüm kontrolüne girmez).
 - Kütüphane koleksiyonları `library\` klasöründe tutulur; yalnızca dosya yollarını içerir, dosyaların kendisi kopyalanmaz. Genel sohbetler `library\conversations\`, Dosya incele listesi `library\recent.files.json`, dosya sohbetleri `library\file-*.chat.json` dosyalarındadır.

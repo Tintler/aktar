@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from app_core import TranslationEngine, load_config, read, render_output
+import languages
 from media import extract_subtitle, ffmpeg_path, ffprobe_path, subtitle_streams, unique_output_path
 import subtitle
 from series import series_decisions, series_glossary
@@ -93,8 +94,9 @@ def command_translate(args):
     checkpoint = source_path.with_suffix(source_path.suffix + '.state.json')
     engine = TranslationEngine(load_config, log=make_logger())
     translated = engine.translate(cues, glossary=glossary, decisions=decisions, checkpoint=checkpoint)
-    output = unique_output_path(source_path, kind)
-    text, _ = render_output(kind, payload, translated, log=make_logger())
+    cfg = load_config()
+    output = unique_output_path(source_path, kind, languages.output_tag(cfg))
+    text, _ = render_output(kind, payload, translated, log=make_logger(), language=languages.target(cfg))
     output.write_text(text, encoding='utf-8', newline='\n')
     print('Çeviri yazıldı: ' + str(output))
     return 0

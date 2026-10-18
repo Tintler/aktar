@@ -144,7 +144,8 @@ class BridgeTests(unittest.TestCase):
 
     def test_save_settings_validates_and_keeps_unknown_keys(self):
         (self.root / 'config.json').write_text(json.dumps({'embedding_query_template': 'q: {query}'}), encoding='utf-8')
-        result = self.bridge.save_settings({'base_url': 'http://192.168.1.5:1234/v1'})
+        # F152: yerel ag http olabilir, internet adresi https olmali.
+        result = self.bridge.save_settings({'base_url': 'http://example.com/v1'})
         self.assertIn('error', result)
         result = self.bridge.save_settings({'batch_cues': '12', 'whisper_language': ' EN ', 'not_a_setting': 1})
         self.assertNotIn('error', result)

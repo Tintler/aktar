@@ -237,13 +237,14 @@ def extract_subtitle(video, stream_index, output, codec=''):
     return output
 
 
-def unique_output_path(video, extension):
+def unique_output_path(video, extension, tag='_TR'):
     """Videonun dizininde cakismasiz CEVIRI cikti yolu uretir.
 
     `<video>_TR.<uzanti>`; varsa `<video>_TR (2).<uzanti>`, `<video>_TR (3)...`.
+    Hedef dil Turkce degilse ek o dilin kodudur (`_DE`, `_JA`; F151).
     Var olan dosyanin uzerine sessizce YAZILMAZ.
     """
-    return _unique_path(Path(video), f'{Path(video).stem}_TR', extension)
+    return _unique_path(Path(video), f'{Path(video).stem}{tag}', extension)
 
 
 def unique_source_path(video, extension):

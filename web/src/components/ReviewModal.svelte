@@ -23,7 +23,7 @@
 
 <Modal title={data.title} width={980}>
   <p class="hint">
-    {#if data.existing}{data.existing} mevcut seri terimi korunacak. {/if}Kullanılacak önerileri işaretleyin, Türkçe
+    {#if data.existing}{data.existing} mevcut seri terimi korunacak. {/if}Kullanılacak önerileri işaretleyin,
     karşılıkları düzeltin ve kapsamlarını seçin. Atlarsanız çeviri önerisiz devam eder.
   </p>
   <div class="tabs">
@@ -33,7 +33,7 @@
   <div class="wrap">
     {#if tab === 'terms'}
       <table class="table">
-        <thead><tr><th></th><th>Kaynak</th><th>Türkçe önerisi</th><th>Tür</th><th>Gerekçe</th><th>Kullanım</th><th>Kapsam</th></tr></thead>
+        <thead><tr><th></th><th>Kaynak</th><th>Karşılık önerisi</th><th>Tür</th><th>Gerekçe</th><th>Kullanım</th><th>Kapsam</th></tr></thead>
         <tbody>
           {#each terms as row}
             <tr class:off={!row.checked}>

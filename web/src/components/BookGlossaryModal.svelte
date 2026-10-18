@@ -30,7 +30,7 @@
 </script>
 
 <Modal {title} width={680} onclose={oncancel}>
-  <p class="hint">İngilizce terim ile zorunlu Türkçe karşılığını girin. Sözlük boş bırakılabilir.</p>
+  <p class="hint">Kaynak dildeki terim ile zorunlu karşılığını girin. Sözlük boş bırakılabilir.</p>
   <div class="tools">
     <input class="field" placeholder="Sözlükte ara" bind:value={filter} />
     <span class="count">{rows.filter((r) => r.source.trim()).length} terim</span>
@@ -38,7 +38,7 @@
   </div>
   <div class="table-wrap">
     <table class="gl-table">
-      <thead><tr><th>İngilizce terim</th><th>Türkçe karşılık</th><th></th></tr></thead>
+      <thead><tr><th>Kaynak terim</th><th>Karşılık</th><th></th></tr></thead>
       <tbody>
         {#each visible as { row, index } (index)}
           <tr>
