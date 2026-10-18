@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import json
 import random
+import re
 import struct
 import subprocess
 import sys
@@ -61,6 +62,19 @@ def ffmpeg_available():
         return True
     except RuntimeError:
         return False
+
+
+def ffmpeg_major():
+    """Kurulu ffmpeg'in ana surumu (bilinmiyorsa 0; 'N-...' ya da tarihli git derlemeleri yeni sayilir)."""
+    try:
+        first = subprocess.run([media.ffmpeg_path(), '-version'], capture_output=True, text=True).stdout.split('\n')[0]
+    except (RuntimeError, OSError):
+        return 0
+    version = first.split('version ')[-1].lstrip('n')
+    if version.startswith('N-'):
+        return 99
+    major = re.match(r'\d+', version)
+    return 0 if not major else 99 if int(major.group()) > 100 else int(major.group())
 
 
 def whisper_result():
@@ -354,6 +368,7 @@ class OcrTests(unittest.TestCase):
         self.assertEqual(result.getpixel((result.width // 2, result.height // 2)), 0)   # koyu yazi
 
     @unittest.skipUnless(ffmpeg_available(), 'ffmpeg yok')
+    @unittest.skipIf(0 < ffmpeg_major() < 7, 'ffmpeg 6.x son PGS olayinin bitisini farkli veriyor (Ubuntu 24.04)')
     def test_recognize_pgs_stream(self):
         with tempfile.TemporaryDirectory() as folder:
             folder = Path(folder)
