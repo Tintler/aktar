@@ -33,15 +33,20 @@ from pathlib import Path
 
 DEFAULT_URL = 'http://127.0.0.1:7861'
 MODEL = 'drama-3'
-MAX_CHARS = 150            # bir istekte en fazla karakter (~14 sn konusma; sunucu MAXNEW=320 kare)
+MAX_CHARS = 100            # bir istekte en fazla karakter; uzun parcayi model bazen erken bitirir (F160: 122 karakterde 1/10, bolunce 0/20)
 REFERENCE_SECONDS = 20.0   # sunucunun kabul ettigi en uzun klon kaydi
 TRANSCRIBE_SECONDS = 30.0  # kirpma noktasini bulmak icin Whisper'a giden en uzun bolum
 REQUEST_TIMEOUT = 180      # yeni bir sesle ilk istek ~8 sn; uzun cumle + yogun sunucu icin pay
 HEALTH_TIMEOUT = 5
-# Ornekleme (F159): sunucunun varsayilani 1.0/0.9 her cumleyi farkli tonlar; 20 Turkce cumlede 0.7/0.7 ile
-# perde sapmasi 16,5 -> 11 Hz, duzey sapmasi 1,9 -> 1,4 dB, Whisper CER %0,9 -> %0. Sunucu seed desteklemiyor.
-TEMPERATURE = 0.7
-TOP_P = 0.7
+# Ornekleme (F159/F160): sunucu varsayilani (temperature 1.0, top_p 0.9) her cumleyi farkli tonlar. Daha dar
+# ornekleme tonu sabitler ama model bazen ilk ifadeden sonra susar ve cumlenin kalanini atlar (0.7/0.7 ile
+# uzun parcalarin ~%4'u). 0.8 + varsayilan top_p bu olcumde susmadi; yine de susan parca yeniden istenir.
+TEMPERATURE = 0.8
+TOP_P = None               # None: sunucu varsayilani
+SILENT_RETRY_TEMPERATURES = (None, None)   # susan parca icin yeniden denemeler (None: sunucu varsayilani)
+MAX_LETTERS_PER_SECOND = 24   # konusulan sureye gore bundan hizli parca "susmus" sayilir (normal 10-17)
+CHECK_MIN_LETTERS = 25        # bundan kisa parcada susma denetimi yapilmaz
+VOICED_LEVEL = 1500           # 100 ms pencerede bu tepeyi asan bolum konusma sayilir
 SENTENCE_GAP = 0.25        # cumle parcalari arasina konan sessizlik (sn)
 CLAUSE_GAP = 0.12          # virgulden bolunen parcalar arasina
 SILENCE_LIMIT = 1.0        # bundan uzun sessizlik...
@@ -94,12 +99,15 @@ def health(url, timeout=HEALTH_TIMEOUT):
 
 
 def speech(url, text, references=(), timeout=REQUEST_TIMEOUT, retries=1, temperature=TEMPERATURE, top_p=TOP_P):
-    """Bir metin parcasini WAV bayt olarak uretir (dusuk temperature/top_p: cumleler arasi tutarli tonlama). Sunucu 500 dondururse (ara sira 'generated no audio
+    """Bir metin parcasini WAV bayt olarak uretir (temperature/top_p None ise sunucu varsayilani). Sunucu 500 dondururse (ara sira 'generated no audio
     frames') `retries` kez yeniden dener."""
     url = normalize_url(url)
-    body = json.dumps({'model': MODEL, 'input': text, 'references': list(references),
-                       'response_format': 'wav', 'temperature': temperature, 'top_p': top_p},
-                      ensure_ascii=False).encode('utf-8')
+    payload = {'model': MODEL, 'input': text, 'references': list(references), 'response_format': 'wav'}
+    if temperature is not None:
+        payload['temperature'] = temperature
+    if top_p is not None:
+        payload['top_p'] = top_p
+    body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
     for attempt in range(retries + 1):
         request = urllib.request.Request(url + '/v1/audio/speech', data=body, method='POST',
                                          headers={'Content-Type': 'application/json'})
@@ -149,11 +157,19 @@ def _protected(text):
     return spans
 
 
+def _lower_follows(text, end):
+    """Bolme noktasindan sonra kucuk harf mi geliyor ('44. bolumunu', 'Gelir misin? diye'): cumle bitmemistir
+    (okuyucunun sentences.js kurali)."""
+    following = text[end:end + 1]
+    return following.isalpha() and following != following.upper()
+
+
 def _cuts(text, pattern):
     """`pattern` eslesmelerindeki bolme noktalari (korunan araliklarin icindekiler haric): [(bas, son)]."""
     spans = _protected(text)
     return [(m.start(), m.end()) for m in pattern.finditer(text)
-            if not any(a < m.start() < b for a, b in spans)]
+            if not any(a < m.start() < b for a, b in spans)
+            and not (pattern is _SENTENCE_END and _lower_follows(text, m.end()))]
 
 
 def _split(text, pattern):
@@ -258,6 +274,25 @@ def shorten_silences(samples, rate, limit=SILENCE_LIMIT, keep=SILENCE_KEEP, leve
         index = end
     output.extend(samples[position:])
     return output
+
+
+def voiced_seconds(samples, rate, level=VOICED_LEVEL):
+    """Konusma suresi: tepesi `level`i asan 100 ms'lik pencerelerin toplami."""
+    window = max(1, int(rate * 0.1))
+    return sum(max(map(abs, samples[i:i + window])) > level for i in range(0, len(samples), window)) * window / rate
+
+
+def letters(text):
+    """Okunacak harf sayisi ([laughs], <whisper> gibi etiketler ve noktalama haric)."""
+    return len(re.sub(r'\[[^\]]*\]|<[^>]*>|[\W_]', '', text))
+
+
+def fell_silent(text, samples, rate):
+    """Model parcanin bir kismini soylemeden sustu mu: konusulan sure metne gore cok kisa."""
+    count = letters(text)
+    if count < CHECK_MIN_LETTERS:
+        return False
+    return count / max(voiced_seconds(samples, rate), 0.05) > MAX_LETTERS_PER_SECOND
 
 
 def join_clips(clips, rate):
@@ -409,6 +444,20 @@ class Engine:
         self.voice = voice
         return {'device': 'sunucu', 'reference_text': self.reference['text'], 'reference_seconds': self.reference['seconds']}
 
+    def _piece(self, piece, references):
+        """Bir parcayi uretir; model cumlenin ortasinda susarsa (F160) sunucu varsayilanlariyla yeniden ister,
+        hepsi susarsa en cok konusani kullanir."""
+        best = None
+        for attempt, temperature in enumerate((TEMPERATURE,) + SILENT_RETRY_TEMPERATURES):
+            samples, rate = read_pcm(speech(self.url, piece, references, temperature=temperature))
+            if not fell_silent(piece, samples, rate):
+                return samples, rate
+            self._log(f'Drama 3: model cümlenin bir kısmını atladı, yeniden deneniyor ({attempt + 1}): {piece[:60]}')
+            if best is None or voiced_seconds(samples, rate) > voiced_seconds(*best):
+                best = (samples, rate)
+        self._log(f'UYARI: Drama 3 bu parçayı tam okuyamadı: {piece[:80]}')
+        return best
+
     def say(self, text, speed=1.0):
         """Metni parcalara bolup sunucuda seslendirir; WAV bayt ve sure (sn) dondurur."""
         if self.reference is None:
@@ -417,7 +466,7 @@ class Engine:
         clips, rate = [], None
         with self._lock:     # sunucuya ayni anda tek istek (motor sureclerindeki gibi sirali)
             for piece, gap in split_text(text):
-                samples, piece_rate = read_pcm(speech(self.url, piece, references))
+                samples, piece_rate = self._piece(piece, references)
                 if rate is not None and piece_rate != rate:
                     raise ServerError('Drama 3 sunucusu parçalar için farklı örnekleme hızları döndürdü.')
                 rate = piece_rate

@@ -126,6 +126,11 @@ class SplitTests(unittest.TestCase):
         self.assertEqual(pieces, ['<|speaker:1|>Selam.', '<|speaker:1|>Nasılsın?', '<|speaker:0|>İyiyim.',
                                   '<|speaker:0|>Sen?'])
 
+    def test_lower_case_continuation_does_not_end_sentence(self):
+        text = "Çöküşü'nün 44. bölümünü izliyordum. \"Gelir misin?\" diye sordu. Sonra gitti."
+        self.assertEqual([p for p, _ in drama3.split_text(text)],
+                         ["Çöküşü'nün 44. bölümünü izliyordum.", '"Gelir misin?" diye sordu.', 'Sonra gitti.'])
+
     def test_empty_text(self):
         self.assertEqual(drama3.split_text('   '), [])
 
@@ -178,6 +183,44 @@ class CutPointTests(unittest.TestCase):
         self.assertEqual(drama3._cut_point([], 20), (0.0, ''))
 
 
+class SilentPieceTests(unittest.TestCase):
+    LONG = 'Kısmen insan, kısmen bot yapısıyız; şirketin güvenlik teminatının bir parçası olarak kiralanıyoruz.'
+
+    def test_detects_model_falling_silent(self):
+        self.assertTrue(drama3.fell_silent(self.LONG, tone(1.0) + silence(6.0), RATE))
+        self.assertFalse(drama3.fell_silent(self.LONG, tone(6.0) + silence(0.5), RATE))
+        self.assertFalse(drama3.fell_silent('Ya da başka bir şey...', tone(0.3), RATE))   # kisa parca denetlenmez
+
+    def test_letters_ignore_tags_and_punctuation(self):
+        self.assertEqual(drama3.letters('[laughs] <whisper>Bak, şu!</whisper> 44.'), 7)
+
+    def test_silent_piece_is_requested_again_with_server_defaults(self):
+        server = FakeServer()
+        self.addCleanup(server.close)
+        server.replies = [(200, drama3.wav_bytes(tone(1.0) + silence(6.0), RATE)),
+                          (200, drama3.wav_bytes(tone(6.0), RATE))]
+        engine = drama3.Engine(tempfile.gettempdir(), prefs=lambda: {'drama3_url': server.url})
+        engine.reference = {'text': 'Kayıt.', 'data': 'QUJD', 'seconds': 3}
+        _data, duration = engine.say(self.LONG)
+        self.assertAlmostEqual(duration, 6.0, delta=0.05)
+        self.assertEqual(len(server.requests), 2)
+        self.assertEqual(server.requests[0][1]['temperature'], drama3.TEMPERATURE)
+        self.assertNotIn('temperature', server.requests[1][1])
+
+    def test_keeps_the_most_complete_attempt(self):
+        server = FakeServer()
+        self.addCleanup(server.close)
+        server.replies = [(200, drama3.wav_bytes(tone(1.0), RATE)), (200, drama3.wav_bytes(tone(2.0), RATE)),
+                          (200, drama3.wav_bytes(tone(0.5), RATE))]
+        logs = []
+        engine = drama3.Engine(tempfile.gettempdir(), prefs=lambda: {'drama3_url': server.url}, log=logs.append)
+        engine.reference = {'text': 'Kayıt.', 'data': 'QUJD', 'seconds': 3}
+        _data, duration = engine.say(self.LONG)
+        self.assertEqual(len(server.requests), 1 + len(drama3.SILENT_RETRY_TEMPERATURES))
+        self.assertAlmostEqual(duration, 2.0, delta=0.05)
+        self.assertTrue(any('tam okuyamadı' in line for line in logs))
+
+
 class HttpTests(unittest.TestCase):
     def setUp(self):
         self.server = FakeServer()
@@ -191,7 +234,10 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(path, '/v1/audio/speech')
         self.assertEqual(body, {'model': 'drama-3', 'input': 'Merhaba [laughs] <whisper>dünya</whisper>',
                                 'references': [{'text': 'Kayıt metni.', 'data': 'QUJD'}], 'response_format': 'wav',
-                                'temperature': drama3.TEMPERATURE, 'top_p': drama3.TOP_P})
+                                'temperature': drama3.TEMPERATURE})
+        self.assertIsNone(drama3.TOP_P)   # top_p kisitlamasi modeli susturuyordu (F160)
+        drama3.speech(self.server.url, 'Bir.', temperature=None)
+        self.assertNotIn('temperature', self.server.requests[-1][1])
 
     def test_retries_once_on_server_error(self):
         self.server.replies = [(500, b'{"detail": "generated no audio frames"}')]
