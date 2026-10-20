@@ -42,6 +42,14 @@ def silence(seconds, rate=RATE):
 TAIL = 0.1   # sunucu sesi gibi: konusma sessizlikle biter
 
 
+def talk(seconds):
+    """Konusmaya benzer: 0,3 sn ses + 0,1 sn sessizlik, sesle biter (gurultu tabani 0)."""
+    out = array.array('h')
+    while len(out) < RATE * seconds:
+        out += silence(0.1) + tone(0.3)
+    return out
+
+
 def spoken(seconds):
     """Sunucudan donen tam bir parca: konusma + kisa sessizlik (sessizlik olmadan biten ses 'erken bitmis' sayilir)."""
     return drama3.wav_bytes(tone(seconds) + silence(TAIL), RATE)
@@ -198,6 +206,13 @@ class CutPointTests(unittest.TestCase):
         self.assertEqual(text, 'Kısa. uzun konuşma')
         self.assertLessEqual(end, 20)
 
+    def test_cuts_at_a_pause_when_no_sentence_ends(self):
+        segments = self.words([(0, 6, 'Ahirete'), (6, 12, 'inanırlar'), (12, 14.5, 'işte'), (15.2, 17, 'onlar'),
+                               (17, 19.6, 'yol'), (19.6, 22, 'üzeredirler')])
+        end, text = drama3._cut_point(segments, 20)
+        self.assertEqual(text, 'Ahirete inanırlar işte')   # 14,5-15,2 arasi duraklama
+        self.assertAlmostEqual(end, 14.65)
+
     def test_no_speech(self):
         self.assertEqual(drama3._cut_point([], 20), (0.0, ''))
 
@@ -257,13 +272,23 @@ class SilentPieceTests(unittest.TestCase):
         self.assertAlmostEqual(duration, 8.0 + 2 * TAIL + drama3.CLAUSE_GAP, delta=0.05)
 
     def test_detects_piece_ending_mid_word(self):
-        self.assertTrue(drama3.ends_abruptly(tone(3.0), RATE))
-        self.assertFalse(drama3.ends_abruptly(tone(3.0) + silence(0.06), RATE))
+        self.assertTrue(drama3.ends_abruptly(talk(3.0), RATE))
+        self.assertFalse(drama3.ends_abruptly(talk(3.0) + silence(0.06), RATE))
+
+    def test_abrupt_threshold_follows_noise_floor(self):
+        noisy = tone(2.0) + tone(1.0, level=700) + tone(0.1, level=1800)   # yankili ses: sessizlikte bile ~700
+        self.assertFalse(drama3.ends_abruptly(noisy, RATE))
+        self.assertTrue(drama3.ends_abruptly(tone(2.0) + tone(1.0, level=700) + tone(0.1, level=8000), RATE))
+
+    def test_fade_out(self):
+        faded = drama3.fade_out(tone(1.0), RATE)
+        self.assertEqual(faded[-1], 0)
+        self.assertEqual(faded[:RATE // 2], tone(1.0)[:RATE // 2])
 
     def test_piece_ending_abruptly_is_requested_again(self):
         server = FakeServer()
         self.addCleanup(server.close)
-        server.replies = [(200, drama3.wav_bytes(tone(5.0), RATE)), (200, spoken(6.0))]
+        server.replies = [(200, drama3.wav_bytes(talk(5.0), RATE)), (200, spoken(6.0))]
         engine = drama3.Engine(tempfile.gettempdir(), prefs=lambda: {'drama3_url': server.url})
         engine.reference = {'text': 'Kayıt.', 'data': 'QUJD', 'seconds': 3}
         _data, duration = engine.say(self.LONG)

@@ -61,7 +61,8 @@ SILENCE_LIMIT = 1.0        # bundan uzun sessizlik...
 SILENCE_KEEP = 0.4         # ...bu kadara kisaltilir
 SILENCE_LEVEL = 300        # 16 bit orneklerde sessizlik esigi (~-40 dBFS)
 SILENCE_WINDOW = 0.01      # sessizlik penceresi (sn)
-REFERENCE_VERSION = 1      # hazirlanan klon kaydi onbellegi bicimi
+REFERENCE_VERSION = 2      # hazirlanan klon kaydi onbellegi bicimi (2: duraklamada kesme + sonda ses azaltma)
+FADE_SECONDS = 0.04        # kirpilan referansin sonundaki ses azaltma
 CONSENT_NOTE = ('Rızası olmadan tanınabilir kişilerin sesini klonlamak yasaktır (Fish Audio Community License). '
                 'Yalnızca hakkına sahip olduğunuz kayıtları kullanın.')
 RECORDING_HINT = ('En iyi sonuç: 8-15 saniyelik, sakin, gürültüsüz ve tam bir cümleyle biten kayıt. '
@@ -302,11 +303,19 @@ def voiced_seconds(samples, rate, level=VOICED_LEVEL):
     return sum(max(map(abs, samples[i:i + window])) > level for i in range(0, len(samples), window)) * window / rate
 
 
+def noise_floor(samples, rate):
+    """Gurultu tabani: 50 ms'lik pencere tepelerinin en sessiz %10'u (yankili/gurultulu klon seste yuksek olur)."""
+    window = max(1, int(rate * 0.05))
+    peaks = sorted(max(map(abs, samples[i:i + window])) for i in range(0, max(0, len(samples) - window), window))
+    return peaks[len(peaks) // 10] if peaks else 0
+
+
 def ends_abruptly(samples, rate, level=ABRUPT_LEVEL):
     """Ses sessizlige inmeden mi bitiyor (son 50 ms'de konusma): model parcayi erken bitirmis, son kelime ya da hece
-    eksik (F162: okuyucu testinde tam biten parcalarin hepsi sessizlikle bitti; 'ifadeler icin [tariyorum]')."""
+    eksik (F162: 'ifadeler icin [tariyorum]'). Esik sesin gurultu tabaninin 3 kati (F164: gurultulu klon seste
+    parcalar bosuna yeniden isteniyordu)."""
     tail = samples[-max(1, int(rate * 0.05)):]
-    return max(map(abs, tail), default=0) > level
+    return max(map(abs, tail), default=0) > max(level, 3 * noise_floor(samples, rate))
 
 
 def letters(text):
@@ -361,6 +370,16 @@ def change_speed(data, speed):
 
 
 # ---------------------------------------------------------------- klon kaydi
+def fade_out(samples, rate, seconds=FADE_SECONDS):
+    """Son `seconds` saniyeyi dogrusal olarak sessizlige indirir (kirpilan kayit tik sesiyle bitmesin)."""
+    count = min(len(samples), int(rate * seconds))
+    out = array.array('h', samples)
+    for i in range(count):
+        index = len(out) - count + i
+        out[index] = int(out[index] * (count - 1 - i) / count)
+    return out
+
+
 def _cut_point(segments, limit=REFERENCE_SECONDS):
     """Whisper kelimelerinden kirpma noktasi ve o noktaya kadarki metin: tercihen `limit` icinde biten son
     cumle sonu, yoksa son kelime. Donen (saniye, metin); konusma yoksa (0, '')."""
@@ -371,7 +390,16 @@ def _cut_point(segments, limit=REFERENCE_SECONDS):
     if not inside:
         return 0.0, ''
     sentence = [i for i in inside if re.search(r'[.!?…]["\'»”’)]*$', words[i][2])]
-    last = sentence[-1] if sentence and words[sentence[-1]][1] >= limit / 3 else inside[-1]
+    # F164: cumle sonu yoksa kelimeler arasindaki bir duraklamada kes (son 1/3'teki en uzun bosluk): konusmanin
+    # ortasinda biten referans modele de sesi birden bitirmeyi ogretiyordu
+    gaps = [i for i in inside
+            if i + 1 < len(words) and words[i + 1][0] - words[i][1] >= 0.2 and words[i][1] >= limit * 2 / 3]
+    if sentence and words[sentence[-1]][1] >= limit / 3:
+        last = sentence[-1]
+    elif gaps:
+        last = max(gaps, key=lambda i: words[i + 1][0] - words[i][1])
+    else:
+        last = inside[-1]
     end = min(limit, words[last][1] + 0.15)
     if last + 1 < len(words):
         end = min(end, max(words[last][1], words[last + 1][0]))
@@ -433,7 +461,7 @@ def prepare_reference(path, text, cache_dir, transcribe=None, language='tr', log
         if not long:
             cut = seconds
         text = heard
-    samples = samples[:int(rate * min(cut, REFERENCE_SECONDS))]
+    samples = fade_out(samples[:int(rate * min(cut, REFERENCE_SECONDS))], rate)
     data = wav_bytes(samples, rate)
     partial = cached_wav.with_suffix('.part')
     partial.write_bytes(data)
