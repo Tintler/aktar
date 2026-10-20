@@ -340,6 +340,7 @@ class VoxCpmWorkerTests(unittest.TestCase):
 
         class FakeVoxCPM:
             loads = []
+            cached = True
 
             def __init__(self, model_id):
                 self.tts_model = types.SimpleNamespace(sample_rate=16000, device='cpu')
@@ -348,6 +349,8 @@ class VoxCpmWorkerTests(unittest.TestCase):
             @classmethod
             def from_pretrained(cls, hf_model_id, **kwargs):
                 cls.loads.append((hf_model_id, kwargs))
+                if kwargs.get('local_files_only') and not cls.cached:
+                    raise FileNotFoundError('not in the local cache')
                 return cls(hf_model_id)
 
             def generate(self, text, **kwargs):
@@ -385,6 +388,22 @@ class VoxCpmWorkerTests(unittest.TestCase):
         self.assertEqual((len(audio), rate), (16000, 16000))
         faster, _ = self.engine.say('Merhaba.', 2.0, 0)
         self.assertLess(len(faster), 12000)
+
+    def test_cached_model_loads_without_asking_the_hub(self):
+        self.engine.options = {}
+        self.engine.load('trendyol', 'auto')
+        self.assertEqual(len(self.Fake.loads), 1)
+        self.assertTrue(self.Fake.loads[0][1]['local_files_only'])
+
+    def test_missing_model_is_downloaded(self):
+        self.Fake.cached = False
+        stages = []
+        self.engine.out = lambda message: stages.append(message.get('message'))
+        self.engine.options = {}
+        self.engine.load('trendyol', 'auto')
+        self.assertEqual([kwargs.get('local_files_only', False) for _, kwargs in self.Fake.loads], [True, False])
+        self.assertTrue(any('indiriliyor' in str(stage) for stage in stages))
+        self.assertEqual(self.engine.model.model_id, 'Trendyol/Trendyol-TTS')
 
     def test_designed_voice_is_made_once_and_reused(self):
         self.engine.options = {'description': 'A calm narrator'}

@@ -80,10 +80,18 @@ class VoxCpmEngine(Engine):
                                "ya da PyTorch'un CUDA sürümünü kurun.")
         if self.model_id != MODELS[voice]:
             self.model = None
-            self.stage('Model alınıyor ve yükleniyor (ilk kullanımda ~5 GB iner)…')
             # optimize=False: torch.compile can take minutes or fail on Windows; the plain path is fast enough.
-            self.model = VoxCPM.from_pretrained(hf_model_id=MODELS[voice], load_denoiser=False, optimize=False,
-                                                device=None if device in ('auto', '', None) else device)
+            settings = dict(hf_model_id=MODELS[voice], load_denoiser=False, optimize=False,
+                            device=None if device in ('auto', '', None) else device)
+            # The cached copy first: otherwise every load asks the Hub for updates and waits on a slow or
+            # missing network. LocalEntryNotFoundError (not cached yet) and missing files of an unfinished
+            # download are both FileNotFoundError; only then is the model fetched.
+            self.stage('Model yükleniyor…')
+            try:
+                self.model = VoxCPM.from_pretrained(local_files_only=True, **settings)
+            except FileNotFoundError:
+                self.stage('Model indiriliyor (ilk kullanımda ~5 GB iner)…')
+                self.model = VoxCPM.from_pretrained(**settings)
             self.model_id = MODELS[voice]
         self.voice = voice
         self.prompt = self._prompt(voice)
