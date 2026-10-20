@@ -39,6 +39,14 @@ def silence(seconds, rate=RATE):
     return array.array('h', bytes(2 * int(rate * seconds)))
 
 
+TAIL = 0.1   # sunucu sesi gibi: konusma sessizlikle biter
+
+
+def spoken(seconds):
+    """Sunucudan donen tam bir parca: konusma + kisa sessizlik (sessizlik olmadan biten ses 'erken bitmis' sayilir)."""
+    return drama3.wav_bytes(tone(seconds) + silence(TAIL), RATE)
+
+
 class FakeServer:
     """Drama 3 sunucusunun yerine gecen yerel HTTP sunucusu: istekleri kaydeder, `replies` sirasiyla yanitlar."""
 
@@ -73,7 +81,7 @@ class FakeServer:
                     code, data = owner.replies.pop(0)
                     self._send(code, data, 'audio/wav' if code == 200 else 'application/json')
                 else:
-                    self._send(200, drama3.wav_bytes(tone(0.5), RATE), 'audio/wav')
+                    self._send(200, spoken(0.5), 'audio/wav')
 
         self.server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         self.url = f'http://127.0.0.1:{self.server.server_address[1]}'
@@ -199,10 +207,6 @@ class SilentPieceTests(unittest.TestCase):
         self.assertFalse(drama3.fell_silent(self.LONG, tone(6.0) + silence(0.5), RATE))
         self.assertFalse(drama3.fell_silent('Ya da başka bir şey...', tone(0.3), RATE))   # kisa parca denetlenmez
 
-    def test_cut_off_only_when_speech_reaches_the_end(self):
-        self.assertTrue(drama3.cut_off(tone(15.0), RATE))
-        self.assertFalse(drama3.cut_off(tone(15.0) + silence(0.4), RATE))
-
     def test_letters_ignore_tags_and_punctuation(self):
         self.assertEqual(drama3.letters('[laughs] <whisper>Bak, şu!</whisper> 44.'), 7)
 
@@ -210,11 +214,11 @@ class SilentPieceTests(unittest.TestCase):
         server = FakeServer()
         self.addCleanup(server.close)
         server.replies = [(200, drama3.wav_bytes(tone(1.0) + silence(6.0), RATE)),
-                          (200, drama3.wav_bytes(tone(6.0), RATE))]
+                          (200, spoken(6.0))]
         engine = drama3.Engine(tempfile.gettempdir(), prefs=lambda: {'drama3_url': server.url})
         engine.reference = {'text': 'Kayıt.', 'data': 'QUJD', 'seconds': 3}
         _data, duration = engine.say(self.LONG)
-        self.assertAlmostEqual(duration, 6.0, delta=0.05)
+        self.assertAlmostEqual(duration, 6.0 + TAIL, delta=0.05)
         self.assertEqual(len(server.requests), 2)
         self.assertEqual(server.requests[0][1]['temperature'], drama3.TEMPERATURE)
         self.assertNotIn('temperature', server.requests[1][1])
@@ -234,15 +238,30 @@ class SilentPieceTests(unittest.TestCase):
     def test_piece_cut_by_server_limit_is_split(self):
         server = FakeServer()
         self.addCleanup(server.close)
-        server.replies = [(200, drama3.wav_bytes(tone(drama3.CAP_SECONDS + 0.5), RATE)),
-                          (200, drama3.wav_bytes(tone(4.0), RATE)), (200, drama3.wav_bytes(tone(4.0), RATE))]
+        # sinira takilan ses bir duraklamada kesilmis olabilir: sonu sessiz olsa da bolunur
+        server.replies = [(200, drama3.wav_bytes(tone(drama3.CAP_SECONDS) + silence(0.5), RATE)),
+                          (200, spoken(4.0)), (200, spoken(4.0))]
         engine = drama3.Engine(tempfile.gettempdir(), prefs=lambda: {'drama3_url': server.url})
         engine.reference = {'text': 'Kayıt.', 'data': 'QUJD', 'seconds': 3}
         _data, duration = engine.say(self.LONG)
         self.assertEqual(len(server.requests), 3)
         halves = [body['input'] for _, body in server.requests[1:]]
         self.assertEqual(' '.join(halves), self.LONG)
-        self.assertAlmostEqual(duration, 8.0 + drama3.CLAUSE_GAP, delta=0.05)
+        self.assertAlmostEqual(duration, 8.0 + 2 * TAIL + drama3.CLAUSE_GAP, delta=0.05)
+
+    def test_detects_piece_ending_mid_word(self):
+        self.assertTrue(drama3.ends_abruptly(tone(3.0), RATE))
+        self.assertFalse(drama3.ends_abruptly(tone(3.0) + silence(0.06), RATE))
+
+    def test_piece_ending_abruptly_is_requested_again(self):
+        server = FakeServer()
+        self.addCleanup(server.close)
+        server.replies = [(200, drama3.wav_bytes(tone(5.0), RATE)), (200, spoken(6.0))]
+        engine = drama3.Engine(tempfile.gettempdir(), prefs=lambda: {'drama3_url': server.url})
+        engine.reference = {'text': 'Kayıt.', 'data': 'QUJD', 'seconds': 3}
+        _data, duration = engine.say(self.LONG)
+        self.assertEqual(len(server.requests), 2)
+        self.assertAlmostEqual(duration, 6.0 + TAIL, delta=0.05)
 
     def test_keeps_the_most_complete_attempt(self):
         server = FakeServer()
@@ -311,13 +330,13 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(drama3.normalize_url(' localhost:7861/ '), 'http://localhost:7861')
 
     def test_engine_say_joins_pieces_and_shortens_silence(self):
-        self.server.replies = [(200, drama3.wav_bytes(tone(0.5) + silence(5.0) + tone(0.5), RATE)),
+        self.server.replies = [(200, drama3.wav_bytes(tone(0.5) + silence(5.0) + tone(0.5) + silence(TAIL), RATE)),
                                (500, b'{"detail": "generated no audio frames"}'),
-                               (200, drama3.wav_bytes(tone(1.0), RATE))]
+                               (200, spoken(1.0))]
         engine = drama3.Engine(tempfile.gettempdir(), prefs=lambda: {'drama3_url': self.server.url})
         engine.reference = {'text': 'Kayıt.', 'data': 'QUJD', 'seconds': 3}
         data, duration = engine.say('Birinci cümle. İkinci cümle.')
-        expected = 1.0 + drama3.SILENCE_KEEP + drama3.SENTENCE_GAP + 1.0
+        expected = 1.0 + drama3.SILENCE_KEEP + TAIL + drama3.SENTENCE_GAP + 1.0 + TAIL
         self.assertAlmostEqual(duration, expected, delta=0.05)
         self.assertEqual(len(self.server.requests), 3)
         self.assertEqual([body['input'] for _, body in self.server.requests],
@@ -434,7 +453,7 @@ class BuiltinEngineTests(unittest.TestCase):
                          ('ready', 'drama3', 'clone', 'sunucu'), status)
         self.assertEqual(prepare.call_args.args[:2], ('C:/ses/kayit.wav', 'Merhaba.'))
         result = self.engines.say('Bir cümle.')
-        self.assertAlmostEqual(result['duration'], 0.5, delta=0.02)
+        self.assertAlmostEqual(result['duration'], 0.5 + TAIL, delta=0.02)
         with wave.open(io.BytesIO(base64.b64decode(result['audio']))) as clip:
             self.assertEqual(clip.getframerate(), RATE)
         self.assertEqual(self.server.requests[-1][1]['references'], [{'text': 'Merhaba.', 'data': 'QUJD'}])

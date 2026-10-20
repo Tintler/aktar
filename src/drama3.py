@@ -35,8 +35,9 @@ DEFAULT_URL = 'http://127.0.0.1:7861'
 MODEL = 'drama-3'
 MAX_CHARS = 150            # bir istekte en fazla karakter (Ayarlar'dan 60-250); kisa parca daha az atlar ama
                            # cumle ortasinda ton degisir (F160: 122 karakterde 1/10 erken bitme, bolunce 0/20)
-CAP_SECONDS = 14.3         # serve_tr.sh MAXNEW=320 kare (~14,9 sn); bundan uzun olup konusmanin ortasinda biten ses
-                           # kesilmistir (MAXNEW buyutulurse tam biten uzun parca bolunmez)
+CAP_SECONDS = 14.3         # serve_tr.sh MAXNEW=320 kare = 14,86 sn; buna ulasan ses kesilmis sayilir ve parca bolunur.
+                           # Kesilme bir duraklamaya denk gelirse ses sessiz biter (F162: 7 kelime boyle kayboldu),
+                           # o yuzden sonun sesli olmasi aranmaz. MAXNEW buyutulurse yalnizca gereksiz bir bolme olur.
 REFERENCE_SECONDS = 20.0   # sunucunun kabul ettigi en uzun klon kaydi
 TRANSCRIBE_SECONDS = 30.0  # kirpma noktasini bulmak icin Whisper'a giden en uzun bolum
 REQUEST_TIMEOUT = 180      # yeni bir sesle ilk istek ~8 sn; uzun cumle + yogun sunucu icin pay
@@ -52,6 +53,7 @@ SILENT_RETRY_TEMPERATURES = (None, None)   # susan parca icin yeniden denemeler 
 MAX_LETTERS_PER_SECOND = 24   # konusulan sureye gore bundan hizli parca "susmus" sayilir (normal 10-17)
 CHECK_MIN_LETTERS = 25        # bundan kisa parcada susma denetimi yapilmaz
 VOICED_LEVEL = 1500           # 100 ms pencerede bu tepeyi asan bolum konusma sayilir
+ABRUPT_LEVEL = 1000           # son 50 ms'de bu tepeyi asan ses 'erken bitmis' sayilir (873 parcada ~%11)
 SENTENCE_GAP = 0.25        # cumle parcalari arasina konan sessizlik (sn)
 CLAUSE_GAP = 0.12          # virgulden bolunen parcalar arasina
 SILENCE_LIMIT = 1.0        # bundan uzun sessizlik...
@@ -295,9 +297,11 @@ def voiced_seconds(samples, rate, level=VOICED_LEVEL):
     return sum(max(map(abs, samples[i:i + window])) > level for i in range(0, len(samples), window)) * window / rate
 
 
-def cut_off(samples, rate):
-    """Ses konusmanin ortasinda mi bitiyor (son 200 ms'de konusma var): sunucunun uretim sinirina takilmis."""
-    return voiced_seconds(samples[-int(rate * 0.2):], rate) > 0
+def ends_abruptly(samples, rate, level=ABRUPT_LEVEL):
+    """Ses sessizlige inmeden mi bitiyor (son 50 ms'de konusma): model parcayi erken bitirmis, son kelime ya da hece
+    eksik (F162: okuyucu testinde tam biten parcalarin hepsi sessizlikle bitti; 'ifadeler icin [tariyorum]')."""
+    tail = samples[-max(1, int(rate * 0.05)):]
+    return max(map(abs, tail), default=0) > level
 
 
 def letters(text):
@@ -483,18 +487,22 @@ class Engine:
         attempts = ((settings['temperature'], settings['top_p']),) + tuple((t, None) for t in SILENT_RETRY_TEMPERATURES)
         for attempt, (temperature, top_p) in enumerate(attempts):
             samples, rate = read_pcm(speech(self.url, piece, references, temperature=temperature, top_p=top_p))
-            if len(samples) / rate >= CAP_SECONDS and cut_off(samples, rate) and depth < 3:
+            if len(samples) / rate >= CAP_SECONDS and depth < 3:
                 halves = halve(piece)
                 if len(halves) > 1:
                     self._log(f'Drama 3: parça sunucunun süre sınırına takıldı, bölünüyor: {piece[:60]}')
                     return [clip for half in halves for clip in self._piece(half, references, settings, depth + 1)]
-            if not fell_silent(piece, samples, rate):
+            silent, abrupt = fell_silent(piece, samples, rate), ends_abruptly(samples, rate)
+            if not silent and not abrupt:
                 return [(samples, rate)]
-            self._log(f'Drama 3: model cümlenin bir kısmını atladı, yeniden deneniyor ({attempt + 1}): {piece[:60]}')
-            if best is None or voiced_seconds(samples, rate) > voiced_seconds(*best):
-                best = (samples, rate)
+            reason = 'cümlenin bir kısmını atladı' if silent else 'parçayı erken bitirdi'
+            self._log(f'Drama 3: model {reason}, yeniden deneniyor ({attempt + 1}): {piece[:60]}')
+            # tercih: susmayan, sonra en cok konusan deneme
+            score = (not silent, voiced_seconds(samples, rate))
+            if best is None or score > best[0]:
+                best = (score, (samples, rate))
         self._log(f'UYARI: Drama 3 bu parçayı tam okuyamadı: {piece[:80]}')
-        return [best]
+        return [best[1]]
 
     def say(self, text, speed=1.0):
         """Metni parcalara bolup sunucuda seslendirir; WAV bayt ve sure (sn) dondurur."""
