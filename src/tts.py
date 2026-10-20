@@ -392,7 +392,11 @@ class Engines:
         if engine_id is None:
             return None
         options = self._voice_options(engine_id, voice_id, override)
-        key = json.dumps([engine_id, voice_id, options, round(float(speed), 2), text], sort_keys=True, ensure_ascii=False)
+        parts = [engine_id, voice_id, options, round(float(speed), 2), text]
+        tag = self._manifests().get(engine_id, {}).get('cache_tag')   # motor.json: bump to re-render old sentences
+        if tag:
+            parts.append(tag)
+        key = json.dumps(parts, sort_keys=True, ensure_ascii=False)
         return self.app_dir / CACHE_DIR / book / (hashlib.sha1(key.encode('utf-8')).hexdigest() + '.wav')
 
     @staticmethod

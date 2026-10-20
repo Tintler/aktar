@@ -190,7 +190,8 @@ class HttpTests(unittest.TestCase):
         path, body = self.server.requests[0]
         self.assertEqual(path, '/v1/audio/speech')
         self.assertEqual(body, {'model': 'drama-3', 'input': 'Merhaba [laughs] <whisper>dünya</whisper>',
-                                'references': [{'text': 'Kayıt metni.', 'data': 'QUJD'}], 'response_format': 'wav'})
+                                'references': [{'text': 'Kayıt metni.', 'data': 'QUJD'}], 'response_format': 'wav',
+                                'temperature': drama3.TEMPERATURE, 'top_p': drama3.TOP_P})
 
     def test_retries_once_on_server_error(self):
         self.server.replies = [(500, b'{"detail": "generated no audio frames"}')]
@@ -327,6 +328,12 @@ class BuiltinEngineTests(unittest.TestCase):
         self.assertEqual(engine['attribution'], 'Built with Fish Audio')
         self.assertIn('Rızası olmadan', engine['notice'])
         self.assertEqual(engine['languages'], ['en', 'tr'])
+
+    def test_cache_tag_separates_sentence_cache(self):
+        path = self.engines._cache_path('0123456789abcdef', 'Bir.', 1.0, 'tr')
+        with patch.object(self.engines, '_manifests', return_value={'drama3': {'id': 'drama3', 'builtin': 'drama3',
+                                                                              'voices': [{'id': 'clone', 'language': 'tr'}]}}):
+            self.assertNotEqual(self.engines._cache_path('0123456789abcdef', 'Bir.', 1.0, 'tr'), path)
 
     def test_never_chosen_by_itself(self):
         self.prefs.pop('voices')

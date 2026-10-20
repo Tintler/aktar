@@ -38,6 +38,10 @@ REFERENCE_SECONDS = 20.0   # sunucunun kabul ettigi en uzun klon kaydi
 TRANSCRIBE_SECONDS = 30.0  # kirpma noktasini bulmak icin Whisper'a giden en uzun bolum
 REQUEST_TIMEOUT = 180      # yeni bir sesle ilk istek ~8 sn; uzun cumle + yogun sunucu icin pay
 HEALTH_TIMEOUT = 5
+# Ornekleme (F159): sunucunun varsayilani 1.0/0.9 her cumleyi farkli tonlar; 20 Turkce cumlede 0.7/0.7 ile
+# perde sapmasi 16,5 -> 11 Hz, duzey sapmasi 1,9 -> 1,4 dB, Whisper CER %0,9 -> %0. Sunucu seed desteklemiyor.
+TEMPERATURE = 0.7
+TOP_P = 0.7
 SENTENCE_GAP = 0.25        # cumle parcalari arasina konan sessizlik (sn)
 CLAUSE_GAP = 0.12          # virgulden bolunen parcalar arasina
 SILENCE_LIMIT = 1.0        # bundan uzun sessizlik...
@@ -89,12 +93,13 @@ def health(url, timeout=HEALTH_TIMEOUT):
     return data
 
 
-def speech(url, text, references=(), timeout=REQUEST_TIMEOUT, retries=1):
-    """Bir metin parcasini WAV bayt olarak uretir. Sunucu 500 dondururse (ara sira 'generated no audio
+def speech(url, text, references=(), timeout=REQUEST_TIMEOUT, retries=1, temperature=TEMPERATURE, top_p=TOP_P):
+    """Bir metin parcasini WAV bayt olarak uretir (dusuk temperature/top_p: cumleler arasi tutarli tonlama). Sunucu 500 dondururse (ara sira 'generated no audio
     frames') `retries` kez yeniden dener."""
     url = normalize_url(url)
     body = json.dumps({'model': MODEL, 'input': text, 'references': list(references),
-                       'response_format': 'wav'}, ensure_ascii=False).encode('utf-8')
+                       'response_format': 'wav', 'temperature': temperature, 'top_p': top_p},
+                      ensure_ascii=False).encode('utf-8')
     for attempt in range(retries + 1):
         request = urllib.request.Request(url + '/v1/audio/speech', data=body, method='POST',
                                          headers={'Content-Type': 'application/json'})
