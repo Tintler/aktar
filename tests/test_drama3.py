@@ -100,9 +100,11 @@ def free_url():
 
 
 class SplitTests(unittest.TestCase):
-    def test_sentences_go_separately(self):
-        pieces = drama3.split_text('Merhaba dünya. Nasılsın? İyiyim!')
-        self.assertEqual([p for p, _ in pieces], ['Merhaba dünya.', 'Nasılsın?', 'İyiyim!'])
+    def test_short_sentences_share_a_piece(self):
+        self.assertEqual([p for p, _ in drama3.split_text('"İşte antiseptik! Haydi gayret!" dedi. Merhaba.')],
+                         ['"İşte antiseptik! Haydi gayret!" dedi. Merhaba.'])
+        pieces = drama3.split_text('Merhaba dünya. Nasılsın? İyiyim!', limit=20)
+        self.assertEqual([p for p, _ in pieces], ['Merhaba dünya.', 'Nasılsın? İyiyim!'])
         self.assertEqual({g for _, g in pieces}, {drama3.SENTENCE_GAP})
 
     def test_long_sentence_splits_at_commas(self):
@@ -139,12 +141,13 @@ class SplitTests(unittest.TestCase):
 
     def test_speaker_tag_carries_to_following_pieces(self):
         pieces = [p for p, _ in drama3.split_text('<|speaker:1|>Selam. Nasılsın? <|speaker:0|>İyiyim. Sen?')]
-        self.assertEqual(pieces, ['<|speaker:1|>Selam.', '<|speaker:1|>Nasılsın?', '<|speaker:0|>İyiyim.',
-                                  '<|speaker:0|>Sen?'])
+        self.assertEqual(pieces, ['<|speaker:1|>Selam. Nasılsın?', '<|speaker:0|>İyiyim. Sen?'])
+        pieces = [p for p, _ in drama3.split_text('<|speaker:1|>Selam. Nasılsın?', limit=20)]
+        self.assertEqual(pieces, ['<|speaker:1|>Selam.', '<|speaker:1|>Nasılsın?'])
 
     def test_lower_case_continuation_does_not_end_sentence(self):
         text = "Çöküşü'nün 44. bölümünü izliyordum. \"Gelir misin?\" diye sordu. Sonra gitti."
-        self.assertEqual([p for p, _ in drama3.split_text(text)],
+        self.assertEqual([p for p, _ in drama3.split_text(text, limit=36)],
                          ["Çöküşü'nün 44. bölümünü izliyordum.", '"Gelir misin?" diye sordu.', 'Sonra gitti.'])
 
     def test_empty_text(self):
@@ -201,6 +204,10 @@ class CutPointTests(unittest.TestCase):
 
 class SilentPieceTests(unittest.TestCase):
     LONG = 'Kısmen insan, kısmen bot yapısıyız; şirketin güvenlik teminatının bir parçası olarak kiralanıyoruz.'
+
+    def test_short_piece_with_long_silence_is_detected(self):
+        self.assertTrue(drama3.fell_silent('dedi.', tone(1.2) + silence(6.0), RATE))
+        self.assertFalse(drama3.fell_silent('dedi.', tone(0.5) + silence(0.2), RATE))
 
     def test_detects_model_falling_silent(self):
         self.assertTrue(drama3.fell_silent(self.LONG, tone(1.0) + silence(6.0), RATE))
@@ -330,17 +337,18 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(drama3.normalize_url(' localhost:7861/ '), 'http://localhost:7861')
 
     def test_engine_say_joins_pieces_and_shortens_silence(self):
-        self.server.replies = [(200, drama3.wav_bytes(tone(0.5) + silence(5.0) + tone(0.5) + silence(TAIL), RATE)),
+        self.server.replies = [(200, drama3.wav_bytes(tone(1.5) + silence(3.0) + tone(1.5) + silence(TAIL), RATE)),
                                (500, b'{"detail": "generated no audio frames"}'),
                                (200, spoken(1.0))]
-        engine = drama3.Engine(tempfile.gettempdir(), prefs=lambda: {'drama3_url': self.server.url})
+        prefs = {'drama3_url': self.server.url, 'engine_settings': {'drama3': {'max_chars': 60}}}
+        engine = drama3.Engine(tempfile.gettempdir(), prefs=lambda: prefs)
         engine.reference = {'text': 'Kayıt.', 'data': 'QUJD', 'seconds': 3}
-        data, duration = engine.say('Birinci cümle. İkinci cümle.')
-        expected = 1.0 + drama3.SILENCE_KEEP + TAIL + drama3.SENTENCE_GAP + 1.0 + TAIL
+        first, second = 'Birinci cümle biraz uzunca yazıldı.', 'İkinci cümle de öyle yazıldı.'
+        data, duration = engine.say(f'{first} {second}')
+        expected = 3.0 + drama3.SILENCE_KEEP + TAIL + drama3.SENTENCE_GAP + 1.0 + TAIL
         self.assertAlmostEqual(duration, expected, delta=0.05)
         self.assertEqual(len(self.server.requests), 3)
-        self.assertEqual([body['input'] for _, body in self.server.requests],
-                         ['Birinci cümle.', 'İkinci cümle.', 'İkinci cümle.'])
+        self.assertEqual([body['input'] for _, body in self.server.requests], [first, second, second])
         self.assertTrue(all(body['references'] == [{'text': 'Kayıt.', 'data': 'QUJD'}] for _, body in self.server.requests))
 
 

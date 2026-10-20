@@ -51,7 +51,8 @@ TOP_P = 0.9                # sunucu varsayilani; daha dari modeli susturabilir
 SETTINGS = {'max_chars': (MAX_CHARS, 60, 250), 'temperature': (TEMPERATURE, 0.3, 1.5), 'top_p': (TOP_P, 0.5, 1.0)}
 SILENT_RETRY_TEMPERATURES = (None, None)   # susan parca icin yeniden denemeler (None: sunucu varsayilani)
 MAX_LETTERS_PER_SECOND = 24   # konusulan sureye gore bundan hizli parca "susmus" sayilir (normal 10-17)
-CHECK_MIN_LETTERS = 25        # bundan kisa parcada susma denetimi yapilmaz
+CHECK_MIN_LETTERS = 25        # bundan kisa parcada harf orani denetimi yapilmaz
+OVERLONG_BASE, OVERLONG_LETTERS_PER_SECOND = 2.0, 5.0   # ses bundan uzunsa (2 sn + harf/5) model takilmis sayilir
 VOICED_LEVEL = 1500           # 100 ms pencerede bu tepeyi asan bolum konusma sayilir
 ABRUPT_LEVEL = 1000           # son 50 ms'de bu tepeyi asan ses 'erken bitmis' sayilir (873 parcada ~%11)
 SENTENCE_GAP = 0.25        # cumle parcalari arasina konan sessizlik (sn)
@@ -214,18 +215,22 @@ def bisect(text, limit):
 
 
 def split_text(text, limit=MAX_CHARS):
-    """Metni sunucuya gidecek parcalara boler: [(parca, sonraki_sessizlik_sn)]. Cumleler ayri gider; sinirdan
-    uzun cumle virgul/noktali virgulden, o da yetmezse kelimelerden bolunur. <|speaker:N|> etiketi sonraki
-    parcalara da tasinir."""
+    """Metni sunucuya gidecek parcalara boler: [(parca, sonraki_sessizlik_sn)]. Ardisik cumleler sinira kadar
+    tek parcada gider (F163: tek basina kalan 'dedi.', 'iste...' gibi kisa parcalari model susarak ya da
+    mirildanarak okuyordu; az parca ayni zamanda az ton degisimi). Sinirdan uzun cumle ortadan, once virgul/
+    noktali virgulden, o da yetmezse kelimelerden bolunur. <|speaker:N|> etiketi sonraki parcalara da tasinir."""
     text = ' '.join(str(text or '').split())
     result = []
     for sentence in _split(text, _SENTENCE_END):
-        if len(sentence) <= limit:
+        if len(sentence) > limit:
+            packed = bisect(sentence, limit)
+            result.extend((piece, CLAUSE_GAP) for piece in packed[:-1])
+            result.append((packed[-1], SENTENCE_GAP))
+        elif (result and result[-1][1] == SENTENCE_GAP and len(result[-1][0]) + 1 + len(sentence) <= limit
+              and not _SPEAKER.match(sentence)):
+            result[-1] = (result[-1][0] + ' ' + sentence, SENTENCE_GAP)
+        else:
             result.append((sentence, SENTENCE_GAP))
-            continue
-        packed = bisect(sentence, limit)
-        result.extend((piece, CLAUSE_GAP) for piece in packed[:-1])
-        result.append((packed[-1], SENTENCE_GAP))
     speaker = ''
     tagged = []
     for piece, gap in result:
@@ -310,8 +315,11 @@ def letters(text):
 
 
 def fell_silent(text, samples, rate):
-    """Model parcanin bir kismini soylemeden sustu mu: konusulan sure metne gore cok kisa."""
+    """Model parcanin bir kismini soylemeden sustu mu: konusulan sure metne gore cok kisa, ya da ses metne gore
+    cok uzun (F163: 'dedi.' icin 1,2 sn konusma + 6 sn sessizlik; kisa parcada harf orani anlamsiz)."""
     count = letters(text)
+    if len(samples) / rate > OVERLONG_BASE + count / OVERLONG_LETTERS_PER_SECOND:
+        return True
     if count < CHECK_MIN_LETTERS:
         return False
     return count / max(voiced_seconds(samples, rate), 0.05) > MAX_LETTERS_PER_SECOND
