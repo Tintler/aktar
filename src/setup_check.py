@@ -80,7 +80,7 @@ def whisper():
 
 
 def tts(engines):
-    usable = [item['name'] for item in engines if item.get('mode')]
+    usable = [item['name'] for item in engines if item.get('mode') and not item.get('server')]   # F158: Drama 3 ayri sunucu ister
     if usable:
         return _item('tts', 'Sesli okuma motoru', False, 'ok', ', '.join(usable), settings='voice')
     return _item('tts', 'Sesli okuma motoru', False, 'missing', 'Sesli okuma, sesli kitap ve dublaj kullanılamaz.',

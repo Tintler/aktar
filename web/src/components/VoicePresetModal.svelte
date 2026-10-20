@@ -16,7 +16,7 @@
 
   const usable = $derived(app.engines.filter((e) => e.mode));
   const voices = $derived(usable.flatMap((engine) => engine.voices.map((voice) => ({
-    value: `${engine.id}/${voice.id}`, spec: voice,
+    value: `${engine.id}/${voice.id}`, spec: voice, engine,
     label: engine.voices.length > 1 ? `${engine.name} · ${voice.name}` : engine.name,
   }))));
 
@@ -31,6 +31,7 @@
     if (!form.voice && voices.length) form.voice = voices[0].value;
   });
   const spec = $derived(voices.find((v) => v.value === form.voice)?.spec ?? null);
+  const engine = $derived(voices.find((v) => v.value === form.voice)?.engine ?? null);
   const initial = $derived((form.name.trim()[0] ?? '').toLocaleUpperCase('tr'));
 
   function setImage(value) {
@@ -115,6 +116,9 @@
         {#each voices as v (v.value)}<option value={v.value}>{v.label}</option>{/each}
       </select>
     </label>
+    {#if engine?.attribution || engine?.notice}
+      <div class="notice">{#if engine.attribution}<b>{engine.attribution}</b>{/if}{#if engine.notice}<span>{engine.notice}</span>{/if}</div>
+    {/if}
     {#each spec?.options ?? [] as option (form.voice + option.key)}
       <div class="fr col">
         <span class="l">{option.label}{#if option.hint}<small>{option.hint}</small>{/if}</span>
@@ -163,4 +167,6 @@
   .warn { color: var(--warning); }
   .err { color: var(--danger); }
   .danger-text { color: var(--danger); }
+  .notice { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--warning); padding: 0 0 10px; }
+  .notice b { color: var(--secondary); font-weight: 600; }
 </style>

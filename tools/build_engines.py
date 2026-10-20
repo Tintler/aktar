@@ -103,8 +103,10 @@ def main():
         print('UYARI: Bu Python ortamındaki PyTorch CUDA desteklemiyor; EMA paketi yalnızca CPU ile çalışır. '
               "GPU için önce CUDA'lı PyTorch kurun: py -3 -m pip install torch --index-url "
               'https://download.pytorch.org/whl/cu128', flush=True)
+    # Yerlesik motorlar (motor.json "builtin", orn. drama3) Aktar'in icinde calisir; paketlenmez.
     folders = [path.parent for path in sorted((ROOT / 'engines').glob('*/motor.json'))
-               if not wanted or path.parent.name in wanted]
+               if (not wanted or path.parent.name in wanted)
+               and not json.loads(path.read_text(encoding='utf-8')).get('builtin')]
     if not folders:
         sys.exit('Derlenecek motor bulunamadı.')
     for folder in folders:

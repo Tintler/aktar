@@ -168,13 +168,57 @@ class Worker:
                 pass
 
 
+class InlineWorker:
+    """An engine running inside Aktar (motor.json "builtin": a module under src/, e.g. drama3, a client of a
+    server the user runs). Same interface as Worker; requests are plain calls, serialized like a worker's."""
+
+    def __init__(self, engine, data, on_event, prefs=None, transcribe=None, log=None):
+        self.engine, self.data = engine, Path(data)
+        if engine['builtin'] == 'drama3':
+            import drama3 as module
+        else:
+            raise RuntimeError(f'Bilinmeyen yerleşik ses motoru: {engine["builtin"]}')
+        self.impl = module.Engine(self.data, prefs=prefs, transcribe=transcribe, log=log,
+                                  stage=lambda message: on_event({'event': 'stage', 'message': message}))
+        self._lock = threading.Lock()
+        self._stopped = False
+
+    def start(self, timeout=60):
+        self.data.mkdir(parents=True, exist_ok=True)
+
+    def request(self, command, timeout=None, **payload):
+        if self._stopped:
+            raise RuntimeError('Ses motoru çalışmıyor.')
+        with self._lock:
+            if command == 'load':
+                return self.impl.load(payload.get('voice') or '', payload.get('options') or {}) or {}
+            if command == 'say':
+                data, duration = self.impl.say(payload.get('text', ''), float(payload.get('speed') or 1.0))
+                return {'audio': base64.b64encode(data).decode('ascii'), 'duration': duration}
+            if command == 'ping':
+                return {}
+        raise ValueError(f'Bilinmeyen komut: {command}')
+
+    @property
+    def alive(self):
+        return not self._stopped
+
+    def log_tail(self, lines=6):
+        return ''
+
+    def stop(self):
+        self._stopped = True
+
+
 class Engines:
     """Lists, installs and runs voice engines; keeps at most one worker process running."""
 
-    def __init__(self, app_dir, source_dir, emit=None, prefs=None):
+    def __init__(self, app_dir, source_dir, emit=None, prefs=None, transcribe=None, log=None):
         self.app_dir, self.source_dir = Path(app_dir), Path(source_dir)
         self._emit = emit or (lambda _event, _data: None)
         self._prefs = prefs or (lambda: {})
+        self._transcribe = transcribe     # builtin engines: (wav path, language) -> Whisper segments
+        self._log = log
         self._lock = threading.RLock()
         self._worker = None
         self._loading = None
@@ -212,6 +256,8 @@ class Engines:
         return known
 
     def _mode(self, manifest):
+        if manifest.get('builtin'):
+            return 'builtin'
         if (not FROZEN and manifest.get('module') and manifest.get('root')
                 and all(importlib.util.find_spec(name) for name in manifest.get('python_modules', []))):
             return 'source'
@@ -234,6 +280,8 @@ class Engines:
                 'devices': manifest.get('devices', ['cpu']), 'voices': voices,
                 'languages': sorted({voice['language'] for voice in voices}),
                 'busy': self._busy.get(engine_id),
+                'attribution': manifest.get('attribution', ''), 'notice': manifest.get('notice', ''),
+                'server': bool(manifest.get('server')),
             })
         return result
 
@@ -250,7 +298,8 @@ class Engines:
             engine_id, _, voice_id = ((self._prefs().get('voices') or {}).get(key) or '').partition('/')
         if engine_id in usable and any(v['id'] == voice_id and v['language'] == key for v in usable[engine_id]['voices']):
             return engine_id, voice_id
-        for candidate in [DEFAULT_ENGINE.get(key)] + sorted(usable):
+        # A server engine (Drama 3) is never picked by itself: it needs a server and a recording the user chose.
+        for candidate in [DEFAULT_ENGINE.get(key)] + sorted(i for i in usable if not usable[i].get('server')):
             voice = next((v for v in usable.get(candidate, {}).get('voices', []) if v['language'] == key), None)
             if voice:
                 return candidate, voice['id']
@@ -315,8 +364,12 @@ class Engines:
             if not (worker and worker.alive and worker.engine['id'] == target['engine']
                     and self._requested_device == target['device']):
                 self.stop_worker()
-                worker = Worker(dict(manifest, mode=mode), self._data_dir(target['engine']),
-                                self.install_root / target['engine'] / 'worker.log', self._on_event)
+                if mode == 'builtin':
+                    worker = InlineWorker(dict(manifest, mode=mode), self._data_dir(target['engine']), self._on_event,
+                                          self._prefs, self._transcribe, self._log)
+                else:
+                    worker = Worker(dict(manifest, mode=mode), self._data_dir(target['engine']),
+                                    self.install_root / target['engine'] / 'worker.log', self._on_event)
                 worker.start()
                 self._worker = worker
             result = worker.request('load', voice=target['voice'], device=target['device'], options=options or {})

@@ -7,11 +7,13 @@
   import { PAUSE_KEYS, PAUSE_PRESETS, PAUSE_DEFAULTS, resolvePauses } from '../lib/pauses.js';
   import { QUOTE_DEFAULTS } from '../lib/sentences.js';
 
-  const LANGUAGES = { tr: 'Ses' };
+  const LANGUAGES = { tr: 'Ses', en: 'İngilizce ses' };
   const DEFAULT_ENGINE = { tr: 'ema-lightning' };
+  const DRAMA3_URL = 'http://127.0.0.1:7861';
 
   const usable = $derived(app.engines.filter((e) => e.mode));
-  const languages = ['tr'];
+  // Turkce her zaman; baska diller ancak o dilde ses veren bir motor varsa (F158: Drama 3 Ingilizce)
+  const languages = $derived(['tr', ...new Set(usable.flatMap((e) => e.voices.map((v) => v.language)).filter((l) => l !== 'tr'))]);
 
   function options(language) {
     return usable.flatMap((engine) => engine.voices.filter((v) => v.language === language).map((voice) => ({
@@ -27,7 +29,9 @@
     const list = options(language);
     const saved = app.ttsPrefs.voices?.[language];
     if (list.some((o) => o.value === saved)) return saved;
-    return (list.find((o) => o.engine === DEFAULT_ENGINE[language]) ?? list[0])?.value ?? '';
+    // sunucu isteyen motor (Drama 3) kendiliginden secilmez
+    const server = (id) => usable.find((e) => e.id === id)?.server;
+    return (list.find((o) => o.engine === DEFAULT_ENGINE[language]) ?? list.find((o) => !server(o.engine)))?.value ?? '';
   }
 
   function choose(language, value) {
@@ -121,14 +125,31 @@
     if (engines) { app.engines = engines; toast(`${engine.name} kaldırıldı.`); }
   }
 
+  // F158: sunucuya baglanan motor (Drama 3): adres ve saglik denetimi
+  let serverCheck = $state(null);    // {ok, message} | {error}
+  let checking = $state(false);
+
+  function setServerUrl(value) {
+    app.ttsPrefs.drama3_url = value.trim();
+    serverCheck = null;
+    saveTtsPrefs();
+  }
+
+  async function checkServer() {
+    checking = true;
+    serverCheck = await call('tts_server_check', app.ttsPrefs.drama3_url || DRAMA3_URL);
+    checking = false;
+  }
+
   const modeBadge = (engine) => engine.busy ? [engine.busy, 'active']
+    : engine.mode === 'builtin' ? ['Sunucuya bağlanır', 'done']
     : engine.mode === 'package' ? [`Kurulu · ${engine.installed_version ?? engine.version}`, 'done']
     : engine.mode === 'source' ? ['Python paketiyle', 'done'] : ['Kurulu değil', ''];
 
   const stateText = $derived({
     idle: 'Henüz yüklenmedi; okumaya başladığınızda yüklenir.',
     loading: app.tts.message,
-    ready: `Hazır · ${app.engines.find((e) => e.id === app.tts.engine)?.name ?? app.tts.engine} · ${String(app.tts.device ?? '').startsWith('cuda') ? 'GPU' : 'CPU'}`,
+    ready: `Hazır · ${app.engines.find((e) => e.id === app.tts.engine)?.name ?? app.tts.engine} · ${app.tts.device === 'sunucu' ? 'Sunucu' : String(app.tts.device ?? '').startsWith('cuda') ? 'GPU' : 'CPU'}`,
     error: app.tts.message,
     missing: app.tts.message,
   }[app.tts.state] ?? '');
@@ -164,8 +185,9 @@
     {@const badge = modeBadge(engine)}
     <div class="fr engine">
       <div class="l">
-        {engine.name} <span class="ver">{engine.version}</span>
+        {engine.name} <span class="ver">{engine.version}</span>{#if engine.attribution}<span class="attr">{engine.attribution}</span>{/if}
         <small>{engine.description}</small>
+        {#if engine.notice}<small class="notice">{engine.notice}</small>{/if}
         <small class="dim">Diller: {engine.languages.map((l) => ({ tr: 'Türkçe', en: 'İngilizce' })[l] ?? l).join(', ')} · {engine.license}</small>
       </div>
       <span class="badge {badge[1]}">{badge[0]}</span>
@@ -173,6 +195,20 @@
         <button class="icon-btn" title="Kaldır" onclick={() => remove(engine)}><Icon name="trash" size={16} /></button>
       {/if}
     </div>
+    {#if engine.server}
+      <div class="fr sub">
+        <div class="l">Sunucu adresi<small>{engine.name} sunucusunu siz başlatırsınız (Aktar başlatmaz). Windows'ta WSL "mirrored" ağ kipindeyse
+          localhost çalışır; değilse WSL'in IP adresini yazın.</small></div>
+        <input class="field" value={app.ttsPrefs.drama3_url ?? ''} placeholder={DRAMA3_URL} spellcheck="false"
+          onchange={(e) => setServerUrl(e.currentTarget.value)} />
+        <button class="btn sm" disabled={checking} onclick={checkServer}><Icon name="refresh" size={14} />{checking ? 'Deneniyor…' : 'Bağlantıyı dene'}</button>
+      </div>
+      {#if serverCheck}
+        <div class={serverCheck.error ? 'warn' : 'info'}>
+          <Icon name={serverCheck.error ? 'alert' : 'check'} size={16} /><span class="selectable">{serverCheck.error ?? serverCheck.message}</span>
+        </div>
+      {/if}
+    {/if}
   {/each}
 
   {#if app.tts.state === 'loading' || app.tts.state === 'error' || app.tts.state === 'ready'}
@@ -188,6 +224,7 @@
       <div class="l">{LANGUAGES[language] ?? `Dil: ${language}`}<small>{list.length ? 'Bu dildeki kitapları okuyacak ses' : 'Bu dil için kurulu ses motoru yok'}</small></div>
       {#if list.length}
         <select class="field w" value={selected(language)} onchange={(e) => choose(language, e.currentTarget.value)}>
+          {#if !selected(language)}<option value="">Seçilmedi</option>{/if}
           {#each list as option}<option value={option.value}>{option.label}{option.note}</option>{/each}
         </select>
       {/if}
@@ -300,6 +337,8 @@
   .sub { padding-left: 16px; border-bottom-style: dashed; }
   .path { max-width: 260px; font-size: 12px; color: var(--secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; }
   .ver { color: var(--dim); font-size: 12px; margin-left: 4px; }
+  .attr { margin-left: 8px; font-size: 11px; font-weight: 600; color: var(--secondary); border: 1px solid var(--outline); border-radius: 999px; padding: 1px 8px; }
+  .l small.notice { color: var(--warning); }
   .field.w { width: 340px; }
   .info, .warn { display: flex; gap: 8px; align-items: center; font-size: 12px; padding: 8px 12px; border-radius: 8px; margin: 4px 0 8px; }
   .info { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }

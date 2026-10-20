@@ -44,7 +44,7 @@ Videolarınızı, belgelerinizi ve kitaplarınızı **yerel bir yapay zeka model
 - **Okuma:** E-kitap kitaplığı (EPUB, MOBI, AZW3, FB2); içindekiler, yer imleri, yazı ve sayfa ayarları, okuma konumu.
 - **Kitapta ara:** Ctrl+F ile kelime ya da cümle tüm kitapta aranır; sonuca tıklayınca bölüm açılıp eşleşme vurgulanır.
 - **Kitaba sor:** Okurken kitaba soru sorun ("3. bölümde ne oldu?"); cevaptaki bölüm atfı kitabı o bölüme götürür. **Okuduğum yere kadar** seçiliyse okuduğunuz yerden (bölüm içindeki konum dahil) sonrası modele hiç gitmez.
-- **Sesli okuma ve sesli kitap:** Kitaplar yerel ses motorlarıyla (EMA Lightning, VoxCPM) cümle cümle okunur; tarifle tasarlanan ya da kayıttan klonlanan sesler kullanılabilir. Kitabın tamamı bölüm işaretli M4B ya da bölüm başına MP3 olarak kaydedilir.
+- **Sesli okuma ve sesli kitap:** Kitaplar yerel ses motorlarıyla (EMA Lightning, VoxCPM) cümle cümle okunur; tarifle tasarlanan ya da kayıttan klonlanan sesler kullanılabilir. **Drama 3 (Türkçe)** motoru, kendi başlattığınız bir SGLang-Omni sunucusuna bağlanıp Fish Audio Drama 3 ile klon sesle okur (Built with Fish Audio; rızası olmadan tanınabilir kişilerin sesini klonlamak yasaktır). Kitabın tamamı bölüm işaretli M4B ya da bölüm başına MP3 olarak kaydedilir.
 - **PDF'den kitap:** Metin katmanı olan PDF'ler doğrudan, taranmış PDF'ler OCR ile (kitabın diliyle) okunur, üst/alt bilgilerden ve bölünmüş kelimelerden temizlenir, bölümlere ayrılır ve EPUB'a dönüştürülür; sonuç **Gözden geçir** ekranında sayfa görüntüsünün yanında düzeltilir.
 
 **Genel**
@@ -92,7 +92,7 @@ Açılan **Kütüphane** sayfasına bir klasör sürükleyin; koleksiyon oluşur
 | `desktop.py` | Giriş noktası: arayüzü pywebview penceresinde açar |
 | `src/` | Python arka ucu (çeviri, kütüphane, soru-cevap, kitap, ses, `bridge_*.py` köprüleri) |
 | `web/` | Svelte arayüzü |
-| `engines/` | Sesli okuma motorları (EMA Lightning, VoxCPM) |
+| `engines/` | Sesli okuma motorları (EMA Lightning, VoxCPM; Drama 3 yalnızca motor.json, istemcisi `src/drama3.py`) |
 | `tests/` | Birim testleri: `py -3 -m unittest discover -s tests` |
 | `tools/` | Geliştirme araçları (`dev_rpc.py`, `build_engines.py`) |
 | `assets/` | Logo, simgeler ve hazır temalar |

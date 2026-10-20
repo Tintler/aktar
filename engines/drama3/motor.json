@@ -1,0 +1,31 @@
+{
+  "id": "drama3",
+  "name": "Drama 3 (Türkçe)",
+  "version": "1.0.0",
+  "protocol": 1,
+  "builtin": "drama3",
+  "server": true,
+  "attribution": "Built with Fish Audio",
+  "notice": "Rızası olmadan tanınabilir kişilerin sesini klonlamak yasaktır (Fish Audio Community License). Yalnızca hakkına sahip olduğunuz kayıtları kullanın.",
+  "description": "Fish Audio Drama 3'ün Türkçeye uyarlanmış sürümü: bir kayıttan klonlanan, duygulu ve doğal ses. Türkçe ve İngilizcede iyi sonuç verir. Kendi başlattığınız SGLang-Omni sunucusuna bağlanır (ör. WSL'de bash ~/drama3/serve_tr.sh); Aktar sunucuyu başlatmaz. [laughs], [sighs], <whisper>…</whisper> etiketleri metinde aynen geçer.",
+  "license": "Fish Audio Community License",
+  "homepage": "https://fish.audio",
+  "speed": true,
+  "devices": ["auto"],
+  "voices": [
+    {"id": "clone", "name": "Türkçe · kayıttan klonlanan ses", "language": "tr", "files": [],
+     "options": [
+       {"key": "reference", "label": "Ses kaydı", "type": "file",
+        "hint": "Hakkına sahip olduğunuz kayıt. En iyi sonuç: 8-15 saniyelik, sakin, gürültüsüz ve tam bir cümleyle biten kayıt. 20 saniyeden uzun kayıtlar kırpılır."},
+       {"key": "reference_text", "label": "Kaydın metni", "type": "text",
+        "hint": "Kayıtta söylenenlerin tam ve doğru metni. Boş bırakılırsa (ya da kayıt kırpılırsa) Whisper ile çıkarılır."}
+     ]},
+    {"id": "clone-en", "name": "İngilizce · kayıttan klonlanan ses", "language": "en", "files": [],
+     "options": [
+       {"key": "reference", "label": "Ses kaydı", "type": "file",
+        "hint": "Hakkına sahip olduğunuz kayıt. En iyi sonuç: 8-15 saniyelik, sakin, gürültüsüz ve tam bir cümleyle biten kayıt. 20 saniyeden uzun kayıtlar kırpılır."},
+       {"key": "reference_text", "label": "Kaydın metni", "type": "text",
+        "hint": "Kayıtta söylenenlerin tam ve doğru metni. Boş bırakılırsa (ya da kayıt kırpılırsa) Whisper ile çıkarılır."}
+     ]}
+  ]
+}

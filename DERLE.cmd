@@ -40,6 +40,7 @@ py -3 -m PyInstaller ^
     --add-data "assets;assets" ^
     --add-data "translation_prompt.txt;." --add-data "book_translation_prompt.txt;." ^
     --add-data "engines\ema\motor.json;engines\ema" --add-data "engines\voxcpm\motor.json;engines\voxcpm" ^
+    --add-data "engines\drama3\motor.json;engines\drama3" ^
     --add-data "web\dist;web\dist" ^
     --exclude-module faster_whisper --exclude-module ctranslate2 --exclude-module sherpa_onnx ^
     --exclude-module PySide6 --exclude-module PyQt5 --exclude-module PyQt6 ^

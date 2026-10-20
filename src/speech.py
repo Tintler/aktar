@@ -354,18 +354,23 @@ def transcribe_clip(audio, model_name=DEFAULT_MODEL, device='auto', language='',
     Video transkriptiyle ayni yol (uygulama ici faster-whisper ya da aktar-whisper paketi).
     Donen: {'text', 'language', 'device'}. Konusma yoksa ValueError.
     """
-    mode = backend()
-    if mode is None:
-        raise RuntimeError(available()[1])
     check_clip(audio)
-    runner = run_whisper if mode == 'inprocess' else _run_helper
-    result = runner(audio, model_name, device, language, log=log, download_root=str(model_dir()),
-                    cuda_dir=cuda_dir)
-    text = ' '.join(' '.join(str(item.get('text', '')).split()) for item in result.get('segments') or [])
+    result = clip_segments(audio, model_name, device, language, log, cuda_dir)
+    text =' '.join(' '.join(str(item.get('text', '')).split()) for item in result.get('segments') or [])
     text = text.strip()
     if not text:
         raise ValueError('Kayıtta konuşma algılanmadı.')
     return {'text': text, 'language': result.get('language', ''), 'device': result.get('device', '')}
+
+
+def clip_segments(audio, model_name=DEFAULT_MODEL, device='auto', language='', log=print, cuda_dir=''):
+    """Kisa bir WAV'i (16 kHz mono) kelime zamanli bolumlere cevirir; onbellek yok.
+    Donen: run_whisper sonucu ({'segments': [{'start', 'end', 'text', 'words'}], 'language', 'device'})."""
+    mode = backend()
+    if mode is None:
+        raise RuntimeError(available()[1])
+    runner = run_whisper if mode == 'inprocess' else _run_helper
+    return runner(audio, model_name, device, language, log=log, download_root=str(model_dir()), cuda_dir=cuda_dir)
 
 
 def _local_model(model_name, download_root):

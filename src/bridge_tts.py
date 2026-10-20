@@ -32,8 +32,33 @@ class TtsMixin:
         cached = getattr(self, '_engines_cache', None)
         if cached is None or cached.app_dir != directory:
             self._engines_cache = Engines(directory, Path(ROOT) / 'engines', emit=self._emit,
-                                          prefs=lambda: self.ui_prefs().get('tts', {}))
+                                          prefs=lambda: self.ui_prefs().get('tts', {}),
+                                          transcribe=self._tts_transcribe, log=self._log)
         return self._engines_cache
+
+    def _tts_transcribe(self, audio, language):
+        """F158: klon kaydinin metni (Drama 3): Ayarlar'daki Whisper modeliyle kelime zamanli bolumler."""
+        import speech
+        from app_core import load_config
+        ok, message = speech.available()
+        if not ok:
+            raise RuntimeError('Kaydın metni yazılmadı ve Whisper kullanılamıyor: ' + message)
+        cfg = load_config()
+        return speech.clip_segments(audio, cfg.get('whisper_model') or speech.DEFAULT_MODEL,
+                                    cfg.get('whisper_device') or 'auto', language or '', self._log,
+                                    cfg.get('whisper_cuda_dir') or '')['segments']
+
+    def tts_server_check(self, url=None):
+        """F158: Drama 3 sunucusunun saglik denetimi (Ayarlar'daki "Baglantiyi dene"). `url` bossa kayitli adres."""
+        import drama3
+        url = drama3.normalize_url(url or self.ui_prefs().get('tts', {}).get('drama3_url'))
+        try:
+            data = drama3.health(url)
+        except drama3.ServerError as error:
+            return _error(error)
+        waiting = data.get('pending_completions')
+        return {'ok': True, 'url': url,
+                'message': f'Drama 3 sunucusu çalışıyor ({url})' + (f' · bekleyen istek: {waiting}' if waiting else '')}
 
     def tts_status(self):
         return self._engines().status()
