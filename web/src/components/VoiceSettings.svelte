@@ -141,6 +141,25 @@
     checking = false;
   }
 
+  // F161: motorun kendi ayarlari (motor.json "settings"; Drama 3: parca uzunlugu, temperature, top_p)
+  const engineValue = (engine, s) => app.ttsPrefs.engine_settings?.[engine.id]?.[s.key] ?? s.default;
+
+  function setEngineValue(engine, key, value, save = true) {
+    const all = { ...(app.ttsPrefs.engine_settings ?? {}) };
+    all[engine.id] = { ...(all[engine.id] ?? {}), [key]: value };
+    app.ttsPrefs.engine_settings = all;
+    if (save) saveTtsPrefs();
+  }
+
+  function resetEngine(engine) {
+    const all = { ...(app.ttsPrefs.engine_settings ?? {}) };
+    delete all[engine.id];
+    app.ttsPrefs.engine_settings = all;
+    saveTtsPrefs();
+  }
+
+  const settingText = (s, value) => `${Number(value).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}${s.unit ? ' ' + s.unit : ''}`;
+
   const modeBadge = (engine) => engine.busy ? [engine.busy, 'active']
     : engine.mode === 'builtin' ? ['Sunucuya bağlanır', 'done']
     : engine.mode === 'package' ? [`Kurulu · ${engine.installed_version ?? engine.version}`, 'done']
@@ -208,6 +227,21 @@
           <Icon name={serverCheck.error ? 'alert' : 'check'} size={16} /><span class="selectable">{serverCheck.error ?? serverCheck.message}</span>
         </div>
       {/if}
+    {/if}
+    {#each engine.settings ?? [] as s (engine.id + s.key)}
+      <div class="fr sub">
+        <div class="l">{s.label}{#if s.hint}<small>{s.hint}</small>{/if}</div>
+        <input class="range" type="range" min={s.min} max={s.max} step={s.step} value={engineValue(engine, s)} aria-label={s.label}
+          oninput={(e) => setEngineValue(engine, s.key, Number(e.currentTarget.value), false)}
+          onchange={(e) => setEngineValue(engine, s.key, Number(e.currentTarget.value))} />
+        <span class="dim-text num wide">{settingText(s, engineValue(engine, s))}</span>
+      </div>
+    {/each}
+    {#if engine.settings?.length && app.ttsPrefs.engine_settings?.[engine.id]}
+      <div class="fr sub">
+        <div class="l"><small>Değiştirilen ayarlarla hazırlanan cümleler yeniden üretilir.</small></div>
+        <button class="btn sm" onclick={() => resetEngine(engine)}><Icon name="refresh" size={14} />Varsayılana dön</button>
+      </div>
     {/if}
   {/each}
 
@@ -347,5 +381,6 @@
   .seg button { display: inline-flex; gap: 6px; align-items: center; padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--secondary); }
   .range { width: 220px; accent-color: var(--accent); }
   .num { width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
+  .num.wide { width: 96px; }
   .seg button.on { background: var(--surface-active); color: var(--text); }
 </style>

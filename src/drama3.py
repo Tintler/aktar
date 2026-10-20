@@ -33,7 +33,10 @@ from pathlib import Path
 
 DEFAULT_URL = 'http://127.0.0.1:7861'
 MODEL = 'drama-3'
-MAX_CHARS = 100            # bir istekte en fazla karakter; uzun parcayi model bazen erken bitirir (F160: 122 karakterde 1/10, bolunce 0/20)
+MAX_CHARS = 150            # bir istekte en fazla karakter (Ayarlar'dan 60-250); kisa parca daha az atlar ama
+                           # cumle ortasinda ton degisir (F160: 122 karakterde 1/10 erken bitme, bolunce 0/20)
+CAP_SECONDS = 14.3         # serve_tr.sh MAXNEW=320 kare (~14,9 sn); bundan uzun olup konusmanin ortasinda biten ses
+                           # kesilmistir (MAXNEW buyutulurse tam biten uzun parca bolunmez)
 REFERENCE_SECONDS = 20.0   # sunucunun kabul ettigi en uzun klon kaydi
 TRANSCRIBE_SECONDS = 30.0  # kirpma noktasini bulmak icin Whisper'a giden en uzun bolum
 REQUEST_TIMEOUT = 180      # yeni bir sesle ilk istek ~8 sn; uzun cumle + yogun sunucu icin pay
@@ -42,7 +45,9 @@ HEALTH_TIMEOUT = 5
 # ornekleme tonu sabitler ama model bazen ilk ifadeden sonra susar ve cumlenin kalanini atlar (0.7/0.7 ile
 # uzun parcalarin ~%4'u). 0.8 + varsayilan top_p bu olcumde susmadi; yine de susan parca yeniden istenir.
 TEMPERATURE = 0.8
-TOP_P = None               # None: sunucu varsayilani
+TOP_P = 0.9                # sunucu varsayilani; daha dari modeli susturabilir
+# Ayarlar -> Ses'te degistirilebilenler (ui.json tts.engine_settings.drama3; engines/drama3/motor.json "settings")
+SETTINGS = {'max_chars': (MAX_CHARS, 60, 250), 'temperature': (TEMPERATURE, 0.3, 1.5), 'top_p': (TOP_P, 0.5, 1.0)}
 SILENT_RETRY_TEMPERATURES = (None, None)   # susan parca icin yeniden denemeler (None: sunucu varsayilani)
 MAX_LETTERS_PER_SECOND = 24   # konusulan sureye gore bundan hizli parca "susmus" sayilir (normal 10-17)
 CHECK_MIN_LETTERS = 25        # bundan kisa parcada susma denetimi yapilmaz
@@ -181,15 +186,29 @@ def _split(text, pattern):
     return [piece.strip() for piece in pieces if piece.strip()]
 
 
-def _pack(pieces, limit, joiner=' '):
-    """Kisa parcalari sinira kadar birlestirir (sira korunur)."""
-    packed = []
-    for piece in pieces:
-        if packed and len(packed[-1]) + len(joiner) + len(piece) <= limit:
-            packed[-1] += joiner + piece
-        else:
-            packed.append(piece)
-    return packed
+_SPACE = re.compile(r'\s+')
+
+
+def halve(text):
+    """Metni ortaya en yakin yerden ikiye boler: once ortanin +-%25'indeki virgul/noktali virgul, yoksa ortaya en
+    yakin bosluk. Bolunemiyorsa [metin]."""
+    middle = len(text) / 2
+    pool = [c for c in _cuts(text, _CLAUSE_END) if abs(c[0] - middle) <= len(text) / 4] or _cuts(text, _SPACE)
+    if not pool:
+        return [text]
+    start, end = min(pool, key=lambda cut: abs(cut[0] - middle))
+    return [text[:start].strip(), text[end:].strip()]
+
+
+def bisect(text, limit):
+    """Sinirdan uzun metni ortadan ikiye bolerek parcalar (ozyinelemeli); greedy paketlemenin aksine sonda tek
+    kalan kisa kirintilar olmaz."""
+    if len(text) <= limit:
+        return [text]
+    halves = halve(text)
+    if len(halves) == 1:
+        return halves
+    return [piece for half in halves for piece in bisect(half, limit)]
 
 
 def split_text(text, limit=MAX_CHARS):
@@ -202,13 +221,7 @@ def split_text(text, limit=MAX_CHARS):
         if len(sentence) <= limit:
             result.append((sentence, SENTENCE_GAP))
             continue
-        clauses = []
-        for clause in _split(sentence, _CLAUSE_END):
-            if len(clause) <= limit:
-                clauses.append(clause)
-            else:
-                clauses.extend(_pack(_split(clause, re.compile(r'\s+')), limit))
-        packed = _pack(clauses, limit)
+        packed = bisect(sentence, limit)
         result.extend((piece, CLAUSE_GAP) for piece in packed[:-1])
         result.append((packed[-1], SENTENCE_GAP))
     speaker = ''
@@ -280,6 +293,11 @@ def voiced_seconds(samples, rate, level=VOICED_LEVEL):
     """Konusma suresi: tepesi `level`i asan 100 ms'lik pencerelerin toplami."""
     window = max(1, int(rate * 0.1))
     return sum(max(map(abs, samples[i:i + window])) > level for i in range(0, len(samples), window)) * window / rate
+
+
+def cut_off(samples, rate):
+    """Ses konusmanin ortasinda mi bitiyor (son 200 ms'de konusma var): sunucunun uretim sinirina takilmis."""
+    return voiced_seconds(samples[-int(rate * 0.2):], rate) > 0
 
 
 def letters(text):
@@ -444,19 +462,39 @@ class Engine:
         self.voice = voice
         return {'device': 'sunucu', 'reference_text': self.reference['text'], 'reference_seconds': self.reference['seconds']}
 
-    def _piece(self, piece, references):
-        """Bir parcayi uretir; model cumlenin ortasinda susarsa (F160) sunucu varsayilanlariyla yeniden ister,
-        hepsi susarsa en cok konusani kullanir."""
+    def settings(self):
+        """Ayarlar'daki parca uzunlugu, temperature, top_p (gecersiz ya da eksikse varsayilan, sinirlara kirpilir)."""
+        given = (self._prefs().get('engine_settings') or {}).get('drama3') or {}
+        result = {}
+        for key, (default, low, high) in SETTINGS.items():
+            try:
+                value = float(given[key])
+            except (KeyError, TypeError, ValueError):
+                value = default
+            result[key] = min(high, max(low, value))
+        result['max_chars'] = int(result['max_chars'])
+        return result
+
+    def _piece(self, piece, references, settings, depth=0):
+        """Bir parcayi uretir: [(ornekler, hiz)]. Model cumlenin ortasinda susarsa (F160) sunucu varsayilanlariyla
+        yeniden ister, hepsi susarsa en cok konusani kullanir. Ses sunucunun istek sinirina dayanmissa (kesilmis)
+        parca ikiye bolunup yeniden istenir."""
         best = None
-        for attempt, temperature in enumerate((TEMPERATURE,) + SILENT_RETRY_TEMPERATURES):
-            samples, rate = read_pcm(speech(self.url, piece, references, temperature=temperature))
+        attempts = ((settings['temperature'], settings['top_p']),) + tuple((t, None) for t in SILENT_RETRY_TEMPERATURES)
+        for attempt, (temperature, top_p) in enumerate(attempts):
+            samples, rate = read_pcm(speech(self.url, piece, references, temperature=temperature, top_p=top_p))
+            if len(samples) / rate >= CAP_SECONDS and cut_off(samples, rate) and depth < 3:
+                halves = halve(piece)
+                if len(halves) > 1:
+                    self._log(f'Drama 3: parça sunucunun süre sınırına takıldı, bölünüyor: {piece[:60]}')
+                    return [clip for half in halves for clip in self._piece(half, references, settings, depth + 1)]
             if not fell_silent(piece, samples, rate):
-                return samples, rate
+                return [(samples, rate)]
             self._log(f'Drama 3: model cümlenin bir kısmını atladı, yeniden deneniyor ({attempt + 1}): {piece[:60]}')
             if best is None or voiced_seconds(samples, rate) > voiced_seconds(*best):
                 best = (samples, rate)
         self._log(f'UYARI: Drama 3 bu parçayı tam okuyamadı: {piece[:80]}')
-        return best
+        return [best]
 
     def say(self, text, speed=1.0):
         """Metni parcalara bolup sunucuda seslendirir; WAV bayt ve sure (sn) dondurur."""
@@ -464,13 +502,15 @@ class Engine:
             raise RuntimeError('Ses motoru hazır değil.')
         references = [{'text': self.reference['text'], 'data': self.reference['data']}]
         clips, rate = [], None
+        settings = self.settings()
         with self._lock:     # sunucuya ayni anda tek istek (motor sureclerindeki gibi sirali)
-            for piece, gap in split_text(text):
-                samples, piece_rate = self._piece(piece, references)
-                if rate is not None and piece_rate != rate:
-                    raise ServerError('Drama 3 sunucusu parçalar için farklı örnekleme hızları döndürdü.')
-                rate = piece_rate
-                clips.append((shorten_silences(samples, rate), gap))
+            for piece, gap in split_text(text, settings['max_chars']):
+                parts = self._piece(piece, references, settings)
+                for number, (samples, piece_rate) in enumerate(parts):
+                    if rate is not None and piece_rate != rate:
+                        raise ServerError('Drama 3 sunucusu parçalar için farklı örnekleme hızları döndürdü.')
+                    rate = piece_rate
+                    clips.append((shorten_silences(samples, rate), gap if number == len(parts) - 1 else CLAUSE_GAP))
         if not clips:
             return wav_bytes(array.array('h'), 44100), 0.0
         data = change_speed(wav_bytes(join_clips(clips, rate), rate), speed)

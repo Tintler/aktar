@@ -107,6 +107,14 @@ class SplitTests(unittest.TestCase):
         self.assertEqual([g for _, g in pieces][-1], drama3.SENTENCE_GAP)
         self.assertEqual({g for _, g in pieces[:-1]}, {drama3.CLAUSE_GAP})
 
+    def test_split_is_balanced(self):
+        text = ('Kısmen insan, kısmen bot yapısıyız; şirketin güvenlik teminatının bir parçası olarak kiralanıyoruz; '
+                'ürkütücü bir halimiz var, herkesi geriyor ve rahatsız ediyoruz.')
+        pieces = [p for p, _ in drama3.split_text(text, limit=150)]
+        self.assertEqual(len(pieces), 2)
+        self.assertLess(abs(len(pieces[0]) - len(pieces[1])), 40)   # sonda kisa kirinti kalmaz
+        self.assertEqual(' '.join(pieces), text)
+
     def test_sentence_without_commas_splits_at_words(self):
         text = ' '.join(['kelime'] * 80) + '.'
         pieces = drama3.split_text(text, limit=100)
@@ -191,6 +199,10 @@ class SilentPieceTests(unittest.TestCase):
         self.assertFalse(drama3.fell_silent(self.LONG, tone(6.0) + silence(0.5), RATE))
         self.assertFalse(drama3.fell_silent('Ya da başka bir şey...', tone(0.3), RATE))   # kisa parca denetlenmez
 
+    def test_cut_off_only_when_speech_reaches_the_end(self):
+        self.assertTrue(drama3.cut_off(tone(15.0), RATE))
+        self.assertFalse(drama3.cut_off(tone(15.0) + silence(0.4), RATE))
+
     def test_letters_ignore_tags_and_punctuation(self):
         self.assertEqual(drama3.letters('[laughs] <whisper>Bak, şu!</whisper> 44.'), 7)
 
@@ -206,6 +218,31 @@ class SilentPieceTests(unittest.TestCase):
         self.assertEqual(len(server.requests), 2)
         self.assertEqual(server.requests[0][1]['temperature'], drama3.TEMPERATURE)
         self.assertNotIn('temperature', server.requests[1][1])
+
+    def test_settings_from_preferences(self):
+        prefs = {'engine_settings': {'drama3': {'max_chars': '90', 'temperature': 5, 'top_p': 'x'}}}
+        engine = drama3.Engine(tempfile.gettempdir(), prefs=lambda: prefs)
+        self.assertEqual(engine.settings(), {'max_chars': 90, 'temperature': 1.5, 'top_p': drama3.TOP_P})
+        self.assertEqual(drama3.Engine(tempfile.gettempdir()).settings(),
+                         {'max_chars': drama3.MAX_CHARS, 'temperature': drama3.TEMPERATURE, 'top_p': drama3.TOP_P})
+
+    def test_settings_match_motor_json(self):
+        manifest = json.loads((REPO / 'engines' / 'drama3' / 'motor.json').read_text(encoding='utf-8'))
+        shown = {item['key']: (item['default'], item['min'], item['max']) for item in manifest['settings']}
+        self.assertEqual(shown, drama3.SETTINGS)
+
+    def test_piece_cut_by_server_limit_is_split(self):
+        server = FakeServer()
+        self.addCleanup(server.close)
+        server.replies = [(200, drama3.wav_bytes(tone(drama3.CAP_SECONDS + 0.5), RATE)),
+                          (200, drama3.wav_bytes(tone(4.0), RATE)), (200, drama3.wav_bytes(tone(4.0), RATE))]
+        engine = drama3.Engine(tempfile.gettempdir(), prefs=lambda: {'drama3_url': server.url})
+        engine.reference = {'text': 'Kayıt.', 'data': 'QUJD', 'seconds': 3}
+        _data, duration = engine.say(self.LONG)
+        self.assertEqual(len(server.requests), 3)
+        halves = [body['input'] for _, body in server.requests[1:]]
+        self.assertEqual(' '.join(halves), self.LONG)
+        self.assertAlmostEqual(duration, 8.0 + drama3.CLAUSE_GAP, delta=0.05)
 
     def test_keeps_the_most_complete_attempt(self):
         server = FakeServer()
@@ -234,10 +271,10 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(path, '/v1/audio/speech')
         self.assertEqual(body, {'model': 'drama-3', 'input': 'Merhaba [laughs] <whisper>dünya</whisper>',
                                 'references': [{'text': 'Kayıt metni.', 'data': 'QUJD'}], 'response_format': 'wav',
-                                'temperature': drama3.TEMPERATURE})
-        self.assertIsNone(drama3.TOP_P)   # top_p kisitlamasi modeli susturuyordu (F160)
-        drama3.speech(self.server.url, 'Bir.', temperature=None)
+                                'temperature': drama3.TEMPERATURE, 'top_p': drama3.TOP_P})
+        drama3.speech(self.server.url, 'Bir.', temperature=None, top_p=None)
         self.assertNotIn('temperature', self.server.requests[-1][1])
+        self.assertNotIn('top_p', self.server.requests[-1][1])
 
     def test_retries_once_on_server_error(self):
         self.server.replies = [(500, b'{"detail": "generated no audio frames"}')]

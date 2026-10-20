@@ -281,7 +281,7 @@ class Engines:
                 'languages': sorted({voice['language'] for voice in voices}),
                 'busy': self._busy.get(engine_id),
                 'attribution': manifest.get('attribution', ''), 'notice': manifest.get('notice', ''),
-                'server': bool(manifest.get('server')),
+                'server': bool(manifest.get('server')), 'settings': manifest.get('settings', []),
             })
         return result
 
@@ -396,6 +396,9 @@ class Engines:
         tag = self._manifests().get(engine_id, {}).get('cache_tag')   # motor.json: bump to re-render old sentences
         if tag:
             parts.append(tag)
+        settings = (self._prefs().get('engine_settings') or {}).get(engine_id)   # motor.json "settings" (Drama 3)
+        if settings:
+            parts.append(settings)
         key = json.dumps(parts, sort_keys=True, ensure_ascii=False)
         return self.app_dir / CACHE_DIR / book / (hashlib.sha1(key.encode('utf-8')).hexdigest() + '.wav')
 
