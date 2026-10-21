@@ -22,6 +22,7 @@ import base64
 import hashlib
 import io
 import json
+import math
 import re
 import subprocess
 import sys
@@ -55,6 +56,13 @@ CHECK_MIN_LETTERS = 25        # bundan kisa parcada harf orani yerine en az konu
 SHORT_MIN_VOICED, SHORT_LETTERS_PER_SECOND = 0.3, 18.0   # max(0,3 sn, harf/18)
 OVERLONG_BASE, OVERLONG_LETTERS_PER_SECOND = 2.0, 5.0   # ses bundan uzunsa (2 sn + harf/5) model takilmis sayilir
 TAG_SECONDS = 1.5             # F168: duygu etiketiyle baslayan parcada gulme/ic cekme payi (uzun ses siniri)
+# F169: model fisiltiyi istek basina ~1/3 olasilikla uyguluyor (etiket fark etmiyor); kulakla fisilti sayilan
+# denemeler cogunlukla en kisik olanlardi (konusma duzeyi -26...-30 dB, siradan -17...-23 dB). Fisilti etiketli
+# parca icin WHISPER_TAKES saglam deneme uretilip duzeyi en dusuk olan secilir.
+WHISPER_TAG = '[fısıldar]'
+WHISPER_TAKES = 3
+LEVEL_WINDOW = 0.05           # speech_level: 50 ms pencerelerin RMS'i...
+LEVEL_QUANTILE = 0.8          # ...%80'lik dilimi (sessiz araliklar ve tek tepeler etkilemez)
 VOICED_LEVEL = 1500           # 100 ms pencerede bu tepeyi asan bolum konusma sayilir
 ABRUPT_LEVEL = 1000           # son 50 ms'de bu tepeyi asan ses 'erken bitmis' sayilir (873 parcada ~%11)
 SENTENCE_GAP = 0.25        # cumle parcalari arasina konan sessizlik (sn)
@@ -353,6 +361,16 @@ def ends_abruptly(samples, rate, level=ABRUPT_LEVEL, floor=None):
     return max(map(abs, tail), default=0) > max(level, 3 * floor)
 
 
+def speech_level(samples, rate):
+    """Konusmanin ses duzeyi (dBFS): 50 ms'lik pencere RMS'lerinin %80'lik dilimi (F169, fisilti secimi)."""
+    window = max(1, int(rate * LEVEL_WINDOW))
+    rms = sorted(math.sqrt(sum(x * x for x in samples[i:i + window]) / window)
+                 for i in range(0, len(samples) - window + 1, window))
+    if not rms:
+        return -120.0
+    return 20 * math.log10(max(rms[min(len(rms) - 1, int(len(rms) * LEVEL_QUANTILE))], 1.0) / 32768)
+
+
 def letters(text):
     """Okunacak harf sayisi ([laughs], <whisper> gibi etiketler ve noktalama haric)."""
     return len(re.sub(r'\[[^\]]*\]|<[^>]*>|[\W_]', '', text))
@@ -562,15 +580,26 @@ class Engine:
         """Bir parcayi uretir: [(ornekler, hiz)]. Model cumlenin ortasinda susarsa (F160) sunucu varsayilanlariyla
         yeniden ister, hepsi susarsa en cok konusani kullanir. Ses sunucunun istek sinirina dayanmissa (kesilmis)
         parca ikiye bolunup yeniden istenir. Duygu etiketiyle (F168) baslayan parca sinira takilirsa (model gulmeyi
-        bitirmiyor) bolunmez, etiketsiz yeniden istenir; son deneme de etiketsizdir."""
-        best = None
+        bitirmiyor) bolunmez, etiketsiz yeniden istenir; son deneme de etiketsizdir. Fisilti etiketli parca (F169)
+        icin WHISPER_TAKES saglam deneme istenir ve ses duzeyi en dusuk olan secilir (etiketsiz deneme yalnizca hicbiri
+        saglam degilse); sinira bir kez takilan fisilti denemesi basarisiz sayilir, ikincisinde etiketsiz istenir."""
+        best, passed, capped = None, [], False
         untagged = _EMOTION.sub('', piece, count=1).strip() if _EMOTION.match(piece) else ''
-        attempts = ((settings['temperature'], settings['top_p']),) + tuple((t, None) for t in SILENT_RETRY_TEMPERATURES)
+        takes = WHISPER_TAKES if piece.startswith(WHISPER_TAG) else 1
+        attempts = (((settings['temperature'], settings['top_p']),) * takes
+                    + tuple((t, None) for t in SILENT_RETRY_TEMPERATURES))
         for attempt, (temperature, top_p) in enumerate(attempts):
+            if passed and attempt == len(attempts) - 1:
+                break
             text = untagged if untagged and attempt == len(attempts) - 1 else piece
             samples, rate = read_pcm(speech(self.url, model_text(text), references, temperature=temperature,
                                             top_p=top_p))
             if len(samples) / rate >= CAP_SECONDS and untagged and depth < 3:
+                if takes > 1 and text == piece and not capped:
+                    # fisilti: tek takilma bir basarisiz deneme sayilir (diger denemeler genelde fisildiyor)
+                    capped = True
+                    self._log(f'Drama 3: fısıltı denemesi süre sınırına takıldı, yeniden deneniyor: {piece[:60]}')
+                    continue
                 self._log(f'Drama 3: etiketli parça süre sınırına takıldı, etiketsiz yeniden isteniyor: {piece[:60]}')
                 return self._piece(untagged, references, settings, depth + 1)
             if len(samples) / rate >= CAP_SECONDS and depth < 3:
@@ -580,13 +609,24 @@ class Engine:
                     return [clip for half in halves for clip in self._piece(half, references, settings, depth + 1)]
             silent, abrupt = fell_silent(text, samples, rate), ends_abruptly(samples, rate, floor=self.floor)
             if not silent and not abrupt:
-                return [(samples, rate)]
+                passed.append((samples, rate))
+                if len(passed) >= takes:
+                    break
+                continue
             reason = 'cümlenin bir kısmını atladı' if silent else 'parçayı erken bitirdi'
             self._log(f'Drama 3: model {reason}, yeniden deneniyor ({attempt + 1}): {piece[:60]}')
             # tercih: susmayan, sonra en cok konusan deneme
             score = (not silent, voiced_seconds(samples, rate))
             if best is None or score > best[0]:
                 best = (score, (samples, rate))
+        if len(passed) > 1:
+            levels = [speech_level(*clip) for clip in passed]
+            quietest = levels.index(min(levels))
+            self._log(f'Drama 3: fısıltı için {len(passed)} deneme ({", ".join(f"{level:.1f}" for level in levels)} dB), '
+                      f'en kısığı seçildi: {piece[:60]}')
+            return [passed[quietest]]
+        if passed:
+            return passed
         self._log(f'UYARI: Drama 3 bu parçayı tam okuyamadı: {piece[:80]}')
         return [best[1]]
 

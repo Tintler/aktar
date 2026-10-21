@@ -197,6 +197,15 @@ class EngineTests(unittest.TestCase):
         self.engines.say('— Gel buraya.', 1.0, None)    # kitap disi (sohbet): etiket yok
         self.assertEqual(self.server.requests[-1][1]['input'], '— Gel buraya.')
 
+    def test_emotion_cache_tag_renews_only_that_tag(self):
+        self.table['— Sus.'] = '[fısıldar]'
+        before = {text: self.engines._cache_path(BOOK, text, 1.0, 'tr') for text in self.table}
+        manifest = json.loads((REPO / 'engines' / 'drama3' / 'motor.json').read_text(encoding='utf-8'))
+        manifest['emotion_cache_tags'] = {'[fısıldar]': 'baska'}
+        with patch.object(self.engines, '_manifests', return_value={'drama3': manifest}):
+            self.assertNotEqual(self.engines._cache_path(BOOK, '— Sus.', 1.0, 'tr'), before['— Sus.'])
+            self.assertEqual(self.engines._cache_path(BOOK, '— Gel buraya.', 1.0, 'tr'), before['— Gel buraya.'])
+
     def test_engine_without_flag_gets_no_tag(self):
         manifest = json.loads((REPO / 'engines' / 'drama3' / 'motor.json').read_text(encoding='utf-8'))
         manifest.pop('emotion_tags')

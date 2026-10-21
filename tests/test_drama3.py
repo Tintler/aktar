@@ -7,6 +7,7 @@ import base64
 import http.server
 import io
 import json
+import math
 from pathlib import Path
 import tempfile
 import threading
@@ -323,6 +324,81 @@ class SilentPieceTests(unittest.TestCase):
         self.assertEqual(len(server.requests), 1 + len(drama3.SILENT_RETRY_TEMPERATURES))
         self.assertAlmostEqual(duration, 2.0, delta=0.05)
         self.assertTrue(any('tam okuyamadı' in line for line in logs))
+
+
+class WhisperTests(unittest.TestCase):
+    """F169: fisilti etiketli parca icin birden cok saglam deneme, en kisigi secilir."""
+    TEXT = '— Sessiz ol, kapının arkasında biri var.'
+
+    def engine(self, replies):
+        server = FakeServer()
+        self.addCleanup(server.close)
+        server.replies = [(200, data) for data in replies]
+        logs = []
+        engine = drama3.Engine(tempfile.gettempdir(), prefs=lambda: {'drama3_url': server.url}, log=logs.append)
+        engine.reference = {'text': 'Kayıt.', 'data': 'QUJD', 'seconds': 3}
+        return engine, server, logs
+
+    @staticmethod
+    def take(seconds, level):
+        return drama3.wav_bytes(tone(seconds, level=level) + silence(TAIL), RATE)
+
+    def test_speech_level(self):
+        self.assertAlmostEqual(drama3.speech_level(tone(2.0), RATE), 20 * math.log10(8000 / 32768), delta=0.1)
+        # sessiz araliklar duzeyi dusurmez, kisik ses dusuktur
+        self.assertAlmostEqual(drama3.speech_level(tone(2.0) + silence(0.3), RATE),
+                               drama3.speech_level(tone(2.0), RATE), delta=0.1)
+        self.assertLess(drama3.speech_level(tone(2.0, level=2000), RATE), drama3.speech_level(tone(2.0), RATE) - 10)
+        self.assertEqual(drama3.speech_level(array.array('h'), RATE), -120.0)
+
+    def test_quietest_of_three_takes_is_chosen(self):
+        engine, server, logs = self.engine([self.take(2.0, 8000), self.take(2.5, 2500), self.take(3.0, 5000)])
+        _data, duration = engine.say(self.TEXT, tag=drama3.WHISPER_TAG)
+        self.assertEqual(len(server.requests), drama3.WHISPER_TAKES)
+        self.assertTrue(all(body['input'].startswith('[fısıldar] ') for _, body in server.requests))
+        self.assertTrue(all(body['temperature'] == drama3.TEMPERATURE for _, body in server.requests))
+        self.assertAlmostEqual(duration, 2.5 + TAIL, delta=0.05)
+        self.assertTrue(any('en kısığı' in line for line in logs))
+
+    def test_failed_take_is_not_chosen_and_is_replaced(self):
+        silent = drama3.wav_bytes(tone(0.6, level=2000) + silence(6.0), RATE)   # kisik ama cumleyi atladi
+        engine, server, _logs = self.engine([silent, self.take(2.0, 8000), self.take(2.5, 3000), self.take(3.0, 6000)])
+        _data, duration = engine.say(self.TEXT, tag=drama3.WHISPER_TAG)
+        self.assertEqual(len(server.requests), 4)
+        self.assertAlmostEqual(duration, 2.5 + TAIL, delta=0.05)
+
+    def test_single_good_take_is_kept_without_untagged_attempt(self):
+        silent = drama3.wav_bytes(tone(0.6) + silence(6.0), RATE)
+        engine, server, _logs = self.engine([silent, silent, silent, self.take(2.0, 3000)])
+        _data, duration = engine.say(self.TEXT, tag=drama3.WHISPER_TAG)
+        self.assertEqual(len(server.requests), 4)    # son (etiketsiz) deneme istenmez
+        self.assertTrue(all(body['input'].startswith('[fısıldar] ') for _, body in server.requests))
+        self.assertAlmostEqual(duration, 2.0 + TAIL, delta=0.05)
+
+    def test_take_stuck_at_server_limit_counts_as_failed_once(self):
+        stuck = drama3.wav_bytes(tone(0.3) + silence(drama3.CAP_SECONDS + 0.3), RATE)
+        engine, server, _logs = self.engine([stuck, self.take(2.0, 8000), self.take(2.5, 3000), self.take(3.0, 6000)])
+        _data, duration = engine.say(self.TEXT, tag=drama3.WHISPER_TAG)
+        self.assertEqual(len(server.requests), 4)
+        self.assertTrue(all(body['input'].startswith('[fısıldar] ') for _, body in server.requests))
+        self.assertAlmostEqual(duration, 2.5 + TAIL, delta=0.05)
+        # ikinci takilmada F168 davranisi: etiketsiz yeniden istenir
+        engine, server, _logs = self.engine([stuck, stuck, self.take(2.0, 8000)])
+        _data, duration = engine.say(self.TEXT, tag=drama3.WHISPER_TAG)
+        self.assertEqual(len(server.requests), 3)
+        self.assertFalse(server.requests[-1][1]['input'].startswith('['))
+        self.assertAlmostEqual(duration, 2.0 + TAIL, delta=0.05)
+
+    def test_other_tags_ask_once(self):
+        engine, server, _logs = self.engine([self.take(2.0, 8000), self.take(2.5, 2500)])
+        _data, duration = engine.say(self.TEXT, tag='[angry]')
+        self.assertEqual(len(server.requests), 1)
+        self.assertAlmostEqual(duration, 2.0 + TAIL, delta=0.05)
+
+    def test_whisper_tag_renews_its_cache(self):
+        manifest = json.loads((REPO / 'engines' / 'drama3' / 'motor.json').read_text(encoding='utf-8'))
+        self.assertIn(drama3.WHISPER_TAG, manifest['emotion_cache_tags'])
+        self.assertIn(drama3.WHISPER_TAG, drama3.EMOTION_TAGS)
 
 
 class HttpTests(unittest.TestCase):

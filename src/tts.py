@@ -413,8 +413,9 @@ class Engines:
         settings = (self._prefs().get('engine_settings') or {}).get(engine_id)   # motor.json "settings" (Drama 3)
         if settings:
             parts.append(settings)
-        if emotion:
-            parts.append({'emotion': emotion})
+        if emotion:   # motor.json "emotion_cache_tags": bump to re-render only sentences with that tag (F169)
+            renew = (self._manifests().get(engine_id, {}).get('emotion_cache_tags') or {}).get(emotion)
+            parts.append({'emotion': emotion, 'tag': renew} if renew else {'emotion': emotion})
         key = json.dumps(parts, sort_keys=True, ensure_ascii=False)
         return self.app_dir / CACHE_DIR / book / (hashlib.sha1(key.encode('utf-8')).hexdigest() + '.wav')
 
