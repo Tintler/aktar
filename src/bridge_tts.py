@@ -193,6 +193,12 @@ class TtsMixin:
         return {'ok': True, 'url': url,
                 'message': f'Drama 3 sunucusu çalışıyor ({url})' + (f' · bekleyen istek: {waiting}' if waiting else '')}
 
+    def tts_folder_check(self, folder=None):
+        """F173: Drama 3 TR model klasorunun denetimi (Ayarlar'daki "Denetle"); sunucuyu baslatmaz."""
+        import drama3_tr
+        return drama3_tr.check_folder(folder if folder is not None else
+                                      self.ui_prefs().get('tts', {}).get(drama3_tr.PREF_DIR))
+
     def tts_status(self):
         return self._engines().status()
 

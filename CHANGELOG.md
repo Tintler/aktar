@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.11.0 — 2026-10-21
+
+### Yeni
+- **Drama 3 TR ses motoru (F176):** Fish Audio Drama 3'ün tam okuyucusu ile 32 uzmanlı Türkçe konuşmacıyı (kasparovabi/drama-3-tr) kullanan yeni ses motoru: duygulu, kayıttan klonlanan ses, tek 16 GB GPU'da, WSL gerekmez. Model (~45 GB: drama-3-tr reposu, fish-speech, orijinal `fishaudio/drama-3`, `speaker.safetensors` ve `.venv` Python ortamı) Aktar klasörüne kopyalanmaz; Ayarlar → Ses → Drama 3 TR → Model klasörü'nden seçilen klasörde durur, Aktar eksikleri adıyla gösterir. Aktar sunucuyu o klasörün Python'uyla kendisi başlatır, ses motoru durunca ya da pencere kapanınca kapatır (Windows'ta Aktar çökse de). Klon kaydı her istekle gider: dublajda konuşmacılara farklı sesler atanabilir, ses değişince sunucu yeniden başlamaz. İlk istekteki ısınma (yaklaşık bir dakika) yüklemede yapılır, okuma başlayınca ilk cümle beklemez. Fısıltı için üç deneme yapılmaz (her istek ~4 sn sabit süre ekliyor; yönerge gücü fısıltıyı zaten belirginleştiriyor). Ayarlar: parça uzunluğu, yönerge gücü (0 kapalı, daha hızlı), temperature. Duygu etiketleri bu motorda da kullanılır.
+
 ## 2.10.0 — 2026-10-21
 
 ### Yeni

@@ -161,6 +161,26 @@
     checking = false;
   }
 
+  // F173: modeli secilen klasorden calistiran motor (Drama 3 TR): klasor ve denetim
+  let folderCheck = $state(null);    // {ok, message, missing} | {error}
+
+  async function setModelFolder(value) {
+    app.ttsPrefs.drama3_tr_dir = value.trim();
+    saveTtsPrefs();
+    folderCheck = app.ttsPrefs.drama3_tr_dir ? await call('tts_folder_check', app.ttsPrefs.drama3_tr_dir) : null;
+  }
+
+  $effect(() => {
+    if (folderCheck === null && app.ttsPrefs.drama3_tr_dir && app.engines.some((e) => e.folder)) {
+      call('tts_folder_check', app.ttsPrefs.drama3_tr_dir).then((result) => { folderCheck = result ?? false; });
+    }
+  });
+
+  async function chooseModelFolder() {
+    const folder = await call('choose_folder', 'Drama 3 TR klasörü (drama-3-tr reposu; models, speaker.safetensors ve .venv içinde)');
+    if (typeof folder === 'string' && folder) await setModelFolder(folder);
+  }
+
   // F161: motorun kendi ayarlari (motor.json "settings"; Drama 3: parca uzunlugu, temperature, top_p)
   const engineValue = (engine, s) => app.ttsPrefs.engine_settings?.[engine.id]?.[s.key] ?? s.default;
 
@@ -181,6 +201,7 @@
   const settingText = (s, value) => `${Number(value).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}${s.unit ? ' ' + s.unit : ''}`;
 
   const modeBadge = (engine) => engine.busy ? [engine.busy, 'active']
+    : engine.mode === 'builtin' && engine.folder ? ['Klasörden çalışır', 'done']
     : engine.mode === 'builtin' ? ['Sunucuya bağlanır', 'done']
     : engine.mode === 'package' ? [`Kurulu · ${engine.installed_version ?? engine.version}`, 'done']
     : engine.mode === 'source' ? ['Python paketiyle', 'done'] : ['Kurulu değil', ''];
@@ -234,7 +255,20 @@
         <button class="icon-btn" title="Kaldır" onclick={() => remove(engine)}><Icon name="trash" size={16} /></button>
       {/if}
     </div>
-    {#if engine.server}
+    {#if engine.folder}
+      <div class="fr sub">
+        <div class="l">Model klasörü<small>Model Aktar klasörüne kopyalanmaz; seçtiğiniz klasörden (hızlı bir SSD önerilir) çalışır.
+          Aktar sunucuyu bu klasördeki .venv Python'uyla kendisi başlatır ve kapanınca durdurur.</small></div>
+        <input class="field" value={app.ttsPrefs.drama3_tr_dir ?? ''} placeholder="ör. Z:\Ai Models\drama-3-tr-speaker" spellcheck="false"
+          onchange={(e) => setModelFolder(e.currentTarget.value)} />
+        <button class="btn sm" onclick={chooseModelFolder}><Icon name="folder" size={14} />Seç…</button>
+      </div>
+      {#if folderCheck}
+        <div class={folderCheck.ok ? 'info' : 'warn'}>
+          <Icon name={folderCheck.ok ? 'check' : 'alert'} size={16} /><span class="selectable">{folderCheck.error ?? folderCheck.message}</span>
+        </div>
+      {/if}
+    {:else if engine.server}
       <div class="fr sub">
         <div class="l">Sunucu adresi<small>{engine.name} sunucusunu siz başlatırsınız (Aktar başlatmaz). Windows'ta WSL "mirrored" ağ kipindeyse
           localhost çalışır; değilse WSL'in IP adresini yazın.</small></div>

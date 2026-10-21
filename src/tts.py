@@ -170,16 +170,21 @@ class Worker:
 
 class InlineWorker:
     """An engine running inside Aktar (motor.json "builtin": a module under src/, e.g. drama3, a client of a
-    server the user runs). Same interface as Worker; requests are plain calls, serialized like a worker's."""
+    server the user runs, or drama3_tr, which starts its own server from a model folder). Same interface as Worker; requests are plain calls, serialized like a worker's."""
 
     def __init__(self, engine, data, on_event, prefs=None, transcribe=None, log=None):
         self.engine, self.data = engine, Path(data)
+        extra = {}
         if engine['builtin'] == 'drama3':
             import drama3 as module
+        elif engine['builtin'] == 'drama3_tr':
+            # F173: Aktar starts this engine's server from the model folder; the script ships in engines/<id>/
+            import drama3_tr as module
+            extra['script'] = Path(engine.get('root') or '.') / 'engines' / engine['id'] / module.SERVER_SCRIPT
         else:
             raise RuntimeError(f'Bilinmeyen yerleşik ses motoru: {engine["builtin"]}')
         self.impl = module.Engine(self.data, prefs=prefs, transcribe=transcribe, log=log,
-                                  stage=lambda message: on_event({'event': 'stage', 'message': message}))
+                                  stage=lambda message: on_event({'event': 'stage', 'message': message}), **extra)
         self._lock = threading.Lock()
         self._stopped = False
 
@@ -209,6 +214,9 @@ class InlineWorker:
 
     def stop(self):
         self._stopped = True
+        stop = getattr(self.impl, 'stop', None)    # F173: a server process Aktar started
+        if stop:
+            stop()
 
 
 class Engines:
@@ -283,7 +291,8 @@ class Engines:
                 'languages': sorted({voice['language'] for voice in voices}),
                 'busy': self._busy.get(engine_id),
                 'attribution': manifest.get('attribution', ''), 'notice': manifest.get('notice', ''),
-                'server': bool(manifest.get('server')), 'settings': manifest.get('settings', []),
+                'server': bool(manifest.get('server')), 'folder': bool(manifest.get('folder')),
+                'settings': manifest.get('settings', []),
                 'emotion_tags': bool(manifest.get('emotion_tags')),
             })
         return result
