@@ -50,12 +50,16 @@ class FakeEngines:
     def __init__(self, app_dir):
         self.app_dir = Path(app_dir)
         self.calls = []
+        self.emotions = {}    # F168: cumle -> duygu etiketi
 
     def choice(self, language, override=None):
         return ('sahte', (override or {}).get('voice', 'sahte/ses').split('/')[1])
 
     def _voice_options(self, engine_id, voice_id, override=None):
         return {}
+
+    def emotion_tag(self, book, text, language='tr', override=None):
+        return self.emotions.get(text, '') if book else ''
 
     def say(self, text, speed=1.0, book=None, language='tr', override=None):
         self.calls.append((text, speed))

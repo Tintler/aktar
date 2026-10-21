@@ -67,6 +67,7 @@
     ({ sentences, breaks } = segment(article, splitOptions()));
     showMatches();
     setSentences(sentences, { book: book.id, language: book.language || 'tr', breaks });
+    await tagEmotions(sentences, breaks);
     refreshCached();
     savePosition(true);
   }
@@ -74,6 +75,19 @@
   // ---- read aloud
 
   const splitOptions = () => ({ ...QUOTE_DEFAULTS, ...(app.ttsPrefs.split ?? {}) });
+
+  // F168: Drama 3 duygu etiketleri (deneysel): bolumun diyaloglari etiketlenip kitabin yanina saklanir; etiket
+  // yalnizca sunucuya giden metne eklenir (tts_say arka ucta bulur), okuyucudaki metin degismez.
+  async function tagEmotions(list, ends) {
+    if ((app.ttsPrefs.emotion_tags ?? 'off') === 'off' || !list.length) return;
+    await call('tts_emotions', book.id, list, [...ends]);
+  }
+
+  // Ayar degisince acik bolum yeniden etiketlenir (hazir cumle sayisi etikete gore degisir).
+  $effect(() => {
+    app.ttsPrefs.emotion_tags;
+    untrack(() => { if (book && sentences.length) tagEmotions(sentences, breaks).then(refreshCached); });
+  });
 
   $effect(() => setPauses(resolvePauses(app.ttsPrefs.pauses)));
   function highlight(index) {
@@ -192,7 +206,9 @@
         if (!result || result.error) continue;
         const holder = document.createElement('div');
         holder.innerHTML = result.html;
-        list.push(...segment(holder, splitOptions()).sentences);
+        const cut = segment(holder, splitOptions());
+        await tagEmotions(cut.sentences, cut.breaks);
+        list.push(...cut.sentences);
       }
     }
     if (!list.length) { toast('Hazırlanacak metin yok.'); return; }
@@ -236,6 +252,7 @@
         const holder = document.createElement('div');
         holder.innerHTML = result.html;
         const cut = segment(holder, splitOptions());
+        await tagEmotions(cut.sentences, cut.breaks);
         cut.sentences.forEach((text, i) => {
           chapter.sentences.push(text);
           chapter.gaps.push(pauseAfter(text, cut.breaks.has(i), pauses, app.ttsPrefs.speed));

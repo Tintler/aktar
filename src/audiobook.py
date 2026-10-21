@@ -136,12 +136,15 @@ def _run(command):
         raise RuntimeError('FFmpeg sesi yazamadı: ' + ((done.stderr or '').strip()[-500:] or f'çıkış kodu {done.returncode}'))
 
 
-def chapter_key(engines, chapter, speed, language, override=None):
+def chapter_key(engines, chapter, speed, language, override=None, book=None):
     """Bolumun sesini belirleyen her sey (ses, ayarlar, hiz, metin, duraklar): saklanan parca gecerli mi."""
     engine_id, voice_id = engines.choice(language, override)
     options = engines._voice_options(engine_id, voice_id, override) if engine_id else {}
-    raw = json.dumps([engine_id, voice_id, options, round(float(speed), 2), chapter['sentences'], chapter['gaps']],
-                     sort_keys=True, ensure_ascii=False)
+    parts = [engine_id, voice_id, options, round(float(speed), 2), chapter['sentences'], chapter['gaps']]
+    tags = [engines.emotion_tag(book, text, language, override) for text in chapter['sentences']] if book else []
+    if any(tags):    # F168: Drama 3 duygu etiketleri
+        parts.append(tags)
+    raw = json.dumps(parts, sort_keys=True, ensure_ascii=False)
     return hashlib.sha1(raw.encode('utf-8')).hexdigest()[:16]
 
 
@@ -175,7 +178,7 @@ def build(engines, chapters, target, fmt='m4b', title='', author='', cover=None,
         for number, chapter in enumerate(chapters, 1):
             check()
             count = len(chapter['sentences'])
-            key = chapter_key(engines, chapter, speed, language)
+            key = chapter_key(engines, chapter, speed, language, book=book)
             stored = work / f'{number:04d}-{key}.m4a'
             seconds_file = stored.with_suffix('.sure')
             if fmt == 'm4b' and stored.exists() and seconds_file.exists():

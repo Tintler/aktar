@@ -11,8 +11,8 @@ Sunucu API'si:
 
 Istek basina en fazla ~14 sn konusma uretilir: metin cumlelere, uzun cumle virgullerden, gerekirse
 kelimelerden bolunur; parcalar birlestirilir. [laughs], <whisper>...</whisper>, <|speaker:N|> etiketleri
-aynen gider (etiket icinden bolunmez). Model bazen uzun sessizlik biraktigi icin 1 sn'den uzun
-sessizlikler 0,4 sn'ye kisaltilir. Klon kaydi en fazla 20 sn olabilir; dogru transkript gerekir:
+aynen gider (etiket icinden bolunmez); duygu etiketi (F168) parcanin basina gelecek bicimde bolunur.
+Model bazen uzun sessizlik biraktigi icin 1 sn'den uzun sessizlikler 0,4 sn'ye kisaltilir. Klon kaydi en fazla 20 sn olabilir; dogru transkript gerekir:
 verilmezse (ya da kayit kirpilirsa) Aktar'in Whisper altyapisiyla cikarilir.
 """
 from __future__ import annotations
@@ -54,6 +54,7 @@ MAX_LETTERS_PER_SECOND = 24   # konusulan sureye gore bundan hizli parca "susmus
 CHECK_MIN_LETTERS = 25        # bundan kisa parcada harf orani yerine en az konusma suresi aranir:
 SHORT_MIN_VOICED, SHORT_LETTERS_PER_SECOND = 0.3, 18.0   # max(0,3 sn, harf/18)
 OVERLONG_BASE, OVERLONG_LETTERS_PER_SECOND = 2.0, 5.0   # ses bundan uzunsa (2 sn + harf/5) model takilmis sayilir
+TAG_SECONDS = 1.5             # F168: duygu etiketiyle baslayan parcada gulme/ic cekme payi (uzun ses siniri)
 VOICED_LEVEL = 1500           # 100 ms pencerede bu tepeyi asan bolum konusma sayilir
 ABRUPT_LEVEL = 1000           # son 50 ms'de bu tepeyi asan ses 'erken bitmis' sayilir (873 parcada ~%11)
 SENTENCE_GAP = 0.25        # cumle parcalari arasina konan sessizlik (sn)
@@ -72,6 +73,11 @@ RECORDING_HINT = ('En iyi sonuç: 8-15 saniyelik, sakin, gürültüsüz ve tam b
 _SENTENCE_END = re.compile(r'(?<=[.!?…])["\'»”’)\]]*\s+')
 _CLAUSE_END = re.compile(r'(?<=[,;:])\s+')
 _SPEAKER = re.compile(r'<\|speaker:\d+\|>')
+# F168: Turkce Drama 3'te calisan duygu etiketleri (emotion_tags.TAGS); yalnizca parcanin basinda etkili
+EMOTION_TAGS = ('[laughs]', '[sighs]', '[fısıldar]', '[shouting]', '[angry]')
+_EMOTION = re.compile('|'.join(re.escape(tag) for tag in EMOTION_TAGS))
+_BEFORE_EMOTION = re.compile(r'\s+(?=' + _EMOTION.pattern + ')')
+_OPEN_QUOTE = re.compile(r'[“«]|(?:(?<=\s)|^)"')
 
 
 class ServerError(RuntimeError):
@@ -229,20 +235,33 @@ def model_text(piece):
     return piece[:match.start()] + ',' + match.group(1) + ' ' + piece[match.end():]
 
 
+def tagged(text, tag):
+    """F168: sunucuya giden metne duygu etiketi: tirnaktan once ('Ali gulerek: [laughs] "Merhaba!"'), tirnak yoksa
+    (cizgili diyalog) en basa. Etiket yalnizca parcanin basinda calistigi icin split_text etiketten once boler."""
+    text = ' '.join(str(text or '').split())
+    if tag not in EMOTION_TAGS or not text:
+        return text
+    match = _OPEN_QUOTE.search(text)
+    position = match.start() if match and re.search(r'[^\W\d_]', text[:match.start()]) else 0
+    return (text[:position] + tag + ' ' + text[position:]).strip()
+
+
 def split_text(text, limit=MAX_CHARS):
     """Metni sunucuya gidecek parcalara boler: [(parca, sonraki_sessizlik_sn)]. Ardisik cumleler sinira kadar
     tek parcada gider (F163: tek basina kalan 'dedi.', 'iste...' gibi kisa parcalari model susarak ya da
     mirildanarak okuyordu; az parca ayni zamanda az ton degisimi). Sinirdan uzun cumle ortadan, once virgul/
-    noktali virgulden, o da yetmezse kelimelerden bolunur. <|speaker:N|> etiketi sonraki parcalara da tasinir."""
+    noktali virgulden, o da yetmezse kelimelerden bolunur. <|speaker:N|> etiketi sonraki parcalara da tasinir.
+    Metnin ortasindaki duygu etiketinden ([laughs] ...) once her zaman bolunur: etiket parcanin basinda olmali."""
     text = ' '.join(str(text or '').split())
     result = []
-    for sentence in _split(text, _SENTENCE_END):
+    sentences = [sentence for part in _BEFORE_EMOTION.split(text) for sentence in _split(part, _SENTENCE_END)]
+    for sentence in sentences:
         if len(sentence) > limit:
             packed = bisect(sentence, limit)
             result.extend((piece, CLAUSE_GAP) for piece in packed[:-1])
             result.append((packed[-1], SENTENCE_GAP))
         elif (result and result[-1][1] == SENTENCE_GAP and len(result[-1][0]) + 1 + len(sentence) <= limit
-              and not _SPEAKER.match(sentence)):
+              and not _SPEAKER.match(sentence) and not _EMOTION.match(sentence)):
             result[-1] = (result[-1][0] + ' ' + sentence, SENTENCE_GAP)
         else:
             result.append((sentence, SENTENCE_GAP))
@@ -343,7 +362,8 @@ def fell_silent(text, samples, rate):
     """Model parcanin bir kismini soylemeden sustu mu: konusulan sure metne gore cok kisa, ya da ses metne gore
     cok uzun (F163: 'dedi.' icin 1,2 sn konusma + 6 sn sessizlik; kisa parcada harf orani anlamsiz)."""
     count = letters(text)
-    if len(samples) / rate > OVERLONG_BASE + count / OVERLONG_LETTERS_PER_SECOND:
+    extra = TAG_SECONDS if _EMOTION.match(text) else 0.0
+    if len(samples) / rate > OVERLONG_BASE + extra + count / OVERLONG_LETTERS_PER_SECOND:
         return True
     voiced = voiced_seconds(samples, rate)
     if count < CHECK_MIN_LETTERS:
@@ -541,18 +561,24 @@ class Engine:
     def _piece(self, piece, references, settings, depth=0):
         """Bir parcayi uretir: [(ornekler, hiz)]. Model cumlenin ortasinda susarsa (F160) sunucu varsayilanlariyla
         yeniden ister, hepsi susarsa en cok konusani kullanir. Ses sunucunun istek sinirina dayanmissa (kesilmis)
-        parca ikiye bolunup yeniden istenir."""
+        parca ikiye bolunup yeniden istenir. Duygu etiketiyle (F168) baslayan parca sinira takilirsa (model gulmeyi
+        bitirmiyor) bolunmez, etiketsiz yeniden istenir; son deneme de etiketsizdir."""
         best = None
+        untagged = _EMOTION.sub('', piece, count=1).strip() if _EMOTION.match(piece) else ''
         attempts = ((settings['temperature'], settings['top_p']),) + tuple((t, None) for t in SILENT_RETRY_TEMPERATURES)
         for attempt, (temperature, top_p) in enumerate(attempts):
-            samples, rate = read_pcm(speech(self.url, model_text(piece), references, temperature=temperature,
+            text = untagged if untagged and attempt == len(attempts) - 1 else piece
+            samples, rate = read_pcm(speech(self.url, model_text(text), references, temperature=temperature,
                                             top_p=top_p))
+            if len(samples) / rate >= CAP_SECONDS and untagged and depth < 3:
+                self._log(f'Drama 3: etiketli parça süre sınırına takıldı, etiketsiz yeniden isteniyor: {piece[:60]}')
+                return self._piece(untagged, references, settings, depth + 1)
             if len(samples) / rate >= CAP_SECONDS and depth < 3:
-                halves = halve(piece)
+                halves = halve(text)
                 if len(halves) > 1:
                     self._log(f'Drama 3: parça sunucunun süre sınırına takıldı, bölünüyor: {piece[:60]}')
                     return [clip for half in halves for clip in self._piece(half, references, settings, depth + 1)]
-            silent, abrupt = fell_silent(piece, samples, rate), ends_abruptly(samples, rate, floor=self.floor)
+            silent, abrupt = fell_silent(text, samples, rate), ends_abruptly(samples, rate, floor=self.floor)
             if not silent and not abrupt:
                 return [(samples, rate)]
             reason = 'cümlenin bir kısmını atladı' if silent else 'parçayı erken bitirdi'
@@ -564,8 +590,10 @@ class Engine:
         self._log(f'UYARI: Drama 3 bu parçayı tam okuyamadı: {piece[:80]}')
         return [best[1]]
 
-    def say(self, text, speed=1.0):
-        """Metni parcalara bolup sunucuda seslendirir; WAV bayt ve sure (sn) dondurur."""
+    def say(self, text, speed=1.0, tag=''):
+        """Metni parcalara bolup sunucuda seslendirir; WAV bayt ve sure (sn) dondurur. `tag`: cumlenin duygu
+        etiketi (F168, emotion_tags), yalnizca sunucuya giden metne eklenir."""
+        text = tagged(text, tag) if tag else text
         if self.reference is None:
             raise RuntimeError('Ses motoru hazır değil.')
         references = [{'text': self.reference['text'], 'data': self.reference['data']}]

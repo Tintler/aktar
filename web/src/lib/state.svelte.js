@@ -251,6 +251,10 @@ export async function init() {
     if (data.error) toast('Ses kaydedilemedi: ' + data.error, 'error');
     else toast(`Ses kaydedildi (${data.count} cümle): ${data.path}`, 'ok');
   });
+  // F168: duygu etiketleri model sunucusuyla cikarilamadiysa kelime listesi kullanilir.
+  on('tts_emotions', (data) => {
+    if (data.error) toast('Duygu etiketleri modelle çıkarılamadı, kelime listesi kullanılıyor: ' + data.error, 'error');
+  });
   // F141: sesli kitap kaydi (okuyucu); bitince dosya/klasor gosterilir.
   on('tts_audiobook', async (data) => {
     if (!data.finished) { app.ttsAudiobook = { ...data, chapters: data.chapters, chapter: data.chapter }; return; }

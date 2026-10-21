@@ -193,7 +193,8 @@ class InlineWorker:
             if command == 'load':
                 return self.impl.load(payload.get('voice') or '', payload.get('options') or {}) or {}
             if command == 'say':
-                data, duration = self.impl.say(payload.get('text', ''), float(payload.get('speed') or 1.0))
+                data, duration = self.impl.say(payload.get('text', ''), float(payload.get('speed') or 1.0),
+                                               payload.get('tag') or '')
                 return {'audio': base64.b64encode(data).decode('ascii'), 'duration': duration}
             if command == 'ping':
                 return {}
@@ -213,8 +214,9 @@ class InlineWorker:
 class Engines:
     """Lists, installs and runs voice engines; keeps at most one worker process running."""
 
-    def __init__(self, app_dir, source_dir, emit=None, prefs=None, transcribe=None, log=None):
+    def __init__(self, app_dir, source_dir, emit=None, prefs=None, transcribe=None, log=None, emotion=None):
         self.app_dir, self.source_dir = Path(app_dir), Path(source_dir)
+        self._emotion = emotion           # F168: (book, sentence) -> emotion tag ('' none), engines with "emotion_tags"
         self._emit = emit or (lambda _event, _data: None)
         self._prefs = prefs or (lambda: {})
         self._transcribe = transcribe     # builtin engines: (wav path, language) -> Whisper segments
@@ -282,6 +284,7 @@ class Engines:
                 'busy': self._busy.get(engine_id),
                 'attribution': manifest.get('attribution', ''), 'notice': manifest.get('notice', ''),
                 'server': bool(manifest.get('server')), 'settings': manifest.get('settings', []),
+                'emotion_tags': bool(manifest.get('emotion_tags')),
             })
         return result
 
@@ -384,6 +387,16 @@ class Engines:
         return self._worker
 
     # ------------------------------------------------------------- sentence cache
+    def emotion_tag(self, book, text, language='tr', override=None):
+        """F168: a book sentence's emotion tag ('' none), only for an engine whose motor.json has "emotion_tags"
+        (Drama 3) and only for reading a book with its own voice (not chat or dubbing voices)."""
+        if not book or override or self._emotion is None:
+            return ''
+        engine_id, _voice = self.choice(language)
+        if not engine_id or not self._manifests().get(engine_id, {}).get('emotion_tags'):
+            return ''
+        return self._emotion(book, ' '.join(str(text).split())) or ''
+
     def _cache_path(self, book, text, speed, language, override=None):
         """Where a sentence rendered with the voice chosen for `language` is kept (None: no caching)."""
         if not book or not re.fullmatch(r'[0-9a-f]{8,40}', str(book)):
@@ -391,6 +404,7 @@ class Engines:
         engine_id, voice_id = self.choice(language, override)
         if engine_id is None:
             return None
+        emotion = self.emotion_tag(book, text, language, override)
         options = self._voice_options(engine_id, voice_id, override)
         parts = [engine_id, voice_id, options, round(float(speed), 2), text]
         tag = self._manifests().get(engine_id, {}).get('cache_tag')   # motor.json: bump to re-render old sentences
@@ -399,6 +413,8 @@ class Engines:
         settings = (self._prefs().get('engine_settings') or {}).get(engine_id)   # motor.json "settings" (Drama 3)
         if settings:
             parts.append(settings)
+        if emotion:
+            parts.append({'emotion': emotion})
         key = json.dumps(parts, sort_keys=True, ensure_ascii=False)
         return self.app_dir / CACHE_DIR / book / (hashlib.sha1(key.encode('utf-8')).hexdigest() + '.wav')
 
@@ -420,7 +436,9 @@ class Engines:
         engine_id, voice_id = self.choice(language, override)
         if (self.current.get('engine'), self.current.get('voice')) != (engine_id, voice_id):
             raise RuntimeError('Ses motoru hazır değil.')
-        result = worker.request('say', text=text, speed=float(speed), rate=AUDIO_RATE, timeout=600)
+        tag = self.emotion_tag(book, text, language, override)
+        extra = {'tag': tag} if tag else {}
+        result = worker.request('say', text=text, speed=float(speed), rate=AUDIO_RATE, timeout=600, **extra)
         if path is not None and result.get('audio'):
             path.parent.mkdir(parents=True, exist_ok=True)
             partial = path.with_suffix('.part')
