@@ -6,7 +6,8 @@ import { confirm, notice } from './confirm.svelte.js';
 
 export const subtool = $state({ job: null });
 
-export const KIND_NAMES = { align: 'Otomatik hizalama', ocr: 'Altyazı OCR', whisper: 'Kelime zamanları', clip: 'Klip kaydı', dub: 'Dublaj', diarize: 'Konuşmacı ayrımı' };
+export const KIND_NAMES = { align: 'Otomatik hizalama', ocr: 'Altyazı OCR', whisper: 'Kelime zamanları', clip: 'Klip kaydı', dub: 'Dublaj', diarize: 'Konuşmacı ayrımı',
+  dubprep: 'Dublaj projesi', dubgen: 'Dublaj seslendirme' };
 const STAGE_NAMES = { whisper: 'Konuşmadan metin', frames: 'Altyazı görüntüleri', ocr: 'OCR', align: 'Hizalanıyor', clip: 'Klip kodlanıyor',
   engine: 'Ses motoru hazırlanıyor', voice: 'Seslendiriliyor', mix: 'Ses karıştırılıyor',
   download: 'Model indiriliyor', separate: 'Konuşma ve müzik ayrılıyor', diarize: 'Konuşmacılar ayrılıyor',
@@ -36,7 +37,8 @@ on('subtool', async (data) => {
   } else if (data.kind === 'dub') {
     const notes = [result.faster ? `${result.faster} satır sığması için hızlandırıldı` : '', result.shifted ? `${result.shifted} satır biraz kaydırıldı` : '',
       result.overlapped ? `${result.overlapped} satır üst üste bindi` : '',
-      result.tagged ? `${result.tagged} satıra ifade etiketi eklendi` : '', result.paused ? `${result.paused} duraklama aktarıldı` : '']
+      result.tagged ? `${result.tagged} satıra ifade etiketi eklendi` : '', result.paused ? `${result.paused} duraklama aktarıldı` : '',
+      result.moved ? `${result.moved} satır elle taşındı` : '', result.missing ? `${result.missing} satırın sesi yoktu (atlandı)` : '']
       .filter(Boolean).join(', ');
     if (await confirm({ title: 'Dublaj hazır', message: `${result.name} · ${result.lines} satır${notes ? '\n' + notes + '.' : ''}`, ok: 'Konumu aç', cancel: 'Kapat' })) {
       act('reveal', result.output);
@@ -45,6 +47,10 @@ on('subtool', async (data) => {
     toast(`Altyazı okundu (${result.lines} satır): ${result.name}`, 'ok');
   } else if (data.kind === 'whisper') {
     toast('Kelime zamanları hazır.', 'ok');
+  } else if (data.kind === 'dubprep') {
+    toast(`Dublaj projesi hazır: ${result.lines} satır.`, 'ok');
+  } else if (data.kind === 'dubgen') {
+    toast(`${result.done} satır seslendirildi.`, 'ok');
   } else if (data.kind === 'diarize') {
     toast(`Konuşmacılar ayrıldı: ${result.speakers} konuşmacı.`, 'ok');
   }

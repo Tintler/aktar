@@ -9,9 +9,10 @@
   import Toggle from './Toggle.svelte';
   import { app, act, savePref } from '../lib/state.svelte.js';
   import { call } from '../lib/api.js';
+  import { confirm } from '../lib/confirm.svelte.js';
   import { subtool, timingText, isIdentity, onSubtool } from '../lib/subtools.svelte.js';
 
-  let { path, source, label = '', timing = null, audio = null, onclose } = $props();
+  let { path, source, label = '', timing = null, audio = null, onclose, oneditor = null } = $props();
 
   const saved = app.prefs.dub ?? {};
   let voice = $state(saved.voice ?? '');
@@ -96,6 +97,18 @@
     const result = await act('dub_create', path, source, { ...$state.snapshot(opts), audio }, timing, voice,
       opts.speakers ? $state.snapshot(speakerVoices) : null);
     if (result?.started) onclose();
+  }
+
+  // F175: ayni seceneklerle duzenlenebilir proje hazirlanir (satirlar seslendirilmez), sonra duzenleyici acilir
+  let hasProject = $state(false);
+  call('dub_project_get', path).then((result) => (hasProject = !!result?.project));
+  async function prepareEditor() {
+    if (hasProject && !(await confirm({ title: 'Dublaj projesini yeniden oluştur', danger: true, ok: 'Yeniden oluştur',
+      message: 'Mevcut projedeki düzenlemeler ve üretilmiş satır sesleri silinir.' }))) return;
+    savePref({ dub: { voice, opts: $state.snapshot(opts) } });
+    const result = await act('dub_project_create', path, source, { ...$state.snapshot(opts), audio }, timing, voice,
+      opts.speakers ? $state.snapshot(speakerVoices) : null);
+    if (result?.started) { onclose(); oneditor?.(); }
   }
 </script>
 
@@ -230,6 +243,10 @@
   {#snippet footer()}
     {#if busy}<span class="dim grow">Önceki altyazı/klip işi sürüyor.</span>{/if}
     <button class="btn" onclick={onclose}>Vazgeç</button>
+    {#if oneditor}
+      <button class="btn" disabled={busy || noEngine} title="Satırları tek tek düzenleyip seslendireceğiniz, dublajı taşıyıp sesi istediğiniz yerde kısacağınız düzenleyici"
+        onclick={prepareEditor}><Icon name="waveform" size={16} />{hasProject ? 'Düzenleyicide yeniden oluştur' : 'Düzenleyicide hazırla'}</button>
+    {/if}
     <button class="btn primary" disabled={busy || noEngine} onclick={start}><Icon name="volume" size={16} />Dublajı başlat</button>
   {/snippet}
 </Modal>

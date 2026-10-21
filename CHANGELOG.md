@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.10.0 — 2026-10-21
+
+### Yeni
+- **Dublaj düzenleyicisi (F175):** Dublaj artık tek seferde yazılmak zorunda değil. Oynatıcıda dalga simgesiyle (ya da CC menüsünden "Dublaj düzenleyicisi") sayfa video düzenleyici düzenine geçer: video sol üstte, sağda satır denetçisi ve satır listesi, altta zaman çizelgesi (özgün sesin dalga biçimi ve kısma aralıkları, altyazı satırları, dublaj sesleri). Dublaj penceresindeki "Düzenleyicide hazırla" aynı seçeneklerle (müzik ayrımı, ifade, konuşmacılar) düzenlenebilir bir proje hazırlar. Her satırın metni ve Drama 3 ifade etiketi düzeltilir, sesi (konuşmacı), hızı ve ses düzeyi değiştirilir; satır metindeki imleçten bölünür, sonrakiyle birleştirilir, silinir ya da yeni satır eklenir. Dublaj sesi sürükleyerek ya da "İmlece taşı" ile istenen ana taşınır; altyazı kutusunun kenarlarından süre değişir. İstenen satır yeniden seslendirilir (önbelleğe bakmadan yeni deneme); metni, etiketi ya da sesi değişen satır "eski" işaretlenir, "Eksikleri seslendir" yalnızca eksik ve eski satırları üretir. Özgün ses şeridinde sürükleyerek istenen aralıkta ses kısılır, aralığın düzeyi ayrı ayarlanır (tamamen susturmak dahil); "Otomatik kısmaya dön" ile eski davranışa dönülür. "Dublajı dinle" açıkken video oynarken satır sesleri yerlerinde çalar ve video sesi kısma aralıklarında kısılır. Ctrl+Z geri alır, S böler, Delete siler, Ctrl+tekerlek yakınlaştırır. "Dışa aktar" projeyi `.dublaj.mkv`/`.m4a` olarak yazar. Proje `work_files/dublaj/` altında saklanır; kaynak videoya dokunulmaz.
+
 ## 2.9.0 — 2026-10-21
 
 ### Yeni

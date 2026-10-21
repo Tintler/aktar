@@ -14,6 +14,7 @@
   import ClipPanel from '../components/ClipPanel.svelte';
   import SubtitleExportModal from '../components/SubtitleExportModal.svelte';
   import DubModal from '../components/DubModal.svelte';
+  import DubEditor from '../components/DubEditor.svelte';
   import { notes, loadNotes, startNote, NOTE_COLORS } from '../lib/notes.svelte.js';
   import { subtool, onSubtool, IDENTITY, signed, jobText } from '../lib/subtools.svelte.js';
 
@@ -275,6 +276,15 @@
   let previewEnd = null;             // onizleme bu anda durur
   let exporting = $state(false);
   let dubbing = $state(false);   // F141: dublaj penceresi
+  // F175: dublaj duzenleyicisi (sayfa video duzenleyici duzenine gecer); onizlemede video sesi kisma araliklarinda kisilir
+  let editing = $state(false);
+  let duckLevel = $state(1);
+  $effect(() => { app.dubEditor = editing; });
+  function openEditor() {
+    editing = true;
+    panel = '';
+    notes.open = false;
+  }
   let osd = $state('');
   let osdTimer;
 
@@ -487,6 +497,7 @@
       items.push('sep', { label: 'Zamanlama ve dışa aktarma…', icon: 'timer', action: () => { if (panel !== 'sync') openPanel('sync'); } });
       items.push({ label: subtool.job?.kind === 'dub' ? 'Dublaj hazırlanıyor…' : 'Bu altyazıyla Türkçe dublaj…', icon: 'volume',
         disabled: !!subtool.job, action: () => (dubbing = true) });
+      items.push({ label: 'Dublaj düzenleyicisi', icon: 'waveform', action: openEditor });
       if (cues.some((c) => c.words?.length)) {
         items.push({ label: 'Söylenen kelimeyi vurgula', icon: wordHighlight ? 'check' : null, action: () => {
           wordHighlight = !wordHighlight;
@@ -532,13 +543,15 @@
   }
 
   $effect(() => {
-    if (native) { call('mpv_command', 'volume', volume); call('mpv_command', 'mute', muted); }
-    else if (videoEl) { videoEl.volume = volume; videoEl.muted = muted; }
+    const level = volume * (editing ? duckLevel : 1);
+    if (native) { call('mpv_command', 'volume', level); call('mpv_command', 'mute', muted); }
+    else if (videoEl) { videoEl.volume = level; videoEl.muted = muted; }
   });
 
   onDestroy(() => {
     clearTimeout(idleTimer);
     if (fullscreen) call('window_fullscreen', false);
+    app.dubEditor = false;
     cancelAnimationFrame(rafId);
     clearTimeout(subTimer);
     offMpv();
@@ -561,7 +574,7 @@
       <h1 class="ellipsis title" title={p.path}>{p.name}</h1>
       <button class="btn sm" onclick={() => act('reveal', p.path)}><Icon name="folderOpen" size={14} />Konumu aç</button>
     </div>
-    <div class="page-body body">
+    <div class="page-body body" class:editing>
       <div class="player card" class:full={fullscreen} class:idle={fullscreen && idle} bind:this={shell} role="presentation" onmousemove={poke}>
         <div class="surface" role="presentation" bind:this={surface} onclick={toggle} >
           <!-- svelte-ignore a11y_media_has_caption -->
@@ -630,11 +643,17 @@
               <button class="icon-btn sm" disabled={!ready} title={ready ? 'Ses parçası' : waitTitle} onclick={audioMenu}><Icon name="headphones" size={18} /></button>
             {/if}
             <button class="icon-btn sm" class:on={ccKey} disabled={!ready} title={ready ? 'Altyazılar' : waitTitle} onclick={ccMenu}><Icon name="subtitles" size={18} /></button>
+            <button class="icon-btn sm" class:on={editing} disabled={!ready} title={ready ? 'Dublaj düzenleyicisi' : waitTitle}
+              onclick={() => (editing ? (editing = false) : openEditor())}><Icon name="waveform" size={17} /></button>
             <button class="icon-btn sm" title="Tam ekran (F)" onclick={toggleFullscreen}><Icon name={fullscreen ? 'shrink' : 'expand'} size={16} /></button>
           </div>
         </div>
       </div>
-      {#if notes.open && notes.path === p.path}
+      {#if editing}
+        <DubEditor path={p.path} {time} {playing} {duration} {volume} {muted} canSetup={!!ccKey}
+          seek={(at, play = null) => seekTo(at, play)} {toggle} pause={() => (native ? call('mpv_command', 'pause') : videoEl?.pause())}
+          onlevel={(value) => (duckLevel = value)} onsetup={() => (dubbing = true)} onclose={() => (editing = false)} />
+      {:else if notes.open && notes.path === p.path}
         <div class="notes-wrap"><NotesPanel path={p.path} current={time} onjump={(at) => seekTo(at)} /></div>
       {:else if panel === 'sync' && ccKey}
         <div class="notes-wrap tools">
@@ -653,7 +672,7 @@
 </section>
 
 {#if dubbing && p && ccKey}
-  <DubModal path={p.path} source={ccKey} label={ccLabel} {timing} {audio} onclose={() => (dubbing = false)} />
+  <DubModal path={p.path} source={ccKey} label={ccLabel} {timing} {audio} onclose={() => (dubbing = false)} oneditor={openEditor} />
 {/if}
 
 {#if exporting && p && ccKey}
@@ -663,6 +682,9 @@
 <style>
   .title { font-size: 24px !important; }
   .body { display: flex; flex-direction: column; gap: 10px; }
+  /* F175: dublaj duzenleyicisi -- video sol ustte, denetci sagda, zaman cizelgesi altta (DubEditor alanlari) */
+  .body.editing { display: grid; grid-template-columns: minmax(0, 1fr) clamp(320px, 30%, 440px); grid-template-rows: minmax(200px, 1fr) minmax(250px, 42%); }
+  .body.editing .player { grid-column: 1; grid-row: 1; min-height: 0; }
   .player { overflow: hidden; display: flex; flex-direction: column; flex: 1; min-height: 0; background: #000; border-color: var(--outline); }
   .player.full { position: fixed; inset: 0; z-index: 45; border: 0; border-radius: 0; }
   .player.full.idle { cursor: none; }

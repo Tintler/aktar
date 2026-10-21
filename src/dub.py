@@ -225,7 +225,8 @@ def overlaps(placed, durations):
 
 
 def duck_commands(spans, level, fade=FADE, steps=FADE_STEPS):
-    """asendcmd komut dosyasi: her konusma araliginda ozgun ses `level`e kisilir, sonra geri acilir."""
+    """asendcmd komut dosyasi: her konusma araliginda ozgun ses `level`e kisilir, sonra geri acilir.
+    F175: aralik (bas, son, duzey) ise o araligin kendi duzeyi kullanilir (dublaj duzenleyicisinde elle kisma)."""
     lines = []
 
     def ramp(begin, frm, to):
@@ -233,9 +234,11 @@ def duck_commands(spans, level, fade=FADE, steps=FADE_STEPS):
             value = frm + (to - frm) * step / steps
             lines.append(f'{max(0.0, begin + fade * (step - 1) / steps):.3f} volume@duck volume {value:.4f};')
 
-    for begin, end in spans:
-        ramp(begin - fade, 1.0, level)
-        ramp(end, level, 1.0)
+    for span in spans:
+        begin, end = span[0], span[1]
+        own = min(1.0, max(0.0, float(span[2]))) if len(span) > 2 and span[2] is not None else level
+        ramp(begin - fade, 1.0, own)
+        ramp(end, own, 1.0)
     return '\n'.join(lines) + ('\n' if lines else '')
 
 
@@ -341,7 +344,6 @@ def build(engines, video, segments, output, options=None, timing=None, language=
     'can_speed'}}, `load_voice(override, language)` motoru o sese hazirlar (bloklar); `stems` ayrilmis
     (konusma, muzik/efekt) dosyalari. F172 `expression`: prepare(); `plan` bu satirlara gore olmali.
     Donen: {'output', 'lines', 'faster', 'shifted', 'overlapped', 'voices', 'tagged', 'paused'}."""
-    import clip   # klip kaydinin FFmpeg ilerleme okuyucusu
 
     options = options_of(options)
     log = log or (lambda _message: None)
@@ -404,25 +406,7 @@ def build(engines, video, segments, output, options=None, timing=None, language=
         else:
             placed = place([line['start'] for line in lines], lengths)
             shifted, overlapped = sum(1 for at, line in zip(placed, lines) if at - line['start'] > 0.3), 0
-        track = folder / 'dublaj.wav'
-        with wave.open(str(track), 'wb') as out:
-            out.setnchannels(1)
-            out.setsampwidth(2)
-            out.setframerate(rate)
-            written = 0
-            for start, frames in layers(placed, voices, rate):
-                start = max(start, written)
-                while written < start:
-                    count = min(start - written, rate * 30)
-                    out.writeframes(b'\x00\x00' * count)
-                    written += count
-                out.writeframes(frames)
-                written += len(frames) // 2
-        duck = None
-        if has_audio and options['duck']:
-            spans = duck_spans(lines, placed, lengths)
-            (folder / 'duck.cmd').write_text(duck_commands(spans, options['background']), encoding='utf-8')
-            duck = 'duck.cmd'
+        spans = duck_spans(lines, placed, lengths) if has_audio and options['duck'] else None
         detail = (f'{overlapped} satır üst üste' if options['overlap']
                   else f'{faster} satır hızlandırıldı, {shifted} satır kaydırıldı')
         if options['normalize']:
@@ -431,37 +415,75 @@ def build(engines, video, segments, output, options=None, timing=None, language=
             detail += f", {expressed['tagged']} satıra ifade etiketi, {expressed['paused']} duraklama"
 
         log(f'Dublaj: {len(lines)} satır seslendirildi ({detail}); ses karıştırılıyor…')
-        output = Path(output)
-        partial = output.with_name(output.stem + '.part' + output.suffix)
-        command = mix_command(video, track.resolve(), partial.resolve(), options, has_audio, duck,
-                              [Path(item).resolve() for item in stems] if stems and has_audio else None)
-        total = float(duration or 0) or (written / rate)
-        try:
-            clip.run(command, total, cwd=str(folder), progress=lambda done, all_: progress and progress(done, all_, 'mix'),
-                     cancelled=cancelled)
-        except GracefulStop:
-            partial.unlink(missing_ok=True)
-            raise GracefulStop('Dublaj durduruldu.')
-        except RuntimeError as error:
-            partial.unlink(missing_ok=True)
-            if options['format'] != 'mkv':
-                raise RuntimeError(str(error).replace('Klip kaydedilemedi', 'Dublaj kaydedilemedi')) from error
-            # Ornek: MP4'teki mov_text altyazisi MKV'ye kopyalanamaz; altyazi ve ekler olmadan yeniden denenir.
-            log('Dublaj: altyazı akışları kopyalanamadı, altyazısız yazılıyor. (' + str(error)[-200:] + ')')
-            command = _drop_map(_drop_map(command, '0:s?'), '0:t?')
-            try:
-                clip.run(command, total, cwd=str(folder), cancelled=cancelled)
-            except GracefulStop:
-                partial.unlink(missing_ok=True)
-                raise GracefulStop('Dublaj durduruldu.')
-            except RuntimeError as again:
-                partial.unlink(missing_ok=True)
-                raise RuntimeError(str(again).replace('Klip kaydedilemedi', 'Dublaj kaydedilemedi')) from again
-        os.replace(partial, output)
+        render(video, folder, placed, voices, rate, output, options, has_audio, spans, stems, duration,
+               progress, cancelled, log)
         return {'output': str(output), 'lines': len(lines), 'faster': faster, 'shifted': shifted, 'overlapped': overlapped,
                 'voices': len(order), 'tagged': expressed['tagged'], 'paused': expressed['paused']}
     finally:
         shutil.rmtree(folder, ignore_errors=True)
+
+
+def write_track(path, placed, clips, rate):
+    """Sesleri zamanlarina yerlestirip tek bir 16 bit mono WAV yazar; donen: yazilan ornek sayisi."""
+    with wave.open(str(path), 'wb') as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(rate)
+        written = 0
+        for start, frames in layers(placed, clips, rate):
+            start = max(start, written)
+            while written < start:
+                count = min(start - written, rate * 30)
+                out.writeframes(b'\x00\x00' * count)
+                written += count
+            out.writeframes(frames)
+            written += len(frames) // 2
+    return written
+
+
+def render(video, folder, placed, clips, rate, output, options, has_audio, spans=None, stems=None, duration=0.0,
+           progress=None, cancelled=None, log=None):
+    """Dublaj izini (`clips` `placed` zamanlarinda) ozgun sesle karistirip `output`a yazar. `spans`: ozgun sesin
+    kisilacagi araliklar [(bas, son[, duzey])] (None: options.duck kapali, ozgun ses hep `background`)."""
+    import clip   # klip kaydinin FFmpeg ilerleme okuyucusu
+
+    options = options_of(options)
+    log = log or (lambda _message: None)
+    folder = Path(folder)
+    track = folder / 'dublaj.wav'
+    written = write_track(track, placed, clips, rate)
+    duck = None
+    if has_audio and spans is not None:
+        (folder / 'duck.cmd').write_text(duck_commands(spans, options['background']), encoding='utf-8')
+        duck = 'duck.cmd'
+    output = Path(output)
+    partial = output.with_name(output.stem + '.part' + output.suffix)
+    command = mix_command(video, track.resolve(), partial.resolve(), options, has_audio, duck,
+                          [Path(item).resolve() for item in stems] if stems and has_audio else None)
+    total = float(duration or 0) or (written / rate)
+    try:
+        clip.run(command, total, cwd=str(folder), progress=lambda done, all_: progress and progress(done, all_, 'mix'),
+                 cancelled=cancelled)
+    except GracefulStop:
+        partial.unlink(missing_ok=True)
+        raise GracefulStop('Dublaj durduruldu.')
+    except RuntimeError as error:
+        partial.unlink(missing_ok=True)
+        if options['format'] != 'mkv':
+            raise RuntimeError(str(error).replace('Klip kaydedilemedi', 'Dublaj kaydedilemedi')) from error
+        # Ornek: MP4'teki mov_text altyazisi MKV'ye kopyalanamaz; altyazi ve ekler olmadan yeniden denenir.
+        log('Dublaj: altyazı akışları kopyalanamadı, altyazısız yazılıyor. (' + str(error)[-200:] + ')')
+        command = _drop_map(_drop_map(command, '0:s?'), '0:t?')
+        try:
+            clip.run(command, total, cwd=str(folder), cancelled=cancelled)
+        except GracefulStop:
+            partial.unlink(missing_ok=True)
+            raise GracefulStop('Dublaj durduruldu.')
+        except RuntimeError as again:
+            partial.unlink(missing_ok=True)
+            raise RuntimeError(str(again).replace('Klip kaydedilemedi', 'Dublaj kaydedilemedi')) from again
+    os.replace(partial, output)
+    return output
 
 
 def _drop_map(command, target):

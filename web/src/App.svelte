@@ -74,7 +74,7 @@
   }
 
   const panelOpen = $derived((app.view === 'library' && !!app.library.slug && !app.libraryView.home && app.libraryView.chatOpen)
-    || (app.view === 'player' && !!app.player) || (app.view === 'document' && !!app.document));
+    || (app.view === 'player' && !!app.player && !app.dubEditor) || (app.view === 'document' && !!app.document));
   const models = $derived(app.models);
   const modelListed = $derived((models.names ?? []).includes(models.model));
 

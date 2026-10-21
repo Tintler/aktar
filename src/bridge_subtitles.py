@@ -8,6 +8,8 @@ Oynatici ve Altyazi Cevir sayfalarinin ortak araclari:
   - whisper_words: kelime zamanlari olmayan eski Whisper transkriptini yeniden cikarir.
   - clip_save: secilen araligi altyazili/altyazisiz klip olarak kaydeder.
   - dub_create: secili altyaziyi sesli okuma motoruyla seslendirip videoya dublaj parcasi ekler (dub.py).
+  - dub_project_* (F175): duzenlenebilir dublaj projesi (dub_project.py): olustur, kaydet, satir seslendir,
+    dalga bicimi, disa aktar.
   - speakers_find / dub_speakers / speakers_rename (F146): konusmaci ayrimi (voice_split.py); dublajda
     konusmaci basina ses, transkriptte ve soru-cevapta etiket.
 
@@ -17,12 +19,15 @@ olayiyla ilerler; pencere kapaninca durdurulur.
 """
 from __future__ import annotations
 
+import json
 import re
 import threading
 from pathlib import Path
 
+import audio_trim
 import clip
 import dub
+import dub_project
 import media_server
 import qa
 import speech
@@ -35,6 +40,8 @@ from app_core import GracefulStop, load_config, read
 from media import extract_subtitle, subtitle_streams
 
 WHISPER_KEY = 'whisper'
+WAVE_RATE = 10         # F175: dublaj duzenleyicisinde dalga bicimi sutunu / sn
+WAVE_LIMIT = 40000
 _SAFE = re.compile(r'[^\w.-]+')
 
 
@@ -374,6 +381,27 @@ class SubtitleToolsMixin:
                 index += 1
         return result
 
+    def _dub_analysis(self, path, segments, options, timing, voice, chosen, has_audio, cancel, progress):
+        """Dublaj oncesi ses cozumlemesi (bloklar): (stems, expression, plan, speakers). F146 'separate' muzik/efekt
+        ayrimi, F172 'expression' ifade ve duraklamalar, F146 'speakers' konusmaci basina ses plani (satirlar
+        dub.prepare ile ayni; `chosen` {'0': ses} kullanicinin secimi, digerleri otomatik)."""
+        stems, plan, expression, speakers = None, None, None, None
+        if options['separate'] and has_audio:
+            stems = voice_split.separate(path, options['audio'], log=self._log, progress=progress,
+                                         cancelled=cancel.is_set)
+        if options['expression'] and has_audio:
+            analysis = voice_split.expression(path, options['audio'], stems[0] if stems else None, log=self._log,
+                                              progress=progress, cancelled=cancel.is_set)
+            expression = {'analysis': analysis, 'allowed': self._emotion_allowed(), 'tags': True}
+        if options['speakers']:
+            speakers = voice_split.diarize(path, options['audio'], log=self._log, progress=progress,
+                                           cancelled=cancel.is_set)
+            lines = dub.prepare(segments, timing, expression)[0]   # build ile ayni satirlar (bolunmus)
+            mapping = dict(self._auto_voices(voice_split.summary(speakers, lines), voice), **chosen)
+            plan = dub.voice_plan(lines, speakers, {k: v for k, v in mapping.items() if v and v != voice})
+            self._log(f'Dublaj: {speakers["count"]} konuşmacı, {len(set(plan) - {None}) + 1} ses.')
+        return stems, expression, plan, speakers
+
     def dub_create(self, path, key, options=None, timing=None, voice='', voices=None):
         """Secili altyaziyi seslendirip videonun yanina dublajli kopya (.dublaj.mkv) ya da ses (.m4a) yazar.
         `voice`: '' (sesli okumanin Turkce sesi), 'preset:<kimlik>' ya da '<motor>/<ses>'.
@@ -416,22 +444,9 @@ class SubtitleToolsMixin:
         def work(cancel, progress):
             probed = info or media_server.probe(path)
             has_audio = bool(probed.get('audio'))
-            stems, plan, specs, expression = None, None, None, None
-            if options['separate'] and has_audio:
-                stems = voice_split.separate(path, options['audio'], log=self._log, progress=progress,
-                                             cancelled=cancel.is_set)
-            if options['expression'] and has_audio:
-                analysis = voice_split.expression(path, options['audio'], stems[0] if stems else None, log=self._log,
-                                                  progress=progress, cancelled=cancel.is_set)
-                expression = {'analysis': analysis, 'allowed': self._emotion_allowed(), 'tags': True}
-            if options['speakers']:
-                speakers = voice_split.diarize(path, options['audio'], log=self._log, progress=progress,
-                                               cancelled=cancel.is_set)
-                lines = dub.prepare(segments, timing, expression)[0]   # build ile ayni satirlar (bolunmus)
-                mapping = dict(self._auto_voices(voice_split.summary(speakers, lines), voice), **chosen)
-                plan = dub.voice_plan(lines, speakers, {k: v for k, v in mapping.items() if v and v != voice})
-                specs = {ref: self._voice_spec(engines, ref) for ref in set(plan) if ref}
-                self._log(f'Dublaj: {speakers["count"]} konuşmacı, {len(specs) + 1} ses.')
+            stems, expression, plan, _speakers = self._dub_analysis(path, segments, options, timing, voice, chosen,
+                                                                   has_audio, cancel, progress)
+            specs = {ref: self._voice_spec(engines, ref) for ref in set(plan) if ref} if plan else None
             self._log(f'Dublaj başlıyor: {path.name} ({len(segments)} satır) -> {target.name}')
             result = dub.build(engines, path, segments, target, options, timing, language, override,
                                duration=probed.get('duration') or 0.0, has_audio=has_audio,
@@ -442,6 +457,135 @@ class SubtitleToolsMixin:
             self._log('Dublaj kaydedildi: ' + result['output'])
             return dict(result, name=target.name)
         return self._start_tool('dub', path, work)
+
+    # ------------------------------------------------------------------ dublaj duzenleyicisi (F175)
+    def _dub_view(self, path, project):
+        media = getattr(self, '_media', None)
+        return dub_project.view(path, project, media.file_url if media is not None else None)
+
+    def dub_project_get(self, path):
+        """Videonun dublaj projesi (dub_project.view) ya da {'project': None}."""
+        path = Path(str(path))
+        project = dub_project.load(path)
+        return {'project': self._dub_view(path, project) if project else None}
+
+    def dub_project_create(self, path, key, options=None, timing=None, voice='', voices=None):
+        """Secili altyazidan duzenlenebilir dublaj projesi olusturur (arka planda 'dubprep': muzik ayrimi, ifade,
+        konusmacilar dub_create ile ayni; satirlar seslendirilmez). Var olan proje ve satir sesleri silinir."""
+        path = Path(str(path))
+        if not key:
+            return {'error': 'Seslendirilecek altyazıyı seçin (CC menüsü).'}
+        options = dub.options_of(options)
+        if options['separate'] or options['speakers'] or options['expression']:
+            ok, message = voice_split.available()
+            if not ok:
+                return {'error': message}
+        try:
+            segments = self._dub_segments(path, key)
+            label = self._source(path, key).label
+        except (RuntimeError, ValueError, OSError) as error:
+            return {'error': str(error)}
+        chosen = {str(k): (voice if str(v) == '=' else str(v)) for k, v in (voices or {}).items() if v}
+        player = getattr(self, '_player_video', None)
+        info = player.info if player is not None and player.path == path and player.info else None
+
+        def work(cancel, progress):
+            probed = info or media_server.probe(path)
+            _stems, expression, plan, speakers = self._dub_analysis(
+                path, segments, options, timing, voice, chosen, bool(probed.get('audio')), cancel, progress)
+            lines, expressed = dub.prepare(segments, timing, expression)
+            if not lines:
+                raise ValueError('Altyazıda seslendirilecek satır yok.')
+            if speakers:
+                for line in lines:
+                    line['speaker'] = voice_split.speaker_of(line['start'], line['end'], speakers.get('turns') or [])
+            project = dub_project.create(path, key, label, lines, timing, voice, options, plan, expressed)
+            self._log(f'Dublaj projesi hazır: {path.name} ({len(lines)} satır).')
+            return {'lines': len(project['lines'])}
+        return self._start_tool('dubprep', path, work)
+
+    def dub_project_save(self, path, project):
+        """Duzenleyicideki degisiklikler (satirlar, kisma araliklari, ana ses, secenekler)."""
+        path = Path(str(path))
+        try:
+            return {'project': self._dub_view(path, dub_project.save(path, project or {}))}
+        except (OSError, ValueError, TypeError) as error:
+            return {'error': str(error)}
+
+    def dub_project_generate(self, path, ids=None, fresh=False):
+        """Satirlari seslendirir (arka planda 'dubgen'): `ids` verilmezse sesi olmayan ya da eski satirlar;
+        `fresh` onbellege bakmadan yeni deneme. Her satir bitince 'dub_line' olayi."""
+        path = Path(str(path))
+        project = dub_project.load(path)
+        if project is None:
+            return {'error': 'Dublaj projesi bulunamadı; önce oluşturun.'}
+        if not dub_project.pending(project, ids):
+            return {'error': 'Seslendirilecek satır yok; hepsi hazır.'}
+        engines = self._engines()
+        if engines.choice('tr', self._voice_override(project.get('voice')))[0] is None:
+            return {'error': 'Dublaj için kurulu ses motoru yok; Ayarlar → Ses → Sesli okuma bölümünden kurun.'}
+        device = self.ui_prefs().get('tts', {}).get('device', 'auto')
+
+        def work(cancel, progress):
+            def load_voice(override, language):
+                progress(0, 0, 'engine')
+                self._wait_voice(engines, language, device, override, cancel)
+
+            def on_line(line):
+                current = dub_project.load(path)
+                if current:
+                    item = next((x for x in self._dub_view(path, current)['lines'] if x['id'] == line['id']), None)
+                    if item:
+                        self._emit('dub_line', {'path': str(path), 'line': item})
+            result = dub_project.generate(engines, path, ids, bool(fresh),
+                                          voice_spec=lambda ref: self._voice_spec(engines, ref), load_voice=load_voice,
+                                          progress=progress, cancelled=cancel.is_set, on_line=on_line, log=self._log)
+            self._log(f'Dublaj: {result["done"]} satır seslendirildi.')
+            return result
+        return self._start_tool('dubgen', path, work)
+
+    def dub_project_export(self, path):
+        """Projeyi videonun yanina dublaj olarak yazar (arka planda 'dub'; bicim proje seceneklerinden)."""
+        path = Path(str(path))
+        project = dub_project.load(path)
+        if project is None:
+            return {'error': 'Dublaj projesi bulunamadı; önce oluşturun.'}
+        options = project['options']
+        target = _unique(path, path.stem + '.dublaj', options['format'])
+        player = getattr(self, '_player_video', None)
+        info = player.info if player is not None and player.path == path and player.info else None
+
+        def work(cancel, progress):
+            probed = info or media_server.probe(path)
+            has_audio = bool(probed.get('audio'))
+            stems = None
+            if options['separate'] and has_audio:
+                stems = voice_split.separate(path, options['audio'], log=self._log, progress=progress,
+                                             cancelled=cancel.is_set)
+            result = dub_project.export(path, target, probed.get('duration') or 0.0, has_audio, stems,
+                                        progress=progress, cancelled=cancel.is_set, log=self._log)
+            self._log('Dublaj kaydedildi: ' + result['output'])
+            return dict(result, name=target.name)
+        return self._start_tool('dub', path, work)
+
+    def dub_project_wave(self, path):
+        """Ozgun sesin dalga bicimi (zaman cizelgesi icin; saniyede ~10 sutun), proje klasorunde saklanir."""
+        path = Path(str(path))
+        cache = dub_project.folder(path) / 'dalga.json'
+        try:
+            return json.loads(cache.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            pass
+        player = getattr(self, '_player_video', None)
+        info = player.info if player is not None and player.path == path and player.info else None
+        try:
+            duration = float((info or media_server.probe(path)).get('duration') or 0)
+            result = audio_trim.peaks(path, max(600, min(WAVE_LIMIT, int(duration * WAVE_RATE))))
+        except (RuntimeError, ValueError, OSError) as error:
+            return {'error': str(error)}
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps(result), encoding='utf-8')
+        return result
 
     # ------------------------------------------------------------------ konusmacilar (F146)
     def dub_speakers(self, path, key=None, timing=None, voice=''):

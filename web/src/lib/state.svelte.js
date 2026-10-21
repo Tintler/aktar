@@ -54,6 +54,7 @@ export const app = $state({
   prepare: null,              // 'Hepsini hazirla' penceresi: plan bilgisi + sayimlar
   player: null,               // bridge_player._player_state (acik video)
   playerSeek: null,           // {time, play, n}: oynaticiya gidecegi an (atif, arama sonucu)
+  dubEditor: false,           // F175: oynaticida dublaj duzenleyicisi acik (yan sohbet paneli gizlenir)
   playerPositions: {},        // video yolu -> son konum (sayfadan cikip donunce)
   document: null,             // bridge_document.doc_open (acik belge)
   docSeek: null,              // {page}: belge goruntuleyicinin gidecegi sayfa
