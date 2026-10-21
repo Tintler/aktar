@@ -247,6 +247,26 @@ class BuiltinEngineTests(unittest.TestCase):
         texts = [request['text'] for request in self.requests()]
         self.assertEqual(texts, [drama3_tr.WARMUP_TEXT, '[fısıldar] Sessiz ol.'])
 
+    def test_group_chars_from_engine_setting(self):
+        # F177: okuyucu bu motorda ardisik cumleleri parca uzunluguna kadar tek istekte okutur
+        self.assertEqual(self.engines.group_chars('tr'), drama3_tr.SETTINGS['max_chars'][0])
+        self.prefs['engine_settings'] = {'drama3-tr': {'max_chars': 320}}
+        self.assertEqual(self.engines.group_chars('tr'), 320)
+        self.prefs['voices'] = {'tr': 'drama3/clone'}     # baska motor: cumle cumle
+        self.assertEqual(self.engines.group_chars('tr'), 0)
+
+    def test_grouped_sentences_keep_their_emotion_tags(self):
+        book = '0123456789abcdef'
+        self.engines._emotion = lambda _book, sentence: '[laughs]' if sentence == 'İki.' else ''
+        self.engines.load('tr')
+        self.assertEqual(self.wait()['state'], 'ready')
+        result = self.engines.say(['Bir.', 'İki.'], 1.0, book)
+        self.assertGreater(result['duration'], 0)
+        texts = [request['text'] for request in self.requests()][1:]   # ilki isitma
+        self.assertEqual(texts, ['Bir.', '[laughs] İki.'])            # etiket parcanin basinda: orada bolunur
+        again = self.engines.say(['Bir.', 'İki.'], 1.0, book)
+        self.assertTrue(again['cached'])
+
     def test_missing_folder_gives_clear_error(self):
         self.prefs[drama3_tr.PREF_DIR] = ''
         self.engines.load('tr')

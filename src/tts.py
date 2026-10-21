@@ -444,7 +444,22 @@ class Engines:
 
     def say(self, text, speed=1.0, book=None, language='tr', override=None, tag=None):
         """One sentence as base64 WAV: from the book's cache when it was rendered before, else from the engine.
-        `tag`: emotion tag chosen by the caller (F172); None reads the book's own (F168)."""
+        `tag`: emotion tag chosen by the caller (F172); None reads the book's own (F168).
+        F177: `text` may be a list of consecutive sentences (group_chars) read in one request; each sentence keeps
+        its own book emotion tag inside the joined text."""
+        if isinstance(text, (list, tuple)):
+            parts = [' '.join(str(part).split()) for part in text]
+            parts = [part for part in parts if part]
+            if tag is None:
+                tagged = []
+                for part in parts:
+                    found = self._tag_for(book, part, language, override, None)
+                    if found:
+                        import drama3
+                        part = drama3.tagged(part, found)
+                    tagged.append(part)
+                parts, tag = tagged, ''
+            text = ' '.join(parts)
         text = ' '.join(str(text).split())
         if not text:
             return {'audio': '', 'duration': 0.0}
@@ -464,6 +479,21 @@ class Engines:
             partial.write_bytes(base64.b64decode(result['audio']))
             os.replace(partial, path)
         return {'audio': result.get('audio', ''), 'duration': result.get('duration', 0.0), 'cached': False}
+
+    def group_chars(self, language='tr', override=None):
+        """F177: how many characters of consecutive sentences the reader may send in one request (0: one sentence
+        at a time). Only for an engine whose motor.json has "group_sentences" (Drama 3 TR: every request costs
+        ~4 s however short it is); the limit is the engine's "max_chars" setting."""
+        engine_id, _voice = self.choice(language, override)
+        manifest = self._manifests().get(engine_id or '', {})
+        if not manifest.get('group_sentences'):
+            return 0
+        default = next((item.get('default') for item in manifest.get('settings', []) if item.get('key') == 'max_chars'), 0)
+        value = ((self._prefs().get('engine_settings') or {}).get(engine_id) or {}).get('max_chars', default)
+        try:
+            return max(0, int(float(value)))
+        except (TypeError, ValueError):
+            return int(default or 0)
 
     def cached(self, book, sentences, speed, language='tr', override=None):
         """How many of the sentences are already rendered for this book and voice."""

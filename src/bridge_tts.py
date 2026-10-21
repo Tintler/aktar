@@ -223,6 +223,13 @@ class TtsMixin:
         except Exception as error:
             return _error(error)
 
+    def tts_group_chars(self, language='tr'):
+        """F177: okuyucunun tek istekte birlestirebilecegi ardisik cumlelerin karakter siniri (0: cumle cumle)."""
+        try:
+            return self._engines().group_chars(language)
+        except Exception as error:
+            return _error(error)
+
     def tts_preview(self, voice='', text=''):
         """F149: bir sesi dinletir (dublaj ses secicileri): motor o sese hazirlanir (bloklar), kisa bir
         metin okunur. `text` bossa ornek cumle. Kayitli ses klon kaydi tasiyorsa motor yuklenmez, o kaydin

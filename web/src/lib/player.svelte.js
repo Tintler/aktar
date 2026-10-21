@@ -1,5 +1,7 @@
 // Read-aloud player: asks the back end (EMA Lightning) for one sentence at a time, plays it with
 // the Web Audio API and prefetches the next sentences so speech flows without gaps.
+// F177: an engine with a fixed cost per request (Drama 3 TR) reads consecutive sentences of a paragraph in one
+// request (tts_group_chars); the highlight moves through the group in proportion to its characters.
 import { call } from './api.js';
 import { PAUSE_DEFAULTS, pauseAfter } from './pauses.js';
 
@@ -18,8 +20,11 @@ let sentences = [];
 let breaks = new Set();   // indices of sentences that end a paragraph
 let pauses = { ...PAUSE_DEFAULTS };
 let scope = { book: null, language: 'tr' };   // where rendered sentences are cached
+let groupChars = 0;       // F177: 0 = one sentence per request
 let context = null;
 let source = null;
+let follow = null;        // interval moving the highlight through a group
+let currentEnd = -1;      // last sentence of the group being played
 let generation = 0;
 const cache = new Map();
 const hooks = { onsentence: () => {}, onend: () => {}, onerror: () => {} };
@@ -41,6 +46,18 @@ export function setPauses(next) {
   pauses = next;
 }
 
+// Last sentence read together with `index`: following sentences of the same paragraph while they fit.
+function groupEnd(index) {
+  let end = index;
+  if (groupChars <= 0) return end;
+  let chars = sentences[index].length;
+  while (end + 1 < sentences.length && !breaks.has(end) && chars + 1 + sentences[end + 1].length <= groupChars) {
+    end++;
+    chars += 1 + sentences[end].length;
+  }
+  return end;
+}
+
 // The sentence followed by its pause: the next one starts when this buffer ends, so pausing and
 // resuming inside the silence works like anywhere else.
 function withPause(buffer, index) {
@@ -59,9 +76,11 @@ function base64Buffer(text) {
 }
 
 function fetchSentence(index) {
-  const key = `${index}@${player.speed}`;
+  const end = groupEnd(index);
+  const key = `${index}-${end}@${player.speed}`;
   if (!cache.has(key)) {
-    const promise = call('tts_say', sentences[index], player.speed, scope.book, scope.language).then(async (result) => {
+    const text = end > index ? sentences.slice(index, end + 1) : sentences[index];
+    const promise = call('tts_say', text, player.speed, scope.book, scope.language).then(async (result) => {
       if (!result || result.error) throw new Error(result?.error ?? 'Ses üretilemedi.');
       if (!result.audio) return null;
       return context.decodeAudioData(base64Buffer(result.audio));
@@ -72,13 +91,44 @@ function fetchSentence(index) {
   return cache.get(key);
 }
 
+function prefetchAfter(end) {
+  for (let next = end + 1, count = 0; next < sentences.length && count < PREFETCH; count++) {
+    fetchSentence(next);
+    next = groupEnd(next) + 1;
+  }
+}
+
 function stopSource() {
+  clearInterval(follow);
+  follow = null;
   if (source) {
     source.onended = null;
     try { source.stop(); } catch { /* already stopped */ }
     source.disconnect();
     source = null;
   }
+}
+
+// Highlight inside a group: each sentence starts at its share of the characters (AudioContext time stops
+// while paused, so the highlight pauses too).
+function followGroup(index, end, duration, token) {
+  if (end <= index) return;
+  const lengths = sentences.slice(index, end + 1).map((s) => s.length);
+  const total = lengths.reduce((a, b) => a + b, 0) || 1;
+  const starts = [];
+  let sum = 0;
+  for (const length of lengths) { starts.push((sum / total) * duration); sum += length; }
+  const begin = context.currentTime;
+  follow = setInterval(() => {
+    if (token !== generation) return;
+    const elapsed = context.currentTime - begin;
+    let current = index;
+    for (let i = 0; i < starts.length; i++) if (elapsed >= starts[i]) current = index + i;
+    if (current !== player.index) {
+      player.index = current;
+      hooks.onsentence(current);
+    }
+  }, 100);
 }
 
 async function playIndex(index) {
@@ -93,6 +143,8 @@ async function playIndex(index) {
   player.index = index;
   player.waiting = true;
   hooks.onsentence(index);
+  const end = groupEnd(index);
+  currentEnd = end;
   let buffer;
   try {
     buffer = await fetchSentence(index);
@@ -105,18 +157,22 @@ async function playIndex(index) {
   }
   if (token !== generation) return;
   player.waiting = false;
-  for (let i = index + 1; i <= Math.min(sentences.length - 1, index + PREFETCH); i++) fetchSentence(i);
-  if (!buffer) { playIndex(index + 1); return; }
+  prefetchAfter(end);
+  if (!buffer) { playIndex(end + 1); return; }
   source = context.createBufferSource();
-  source.buffer = withPause(buffer, index);
+  source.buffer = withPause(buffer, end);
   source.connect(context.destination);
-  source.onended = () => { if (token === generation && player.playing) playIndex(index + 1); };
+  source.onended = () => { if (token === generation && player.playing) playIndex(end + 1); };
   source.start();
+  followGroup(index, end, buffer.duration, token);
 }
 
 export async function play(index = player.index) {
   context ??= new AudioContext();
   if (context.state === 'suspended') await context.resume();
+  const chars = await call('tts_group_chars', scope.language);
+  const next = typeof chars === 'number' ? chars : 0;
+  if (next !== groupChars) { groupChars = next; cache.clear(); }
   player.active = true;
   player.playing = true;
   await playIndex(index < 0 ? 0 : index);
@@ -154,7 +210,5 @@ export function setSpeed(speed) {
   player.speed = speed;
   // Already prefetched sentences used the old speed; the current one finishes as it is.
   for (const key of [...cache.keys()]) if (!key.endsWith(`@${speed}`)) cache.delete(key);
-  if (player.active && player.index >= 0) {
-    for (let i = player.index + 1; i <= Math.min(sentences.length - 1, player.index + PREFETCH); i++) fetchSentence(i);
-  }
+  if (player.active && player.index >= 0) prefetchAfter(Math.max(currentEnd, player.index));
 }

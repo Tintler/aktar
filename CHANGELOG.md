@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.12.0 — 2026-10-21
+
+### Değişiklik
+- **Drama 3 TR'de okuyucu cümleleri birleştirir (F177):** Bu motorda her istek, cümle ne kadar kısa olursa olsun ~4 saniyelik sabit bir süre ekliyor; okuyucu cümle cümle istediği için kısa cümlelerde ses metinden yavaş üretiliyordu. Artık okuyucu aynı paragraftaki ardışık cümleleri "Parça uzunluğu" ayarına kadar (varsayılan 200 karakter) tek istekte okutur, sonraki iki grubu önceden hazırlar. Vurgu çalan sesin içinde cümleden cümleye karakter oranına göre ilerler (duraklatınca durur); duygu etiketleri her cümlenin kendi yerinde kalır; ayarlanan cümle arası duraklama grubun sonuna konur. Diğer ses motorları eskisi gibi cümle cümle okur.
+
 ## 2.11.3 — 2026-10-21
 
 ### Düzeltme
