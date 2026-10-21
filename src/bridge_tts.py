@@ -411,11 +411,23 @@ class TtsMixin:
         except (ValueError, RuntimeError, OSError) as error:
             return _error(error)
 
-    def tts_reference_clip(self, path, start, end):
-        """F173: kaydin secilen araligi dinlemek icin {'audio': base64 WAV}."""
+    def tts_reference_transcript(self, path, language='tr'):
+        """F174: klon kaydinin kelime zamanli metni (Whisper, onbellekli): {'words': [[bas, son, kelime], ...]}."""
+        import qa
+        import speech
+        from app_core import load_config
         try:
-            return {'audio': audio_trim.clip_base64(str(path), float(start), float(end))}
-        except (ValueError, TypeError, RuntimeError, OSError) as error:
+            model = load_config().get('whisper_model') or speech.DEFAULT_MODEL
+            return audio_trim.transcript(str(path), self._tts_transcribe, qa.work_dir() / 'kayit-metni',
+                                         language or '', model)
+        except (ValueError, RuntimeError, OSError) as error:
+            return _error(error)
+
+    def tts_reference_audio(self, path):
+        """F173/F174: kaydi dinlemek icin {'audio': base64, 'mime'} (secim ve oynatma imleci arayuzde)."""
+        try:
+            return audio_trim.listen_base64(str(path))
+        except (ValueError, RuntimeError, OSError) as error:
             return _error(error)
 
     def tts_install_file(self):

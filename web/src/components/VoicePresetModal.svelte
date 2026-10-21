@@ -26,6 +26,7 @@
   let form = $state({ id: preset?.id ?? '', name: preset?.name ?? '', voice: preset?.voice ?? '',
     options: { ...(preset?.options ?? {}) }, image: preset?.image ?? '' });
   let trims = $state({});         // F173: {secenek: {start, end}} (yoksa kaydin tamami)
+  let spoken = $state('');        // F174: secilen parcanin metni (Whisper) -> 'Kaydin metni' kutusuna yazilabilir
   let imageChanged = $state(false);
   let saving = $state(false);
   let error = $state('');
@@ -135,11 +136,15 @@
             <button class="btn sm" onclick={() => pickRecording(option.key)}>Seç…</button>
           </div>
           {#if form.options[option.key]}
-            {#key form.options[option.key]}<AudioTrim path={form.options[option.key]} bind:trim={trims[option.key]}
+            {#key form.options[option.key]}<AudioTrim path={form.options[option.key]} bind:trim={trims[option.key]} bind:text={spoken}
               whole={form.options[option.key] === preset?.options?.[option.key]} />{/key}
           {/if}
         {:else}
           <textarea class="field" rows="2" bind:value={form.options[option.key]} placeholder={option.default ?? ''}></textarea>
+          {#if option.key === 'reference_text' && spoken && spoken !== (form.options[option.key] ?? '').trim()}
+            <div class="hint"><button class="link" onclick={() => (form.options[option.key] = spoken)}>Seçilen parçanın metnini yaz</button>
+              <span class="dim ellipsis" title={spoken}>{spoken}</span></div>
+          {/if}
         {/if}
       </div>
     {/each}

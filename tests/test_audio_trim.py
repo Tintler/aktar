@@ -4,7 +4,6 @@ from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / 'src'))
 
 import base64
-import io
 import shutil
 import subprocess
 import tempfile
@@ -60,10 +59,10 @@ class TrimTests(unittest.TestCase):
         self.assertLess(max(info['peaks'][:15]), 0.05)
         self.assertGreater(min(info['peaks'][30:75]), 0.5)
 
-    def test_clip_and_cut(self):
-        with wave.open(io.BytesIO(base64.b64decode(audio_trim.clip_base64(self.source, 1.0, 4.0)))) as clip:
-            self.assertEqual(clip.getframerate(), audio_trim.PREVIEW_RATE)
-            self.assertAlmostEqual(clip.getnframes() / clip.getframerate(), 3.0, delta=0.05)
+    def test_listen_and_cut(self):
+        heard = audio_trim.listen_base64(self.source)
+        self.assertIn(heard['mime'], ('audio/mpeg', 'audio/wav'))
+        self.assertGreater(len(base64.b64decode(heard['audio'])), 1000)
         target = audio_trim.cut(self.source, self.folder / 'kesik.wav', 2.5, 7.0)
         length, channels = seconds_of(target)
         self.assertAlmostEqual(length, 4.5, delta=0.05)
@@ -89,6 +88,27 @@ class TrimTests(unittest.TestCase):
         self.assertEqual(again['options']['reference'], str(recording))
         self.assertAlmostEqual(seconds_of(recording)[0], 1.5, delta=0.05)
         self.assertEqual([path.name for path in voice_presets.folder(app).glob('*-kayit.*')], [recording.name])
+
+    def test_transcript_is_cached(self):
+        calls = []
+
+        def transcribe(audio, language):
+            with wave.open(str(audio)) as clip:
+                calls.append((clip.getframerate(), clip.getnchannels(), language))
+            return [{'start': 2.1, 'end': 3.0, 'text': 'Merhaba dünya.',
+                     'words': [[2.1, 2.5, 'Merhaba'], [2.6, 3.0, ' dünya.']]}, {'start': 5.0, 'end': 5.5, 'text': 'Evet'}]
+        cache = self.folder / 'metin'
+        first = audio_trim.transcript(self.source, transcribe, cache, 'tr', 'small')
+        self.assertEqual(first, {'words': [[2.1, 2.5, 'Merhaba'], [2.6, 3.0, 'dünya.'], [5.0, 5.5, 'Evet']]})
+        self.assertEqual(calls, [(16000, 1, 'tr')])
+        self.assertEqual(audio_trim.transcript(self.source, transcribe, cache, 'tr', 'small'), first)
+        self.assertEqual(len(calls), 1)                       # onbellekten
+        copy = self.folder / 'kopya.mp3'
+        shutil.copyfile(self.source, copy)
+        self.assertEqual(audio_trim.transcript(copy, transcribe, cache, 'tr', 'small'), first)
+        self.assertEqual(len(calls), 1)                       # ayni icerik baska yerde
+        audio_trim.transcript(self.source, transcribe, cache, 'tr', 'large')
+        self.assertEqual(len(calls), 2)                       # baska model: yeniden
 
     def test_untrimmed_recording_is_copied_as_before(self):
         app = self.folder / 'app'

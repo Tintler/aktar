@@ -1,7 +1,8 @@
 """Ses kaydindan aralik kesme (F173): ses onayari olustururken klon kaydinin istenen parcasi.
 
 Klonlama modelleri kaydin ilk ~20 sn'sini kullanir; uzun bir kaydin istenen parcasi burada secilir ve onayar
-klasorune WAV olarak yazilir (voice_presets). Arayuz dalga bicimini (peaks) cizer, secimi dinletir (clip_base64).
+klasorune WAV olarak yazilir (voice_presets). Arayuz dalga bicimini (peaks) cizer, kaydi dinletir (listen_base64;
+secim ayni ses icinde aranir, oynatma imleci gorunur) ve F174 kelime zamanli metni gosterir (transcript, Whisper).
 Kaynak dosya SALT-OKUNUR. FFmpeg ile; numpy gerekmez.
 """
 from __future__ import annotations
@@ -18,8 +19,7 @@ import media
 
 PEAK_RATE = 8000       # dalga bicimi icin cozme hizi
 PEAKS = 600            # dalga bicimi sutun sayisi
-PREVIEW_RATE = 22050
-PREVIEW_LIMIT = 60.0   # dinletilen secim en fazla (sn)
+LISTEN_LIMIT = 900.0   # dinletilen kayit en fazla (sn); daha uzun kaydin basi
 FADE = 0.02            # kesilen uclarda tik sesi olmasin
 MIN_LENGTH = 0.5
 
@@ -62,27 +62,27 @@ def span(start, end, duration=None):
     return start, end
 
 
-def _cut_command(source, target, start, end, rate=None):
+def _cut_command(source, target, start, end):
     length = end - start
     fade = min(FADE, length / 4)
     command = [media.ffmpeg_path(), '-v', 'error', '-nostdin', '-y', '-ss', f'{start:.3f}', '-t', f'{length:.3f}',
                '-i', str(source), '-vn', '-ac', '1']
-    if rate:
-        command += ['-ar', str(rate)]
     return command + ['-af', f'afade=t=in:d={fade:.3f},afade=t=out:st={max(0.0, length - fade):.3f}:d={fade:.3f}',
                       '-c:a', 'pcm_s16le', str(target)]
 
 
-def clip_base64(path, start, end):
-    """Secimin dinlenecek kopyasi: 22 kHz mono WAV, base64 (en fazla PREVIEW_LIMIT sn)."""
-    start, end = span(start, end)
-    end = min(end, start + PREVIEW_LIMIT)
-    with tempfile.TemporaryDirectory(prefix='aktar-kes-') as folder:
-        target = Path(folder) / 'secim.wav'
-        done = media._run(_cut_command(path, target, start, end, PREVIEW_RATE))
-        if done.returncode != 0 or not target.exists():
-            raise ValueError('Seçim dinletilemedi: ' + (done.stderr or '').strip()[-300:])
-        return base64.b64encode(target.read_bytes()).decode('ascii')
+def listen_base64(path):
+    """Kaydin dinlenecek kopyasi {'audio': base64, 'mime'}: mono MP3 (en fazla LISTEN_LIMIT sn); MP3 kodlayicisi
+    yoksa 16 kHz WAV. Zamanlar ozgun kayitla aynidir (arayuz secimi bu ses icinde arar)."""
+    with tempfile.TemporaryDirectory(prefix='aktar-dinle-') as folder:
+        for name, mime, codec in (('kayit.mp3', 'audio/mpeg', ['-c:a', 'libmp3lame', '-b:a', '96k']),
+                                  ('kayit.wav', 'audio/wav', ['-ar', '16000', '-c:a', 'pcm_s16le'])):
+            target = Path(folder) / name
+            done = media._run([media.ffmpeg_path(), '-v', 'error', '-nostdin', '-y', '-t', f'{LISTEN_LIMIT:g}',
+                               '-i', str(path), '-vn', '-ac', '1'] + codec + [str(target)])
+            if done.returncode == 0 and target.exists():
+                return {'audio': base64.b64encode(target.read_bytes()).decode('ascii'), 'mime': mime}
+        raise ValueError('Ses kaydı dinletilemedi: ' + (done.stderr or '').strip()[-300:])
 
 
 def cut(source, target, start, end):
@@ -97,3 +97,42 @@ def cut(source, target, start, end):
         raise ValueError('Ses kaydı kesilemedi: ' + (done.stderr or '').strip()[-300:])
     os.replace(partial, target)
     return target
+
+
+TRANSCRIPT_VERSION = 1
+
+
+def transcript(path, transcribe, cache_dir, language='', model=''):
+    """F174: kaydin kelime zamanli metni {'words': [[bas, son, kelime], ...]} (Whisper; onbellekli).
+    `transcribe(wav16k, dil)` Whisper bolumlerini dondurur ([{'start', 'end', 'text', 'words'}])."""
+    import hashlib
+    import json
+    source = Path(path)
+    content = hashlib.sha1()   # icerige gore: onayar klasorune kopyalanan kayit da onbellekten gelir
+    with open(source, 'rb') as stream:
+        for block in iter(lambda: stream.read(1 << 20), b''):
+            content.update(block)
+    key = hashlib.sha1(f'{TRANSCRIPT_VERSION}|{content.hexdigest()}|{language}|{model}'.encode('utf-8')).hexdigest()[:20]
+    cached = Path(cache_dir) / f'{key}.json'
+    try:
+        return json.loads(cached.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        pass
+    with tempfile.TemporaryDirectory(prefix='aktar-metin-') as folder:
+        audio = Path(folder) / 'kayit.wav'
+        done = media._run([media.ffmpeg_path(), '-v', 'error', '-nostdin', '-y', '-i', str(source), '-vn', '-ac', '1',
+                           '-ar', '16000', '-c:a', 'pcm_s16le', str(audio)])
+        if done.returncode != 0 or not audio.exists():
+            raise ValueError('Ses kaydı okunamadı: ' + (done.stderr or '').strip()[-300:])
+        segments = transcribe(audio, language) or []
+    words = []
+    for segment in segments:
+        for start, end, word in segment.get('words') or [[segment['start'], segment['end'], segment.get('text', '')]]:
+            word = ' '.join(str(word).split())
+            if word:
+                words.append([round(float(start), 2), round(float(end), 2), word])
+    result = {'words': words}
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    cached.write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
+    return result
+
