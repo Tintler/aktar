@@ -60,9 +60,11 @@ def main():
     sys.path.insert(0, folder)
     os.environ['FISH_DRAMA3_CUDA_GRAPH'] = '1'
 
-    stage('Drama 3 TR: kütüphaneler yükleniyor…')
+    stage('Drama 3 TR: torch yükleniyor…')
     import soundfile as sf
     import torch
+    print(f'torch {torch.__version__}, CUDA: {torch.cuda.is_available()}', flush=True)
+    stage('Drama 3 TR: model kodu yükleniyor…')
     from engine import OnDemandExperts, PrefixCache, attach_speaker, build_model, synthesize
     from prepare_data import encode, load_codec
 

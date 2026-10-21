@@ -145,6 +145,22 @@ class ServerTests(unittest.TestCase):
         process.stdin.close()
         self.assertEqual(process.wait(10), 0)
 
+    def test_child_env_drops_aktar_paths(self):
+        # F176: Whisper'in CUDA 12 klasorleri ve Aktar'in kendi klasorleri sunucunun PATH'inde kalmaz
+        import types
+        cuda = os.path.abspath(os.path.join(self.temp.name, 'cuda12'))
+        own = str(REPO / 'bin')
+        other = os.path.abspath(os.path.join(self.temp.name, 'diger'))
+        path = os.pathsep.join([cuda, own, other])
+        with patch.dict(os.environ, {'PATH': path, 'PYTHONHOME': 'x', '_PYI_APPLICATION_HOME_DIR': 'y'}), \
+                patch.dict(sys.modules, {'speech': types.SimpleNamespace(_cuda_dirs_added=[Path(cuda)])}):
+            env = drama3_tr.child_env()
+        path_key = next(key for key in env if key.upper() == 'PATH')
+        self.assertEqual(env[path_key].split(os.pathsep), [other])
+        self.assertNotIn('PYTHONHOME', env)
+        self.assertNotIn('_PYI_APPLICATION_HOME_DIR', env)
+        self.assertEqual(env['PYTHONUNBUFFERED'], '1')
+
     def test_crash_before_ready_shows_output(self):
         (self.folder / 'crash').write_text('', encoding='utf-8')
         server = drama3_tr.Server(self.folder, sys.executable, self.script)

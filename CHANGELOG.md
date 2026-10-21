@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.11.2 — 2026-10-21
+
+### Düzeltme
+- **Drama 3 TR "kütüphaneler yükleniyor"da takılabiliyordu (F176):** Sunucu Aktar'ın ortamını miras alıyordu: Whisper için PATH'e eklenen CUDA 12 klasörleri, Aktar'ın kendi `bin` klasörü ve paketli Aktar'ın geçici DLL klasörü klasördeki torch'un (CUDA 13) yanlış kütüphaneleri yüklemesine yol açabiliyordu. Sunucu artık bunlardan arındırılmış bir ortamla başlar. Yükleme aşamaları ayrıldı (torch, model kodu, model) ve torch'un GPU'yu görüp görmediği Konsol'a yazılır.
+
 ## 2.11.1 — 2026-10-21
 
 ### Düzeltme

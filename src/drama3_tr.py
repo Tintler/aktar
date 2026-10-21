@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 import socket
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -121,6 +122,43 @@ def _bind_to_parent(process):
     return job
 
 
+def child_env():
+    """Sunucu surecinin ortami: Aktar'in kendisine ekledikleri cikar (F176). Whisper'in CUDA 12 klasorleri
+    (speech._add_cuda_dll_dirs) ve Aktar'in bin\\ / paket klasoru PATH'te onde kalirsa klasordeki torch (CUDA 13)
+    yanlis DLL'leri yukleyip takilabiliyor; paketli Aktar'in PyInstaller degiskenleri de alt surece gecmemeli."""
+    env = {key: value for key, value in os.environ.items()
+           if not key.upper().startswith(('_PYI_', '_MEIPASS')) and key.upper() not in ('PYTHONHOME', 'PYTHONPATH')}
+    speech = sys.modules.get('speech')
+    added = {os.path.normcase(os.path.abspath(str(folder))) for folder in getattr(speech, '_cuda_dirs_added', [])}
+    roots = [Path(sys._MEIPASS)] if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS') else []
+    roots.append(Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False)
+                  else Path(__file__).resolve().parent.parent)
+    roots = [os.path.normcase(os.path.abspath(str(root))) for root in roots]
+
+    def own(entry):
+        entry = os.path.normcase(os.path.abspath(entry))
+        return entry in added or any(entry == root or entry.startswith(root + os.sep) for root in roots)
+
+    for key in [name for name in env if name.upper() == 'PATH']:
+        env[key] = os.pathsep.join(entry for entry in env[key].split(os.pathsep) if entry and not own(entry))
+    env.update(PYTHONUNBUFFERED='1', PYTHONIOENCODING='utf-8')
+    return env
+
+
+def _spawn(command, **options):
+    """Popen; paketli Aktar'da Windows DLL arama klasoru (SetDllDirectory, PyInstaller'in gecici klasoru) alt
+    surece miras kalmasin diye baslatirken sifirlanir."""
+    reset = os.name == 'nt' and getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+    if reset:
+        import ctypes
+        ctypes.windll.kernel32.SetDllDirectoryW(None)
+    try:
+        return subprocess.Popen(command, **options)
+    finally:
+        if reset:
+            ctypes.windll.kernel32.SetDllDirectoryW(sys._MEIPASS)
+
+
 def free_port():
     with socket.socket() as probe:
         probe.bind(('127.0.0.1', 0))
@@ -150,14 +188,14 @@ class Server:
 
     def start(self):
         self.port = free_port()
-        env = dict(os.environ, PYTHONUNBUFFERED='1', PYTHONIOENCODING='utf-8')
+        env = child_env()
         command = [str(self.python), '-u', str(self.script), '--folder', str(self.folder), '--port', str(self.port),
                    '--speaker', str(self.folder / 'speaker.safetensors')]
         # stdin acik kalir: Aktar kapanir ya da cokerse boru kapanir, sunucu betigi kendini kapatir (F176: Linux'ta
         # PR_SET_PDEATHSIG sureci baslatan is parcacigina bagli; yukleme is parcacigi bitince sunucu kapaniyordu)
         extra = {'creationflags': getattr(subprocess, 'CREATE_NO_WINDOW', 0)} if os.name == 'nt' else {}
-        self.process = subprocess.Popen(command, cwd=str(self.folder), env=env, stdin=subprocess.PIPE,
-                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **extra)
+        self.process = _spawn(command, cwd=str(self.folder), env=env, stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **extra)
         try:
             self._job = _bind_to_parent(self.process)
         except OSError:
