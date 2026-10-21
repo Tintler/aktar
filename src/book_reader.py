@@ -357,6 +357,10 @@ class Library:
                 'position': entry.get('position') or {'section': 0, 'offset': 0},
                 'percent': entry.get('percent', 0), 'bookmarks': entry.get('bookmarks', [])}
 
+    def section_count(self, book_id):
+        """Bolum sayisi; open() gibi 'son acilan' zamanini degistirmez (F170 kitapliktan etiketleme)."""
+        return len(self._book(book_id)[1].sections)
+
     def section(self, book_id, number):
         _entry, book = self._book(book_id)
         return {'section': number, 'html': book.section_html(int(number)), 'title': book.section_title(int(number))}

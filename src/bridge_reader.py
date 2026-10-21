@@ -116,6 +116,9 @@ class ReaderMixin:
     def reader_open(self, book_id):
         return self._reading(self._shelf().open, book_id)
 
+    def shelf_section_count(self, book_id):
+        return self._reading(self._shelf().section_count, book_id)
+
     def reader_section(self, book_id, number):
         return self._reading(self._shelf().section, book_id, number)
 

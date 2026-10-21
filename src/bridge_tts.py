@@ -45,65 +45,108 @@ class TtsMixin:
             self._emotion_cache = store = emotion_tags.Store(directory)
         return store
 
-    def _emotion_mode(self):
-        mode = self.ui_prefs().get('tts', {}).get('emotion_tags') or 'off'
-        return mode if mode in emotion_tags.MODES else 'off'
+    def _emotion_enabled(self):
+        """ui.json tts.emotion_tags: 'off' kapali; yoksa (ya da eski 'words'/'llm') etiketli surum kullanilir."""
+        return (self.ui_prefs().get('tts', {}).get('emotion_tags') or 'on') != 'off'
 
     def _emotion_tag(self, book, text):
-        """tts.Engines'in sordugu cumle etiketi: Ayarlar'da kapaliysa ''."""
-        mode = self._emotion_mode()
-        if mode == 'off':
+        """tts.Engines'in sordugu cumle etiketi: kitabin etiketli surumunden; kapaliysa ya da surum yoksa ''."""
+        if not self._emotion_enabled():
             return ''
         try:
-            return self._emotion_store().tag(book, text, mode)
+            return self._emotion_store().tag(book, text)
         except (OSError, ValueError):
             return ''
 
-    def tts_emotions(self, book, sentences, breaks=None):
-        """Okuyucunun bir bolumunu (cumleler + paragraf sonu cumle numaralari) Drama 3 icin etiketler ve kitabin
-        yanina saklar. Kelime listesi hemen; 'llm' kipinde model sunucusu arka planda (bitince 'tts_emotions'
-        olayi). Donen: {'mode', 'tags', 'pending'}; kapaliysa etiket yok."""
-        mode = self._emotion_mode()
-        sentences = [' '.join(str(s).split()) for s in sentences or ()]
-        if mode == 'off' or not sentences:
-            return {'mode': mode, 'tags': [], 'pending': False}
-        breaks = [int(b) for b in breaks or ()]
+    def tts_emotions_books(self):
+        """F170: etiketli surumu olan kitaplar (kitaplikta isaret icin)."""
         try:
-            store = self._emotion_store()
-            store.update(book, 'words', sentences, emotion_tags.tag_sentences(sentences, breaks))
-            pending = mode == 'llm' and not store.has_llm(book, sentences) and self._emotion_llm(book, sentences, breaks)
-            return {'mode': mode, 'tags': [store.tag(book, s, mode) for s in sentences], 'pending': bool(pending)}
+            return self._emotion_store().books()
+        except OSError:
+            return []
+
+    def tts_emotions_info(self, book, language='tr'):
+        """F170: okuyucu icin: kitabin etiketli surumu, kitabin motoru etiket destekliyor mu (Drama 3), acik mi."""
+        try:
+            info = self._emotion_store().info(book)
         except (OSError, ValueError) as error:
             return _error(error)
+        engines = self._engines()
+        engine_id, _voice = engines.choice(language)
+        supported = bool(engine_id and engines._manifests().get(engine_id, {}).get('emotion_tags'))
+        return {'info': info, 'engine': supported, 'enabled': self._emotion_enabled()}
 
-    def _emotion_llm(self, book, sentences, breaks):
-        """Model sunucusuyla etiketleme isi (ayni anda tek; pencere kapaninca durur). Baslarsa True."""
-        job = getattr(self, '_emotion_job', None)
-        if job is not None and job.is_alive():
-            return False
-        cancel = threading.Event()
-        self._emotion_cancel = cancel
+    def tts_emotions_create(self, book, sections, method='llm', title=''):
+        """F170: butun kitabin etiketli surumunu arka planda olusturur (kitapligin sag tik menusu). `sections`:
+        [{'sentences', 'breaks'}] okuyucunun bolmesiyle. Okurken etiketleme yapilmaz: ses motoru ile dil modeli
+        ayni anda bellegi dolduruyordu; is basinda ses motoru durdurulur, model sunucusunda bu isin yukledigi
+        model sonunda bosaltilir. Ilerleme ve bitis 'tts_emotions' olayiyla."""
+        if not hasattr(self, '_emotion_lock'):
+            self._emotion_lock = threading.Lock()
+        method = method if method in emotion_tags.METHODS else 'llm'
+        try:
+            self._emotion_store()._path(book)
+        except ValueError as error:
+            return _error(error)
+        sections = [{'sentences': [' '.join(str(s).split()) for s in (part or {}).get('sentences') or ()],
+                     'breaks': [int(b) for b in (part or {}).get('breaks') or ()]} for part in sections or ()]
+        total = sum(len(part['sentences']) for part in sections)
+        if not total:
+            return _error('Kitapta etiketlenecek metin yok.')
+        with self._emotion_lock:
+            job = getattr(self, '_emotion_job', None)
+            if job is not None and job.is_alive():
+                return _error('Duygu etiketleri zaten oluşturuluyor.')
+            for name in ('_prepare_job', '_audiobook_job'):
+                running = getattr(self, name, None)
+                if running is not None and running.is_alive():
+                    return _error('Ses hazırlanırken ya da sesli kitap kaydedilirken duygu etiketi oluşturulamaz.')
+            cancel = threading.Event()
+            self._emotion_cancel = cancel
 
-        def work():
-            from app_core import Client, load_config
-            try:
-                client = Client(load_config(), log=self._log)
-                ask = lambda prompt: client.chat([{'role': 'user', 'content': prompt}], temperature=0, max_tokens=1500)
-                tags = emotion_tags.tag_with_llm(sentences, breaks, ask, cancel)
-                if not cancel.is_set():
-                    self._emotion_store().update(book, 'llm', sentences, tags)
-                    self._log(f'Duygu etiketleri (model): {sum(map(bool, tags))} konuşma etiketlendi.')
-                self._emit('tts_emotions', {'book': book, 'finished': True})
-            except Exception as error:
-                self._log(f'UYARI: Duygu etiketleri modelle çıkarılamadı, kelime listesi kullanılıyor: {error}')
-                self._emit('tts_emotions', {'book': book, 'finished': True, 'error': str(error)})
+            def progress(done, count):
+                self._emit('tts_emotions', {'book': book, 'title': title, 'done': done, 'total': count})
 
-        self._emotion_job = threading.Thread(target=work, name='aktar-tts-emotions', daemon=True)
-        self._emotion_job.start()
+            def work():
+                from app_core import Client, keep_loaded, load_config, unload_models
+                client, loaded = None, []
+                try:
+                    engines = getattr(self, '_engines_cache', None)
+                    if engines is not None and engines.state != 'idle' and not engines._exporting:
+                        engines.stop_worker()   # ses motoru bellegi bosalsin
+                        engines._set('idle', '')
+                    ask = None
+                    if method == 'llm':
+                        client = Client(load_config(), log=self._log)
+                        loaded = keep_loaded(client, [client.cfg.get('model')], self._log)
+                        ask = lambda prompt: client.chat([{'role': 'user', 'content': prompt}], temperature=0,
+                                                         max_tokens=1500)
+                    progress(0, total)
+                    tags = emotion_tags.tag_book(sections, ask, cancel, progress)
+                    info = self._emotion_store().save(book, method, sections, tags)
+                    self._log(f'Duygu etiketleri: {info["tagged"]} konuşma etiketlendi ({title or book}).')
+                    self._emit('tts_emotions', {'book': book, 'title': title, 'finished': True, 'info': info})
+                except emotion_tags.Cancelled:
+                    self._emit('tts_emotions', {'book': book, 'title': title, 'finished': True, 'cancelled': True})
+                except Exception as error:
+                    self._log(f'UYARI: Duygu etiketleri oluşturulamadı: {error}')
+                    self._emit('tts_emotions', {'book': book, 'title': title, 'finished': True, 'error': str(error)})
+                finally:
+                    if loaded:
+                        unload_models(client, loaded)
+
+            self._emotion_job = threading.Thread(target=work, name='aktar-tts-emotions', daemon=True)
+            self._emotion_job.start()
+        return {'started': True, 'total': total}
+
+    def tts_emotions_cancel(self):
+        cancel = getattr(self, '_emotion_cancel', None)
+        if cancel is not None:
+            cancel.set()
         return True
 
     def tts_emotions_clear(self, book=None):
-        """Saklanan duygu etiketlerini siler (kitap verilmezse hepsini)."""
+        """Kitabin etiketli surumunu siler (kitap verilmezse hepsini)."""
         try:
             self._emotion_store().clear(book)
         except (OSError, ValueError) as error:
@@ -143,6 +186,10 @@ class TtsMixin:
     def tts_load(self, language=None, voice=None):
         """Kitap dili icin secilen motoru ve sesi (arka planda) hazirlar. `voice`: sayfanin kendi sesi
         (sohbet, dublaj): '' okuyucunun sesi, 'preset:<kimlik>' ses kaydi ya da '<motor>/<ses>'."""
+        job = getattr(self, '_emotion_job', None)
+        if job is not None and job.is_alive():   # F170: dil modeli calisirken ses motoru bellege yuklenmez
+            return {'state': 'error', 'message': 'Duygu etiketleri oluşturulurken ses motoru başlatılmaz; '
+                    'bitmesini bekleyin ya da sağ üstteki işlerden durdurun.'}
         device = self.ui_prefs().get('tts', {}).get('device', 'auto')
         override = self._voice_override(voice)
         return self._engines().load(self._override_language(override, language), device, override)

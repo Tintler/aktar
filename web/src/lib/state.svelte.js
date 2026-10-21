@@ -41,6 +41,8 @@ export const app = $state({
   ttsPrepare: null,           // {book, done, total}: cumleler hazirlanirken
   ttsExport: null,
   ttsAudiobook: null,         // F141: {book, title, done, total, chapter, chapters}: sesli kitap kaydedilirken
+  emotionJob: null,           // F170: {book, title, done, total, reading}: kitabin duygu etiketleri olusturulurken
+  emotionBooks: [],           // F170: etiketli surumu olan kitaplar (tts_emotions_books)
   ttsPrefs: { device: 'auto', speed: 1, voices: {}, options: {} },
   // Komut satirindan ya da baska sayfadan acilmak uzere bekleyen video (Translate acilinca alir).
   pendingVideo: null,
@@ -68,7 +70,7 @@ export const app = $state({
 // kapaninca silindigi icin hatirlanmasi gereken her secim buradan kaydedilir (F130).
 export function savePref(values) {
   Object.assign(app.prefs, values);
-  call('save_ui_prefs', $state.snapshot(values));
+  return call('save_ui_prefs', $state.snapshot(values));
 }
 
 export function setThink(value) {
@@ -96,7 +98,7 @@ export function saveReaderPrefs() {
 }
 
 export function saveTtsPrefs() {
-  savePref({ tts: $state.snapshot(app.ttsPrefs) });
+  return savePref({ tts: $state.snapshot(app.ttsPrefs) });
 }
 
 export const toasts = $state([]);
@@ -124,6 +126,11 @@ export function clearLog() {
 export function log(line) {
   app.log.push(line);
   if (app.log.length > LOG_LIMIT) app.log.splice(0, app.log.length - LOG_LIMIT);
+}
+
+export async function refreshEmotionBooks() {
+  const books = await call('tts_emotions_books').catch(() => null);
+  if (Array.isArray(books)) app.emotionBooks = books;
 }
 
 // Arka uc metodunu cagirir; {error} sonucunu bildirime cevirir ve null dondurur.
@@ -251,9 +258,14 @@ export async function init() {
     if (data.error) toast('Ses kaydedilemedi: ' + data.error, 'error');
     else toast(`Ses kaydedildi (${data.count} cümle): ${data.path}`, 'ok');
   });
-  // F168: duygu etiketleri model sunucusuyla cikarilamadiysa kelime listesi kullanilir.
+  // F170: kitabin duygu etiketleri (kitapliktan, butun kitap icin).
   on('tts_emotions', (data) => {
-    if (data.error) toast('Duygu etiketleri modelle çıkarılamadı, kelime listesi kullanılıyor: ' + data.error, 'error');
+    if (!data.finished) { app.emotionJob = { book: data.book, title: data.title, done: data.done, total: data.total }; return; }
+    app.emotionJob = null;
+    refreshEmotionBooks();
+    if (data.error) toast('Duygu etiketleri oluşturulamadı: ' + data.error, 'error');
+    else if (data.cancelled) toast('Duygu etiketleme durduruldu.');
+    else toast(`Duygu etiketleri hazır: ${data.title || 'kitap'} · ${data.info?.tagged ?? 0} konuşma etiketlendi.`, 'ok');
   });
   // F141: sesli kitap kaydi (okuyucu); bitince dosya/klasor gosterilir.
   on('tts_audiobook', async (data) => {
@@ -357,6 +369,7 @@ export async function init() {
   setLibrary(start.library);
   applyBookSnapshot(start.books);
   call('shelf_list').then((books) => { if (Array.isArray(books)) app.shelf = books; });
+  refreshEmotionBooks();
   call('tts_status').then((status) => { if (status?.state) app.tts = status; });
   call('refresh_models');
   if (!app.prefs.setup_seen) app.setup = true;   // F154: ilk acilista bilesen denetimi

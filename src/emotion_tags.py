@@ -9,21 +9,25 @@ anlaticidaki ipucu ('gulerek', 'fisildadi', 'bagirdi' ...) ayni paragraftaki kon
 cizgili) atanir; anlatici cumlesi etiket almaz. Istege bagli olarak model sunucusu (llm_provider) baglamdan
 cikarir. Okuyucuda gorunen metin degismez: etiket yalnizca sunucuya giden metne eklenir (drama3.tagged).
 
-Sonuc kitap basina APP_DIR/duygu-etiketleri/<kitap>.json'da cumle metnine gore saklanir:
-    {"version": 1, "words": {cumle: etiket}, "llm": {cumle: etiket ya da ""}}
+F170: etiketleme okurken yapilmaz (ses motoru ile dil modeli ayni anda bellegi dolduruyordu); kitapligin sag tik
+menusunden butun kitap icin bir kez calisir (tag_book) ve kitabin etiketli surumu APP_DIR/duygu-etiketleri altina
+yazilir: <kitap>.json cumle metnine gore etiketler, <kitap>.txt okunabilir etiketli metin:
+    {"version": 2, "method": "llm"|"words", "created", "sentences", "tagged", "tags": {cumle: etiket}}
+Okuyucu Drama 3 ile okurken etiketli surumu (Ayarlar'da ya da okuyucuda kapatilmadiysa) kullanir.
 """
 from __future__ import annotations
 
 import json
 import re
 import threading
+from datetime import datetime
 from pathlib import Path
 
-from drama3 import EMOTION_TAGS as TAGS   # [laughs], [sighs], [fısıldar], [shouting], [angry]
+from drama3 import EMOTION_TAGS as TAGS, tagged   # [laughs], [sighs], [fısıldar], [shouting], [angry]
 
-MODES = ('off', 'words', 'llm')
+METHODS = ('words', 'llm')
 STORE_DIR = 'duygu-etiketleri'
-VERSION = 1
+VERSION = 2
 
 # Anlatici ipuclari (Turkce kucuk harfle). Yalnizca ucuncu kisi/zarf bicimleri: konusmanin icindeki
 # 'Neden bagirdin?' eslesmesin (ikinci kisi eki -n/-niz dislanir). Sira oncelik sirasidir (fisilti ve
@@ -157,9 +161,10 @@ def parse_llm(raw, sentences, start, stop):
     return result
 
 
-def tag_with_llm(sentences, breaks, ask, cancel=None):
+def tag_with_llm(sentences, breaks, ask, cancel=None, progress=None):
     """Model sunucusuyla etiketleme: `ask(istem) -> yanit metni`. Donen: her cumle icin etiket ('' yok). Konusmalarin
-    yarisindan fazlasini etiketleyen yanit (kucuk model istemi anlamamis: her seye [laughs]) yok sayilir."""
+    yarisindan fazlasini etiketleyen yanit (kucuk model istemi anlamamis: her seye [laughs]) yok sayilir.
+    `progress(islenen_cumle)` her parcadan sonra cagrilir."""
     sentences = [str(s) for s in sentences]
     tags = [''] * len(sentences)
     for start in range(0, len(sentences), LLM_BATCH):
@@ -167,23 +172,70 @@ def tag_with_llm(sentences, breaks, ask, cancel=None):
             break
         stop = min(len(sentences), start + LLM_BATCH)
         speech = sum(is_speech(sentences[i]) for i in range(start, stop))
-        if not speech:
-            continue
-        found = parse_llm(ask(LLM_PROMPT + llm_lines(sentences, breaks, start, stop)), sentences, start, stop)
-        if len(found) > max(LLM_MAX_TAGGED, speech // 2):
-            continue
-        for index, tag in found.items():
-            tags[index] = tag
+        if speech:
+            found = parse_llm(ask(LLM_PROMPT + llm_lines(sentences, breaks, start, stop)), sentences, start, stop)
+            if len(found) <= max(LLM_MAX_TAGGED, speech // 2):
+                for index, tag in found.items():
+                    tags[index] = tag
+        if progress:
+            progress(stop)
     return tags
 
 
-# ---------------------------------------------------------------- kitap basina saklama
+class Cancelled(RuntimeError):
+    """Kullanici etiketlemeyi durdurdu."""
+
+
+def tag_book(sections, ask=None, cancel=None, progress=None):
+    """Butun kitabi etiketler (F170). `sections`: [{'sentences', 'breaks'}] okuyucunun bolmesiyle. `ask` verilirse
+    model sunucusu da sorulur; modelin etiket vermedigi konusmada kelime listesininki kalir (anlaticidaki acik
+    ipucu modelden daha guvenilir). Donen: bolum basina etiket listeleri. `progress(islenen, toplam)`;
+    durdurulursa Cancelled."""
+    total = sum(len(section['sentences']) for section in sections)
+    result, done = [], 0
+    for section in sections:
+        if cancel is not None and cancel.is_set():
+            raise Cancelled('Duygu etiketleme durduruldu.')
+        sentences, breaks = section['sentences'], section.get('breaks') or ()
+        tags = tag_sentences(sentences, breaks)
+        if ask is not None:
+            step = (lambda count, base=done: progress(base + count, total)) if progress else None
+            found = tag_with_llm(sentences, breaks, ask, cancel, step)
+            tags = [llm or words for llm, words in zip(found, tags)]
+        result.append(tags)
+        done += len(sentences)
+        if progress:
+            progress(done, total)
+    if cancel is not None and cancel.is_set():
+        raise Cancelled('Duygu etiketleme durduruldu.')
+    return result
+
+
+# ---------------------------------------------------------------- kitabin etiketli surumu
 def _key(text):
     return ' '.join(str(text).split())
 
 
+def tagged_text(sections, tags):
+    """Okunabilir etiketli metin (<kitap>.txt): bolumler arasi bos satir, paragraf basina bir satir."""
+    blocks = []
+    for section, section_tags in zip(sections, tags):
+        ends = {int(b) for b in section.get('breaks') or ()}
+        lines, line = [], []
+        for i, (text, tag) in enumerate(zip(section['sentences'], section_tags)):
+            line.append(tagged(text, tag) if tag else _key(text))
+            if i in ends:
+                lines.append(' '.join(line))
+                line = []
+        if line:
+            lines.append(' '.join(line))
+        if lines:
+            blocks.append('\n'.join(lines))
+    return '\n\n'.join(blocks) + '\n'
+
+
 class Store:
-    """APP_DIR/duygu-etiketleri/<kitap>.json (bellekte onbellekli)."""
+    """APP_DIR/duygu-etiketleri/<kitap>.json + .txt (bellekte onbellekli)."""
 
     def __init__(self, app_dir):
         self.directory = Path(app_dir) / STORE_DIR
@@ -196,55 +248,58 @@ class Store:
         return self.directory / f'{book}.json'
 
     def load(self, book):
+        """Kitabin etiketli surumu (yoksa None)."""
         with self._lock:
             if book not in self._cache:
                 try:
                     data = json.loads(self._path(book).read_text(encoding='utf-8'))
-                    if data.get('version') != VERSION:
+                    if data.get('version') != VERSION or not isinstance(data.get('tags'), dict):
                         raise ValueError
                 except (OSError, ValueError, AttributeError):
-                    data = {}
-                self._cache[book] = {'version': VERSION, 'words': dict(data.get('words') or {}),
-                                     'llm': dict(data.get('llm') or {})}
+                    data = None
+                self._cache[book] = data
             return self._cache[book]
 
-    def update(self, book, kind, sentences, tags):
-        """`kind` ('words'/'llm') haritasina bu cumlelerin etiketlerini yazar; degistiyse kaydeder. 'words'
-        yalnizca etiketlileri tutar, 'llm' etiketsizleri de ('') tutar (bolum modelle islendi)."""
+    def save(self, book, method, sections, tags):
+        """Butun kitabin etiketlerini yazar (oncekinin yerine). Donen: info()."""
+        table = {}
+        for section, section_tags in zip(sections, tags):
+            for text, tag in zip(section['sentences'], section_tags):
+                if tag and _key(text):
+                    table[_key(text)] = tag
+        data = {'version': VERSION, 'method': method if method in METHODS else 'words',
+                'created': datetime.now().isoformat(timespec='seconds'),
+                'sentences': sum(len(section['sentences']) for section in sections), 'tagged': len(table),
+                'tags': table}
         with self._lock:
-            data = self.load(book)
-            table, changed = data[kind], False
-            for text, tag in zip(sentences, tags):
-                key = _key(text)
-                if not key:
-                    continue
-                if tag or kind == 'llm':
-                    if table.get(key) != tag:
-                        table[key], changed = tag, True
-                elif key in table:
-                    del table[key]
-                    changed = True
-            if changed:
-                path = self._path(book)
-                path.parent.mkdir(parents=True, exist_ok=True)
-                partial = path.with_suffix('.part')
-                partial.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
-                partial.replace(path)
-            return changed
+            path = self._path(book)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            for target, content in ((path, json.dumps(data, ensure_ascii=False, indent=1)),
+                                    (path.with_suffix('.txt'), tagged_text(sections, tags))):
+                partial = target.with_name(target.name + '.part')
+                partial.write_text(content, encoding='utf-8')
+                partial.replace(target)
+            self._cache[book] = data
+        return self.info(book)
 
-    def has_llm(self, book, sentences):
-        table = self.load(book)['llm']
-        return all(_key(s) in table for s in sentences if _key(s))
+    def info(self, book):
+        """{'method', 'created', 'sentences', 'tagged', 'text'} ya da None."""
+        data = self.load(book)
+        if not data:
+            return None
+        return {key: data.get(key) for key in ('method', 'created', 'sentences', 'tagged')} | {
+            'text': str(self._path(book).with_suffix('.txt'))}
 
-    def tag(self, book, text, mode):
-        """Bir cumlenin etiketi: 'words' kipinde kelime listesi; 'llm' kipinde modelin etiketi, model etiket vermediyse
-        kelime listesininki (anlaticidaki acik ipucu modelden daha guvenilir)."""
-        if mode not in ('words', 'llm') or not re.fullmatch(r'[0-9a-f]{8,40}', str(book or '')):
+    def books(self):
+        """Etiketli surumu olan kitaplar."""
+        return sorted(path.stem for path in self.directory.glob('*.json') if self.load(path.stem))
+
+    def tag(self, book, text):
+        """Bir cumlenin etiketi ('' yok)."""
+        if not re.fullmatch(r'[0-9a-f]{8,40}', str(book or '')):
             return ''
-        data, key = self.load(book), _key(text)
-        if mode == 'llm' and data['llm'].get(key):
-            return data['llm'][key]
-        return data['words'].get(key, '')
+        data = self.load(book)
+        return data['tags'].get(_key(text), '') if data else ''
 
     def clear(self, book=None):
         with self._lock:
@@ -252,3 +307,4 @@ class Store:
             targets = [self._path(book)] if book else list(self.directory.glob('*.json'))
             for path in targets:
                 path.unlink(missing_ok=True)
+                path.with_suffix('.txt').unlink(missing_ok=True)

@@ -6,6 +6,7 @@ _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 import json
 from pathlib import Path
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -92,26 +93,157 @@ class LlmTests(unittest.TestCase):
         self.assertEqual(emotion_tags.tag_with_llm(sentences, [], lambda _prompt: everything), [''] * 10)
 
 
+class BookTaggingTests(unittest.TestCase):
+    SECTIONS = [{'sentences': ['— Çok komiksin, dedi gülerek.', '— Peki.'], 'breaks': [0, 1]},
+                {'sentences': ['Adam öfkeyle vurdu.', '— Yeter!', '— Sus.'], 'breaks': [1, 2]}]
+
+    def test_words_only(self):
+        seen = []
+        tags = emotion_tags.tag_book(self.SECTIONS, progress=lambda done, total: seen.append((done, total)))
+        self.assertEqual(tags, [['[laughs]', ''], ['', '[angry]', '']])
+        self.assertEqual(seen[-1], (5, 5))
+
+    def test_model_tag_wins_and_words_fill_the_rest(self):
+        def ask(prompt):
+            return json.dumps({'1': '[sighs]'} if 'Peki' in prompt else {'2': '[fısıldar]'})
+        tags = emotion_tags.tag_book(self.SECTIONS, ask)
+        self.assertEqual(tags, [['[laughs]', '[sighs]'], ['', '[angry]', '[fısıldar]']])
+
+    def test_cancel(self):
+        cancel = threading.Event()
+        cancel.set()
+        with self.assertRaises(emotion_tags.Cancelled):
+            emotion_tags.tag_book(self.SECTIONS, cancel=cancel)
+
+
 class StoreTests(unittest.TestCase):
-    def test_round_trip_and_modes(self):
+    def test_save_and_lookup(self):
+        sections = BookTaggingTests.SECTIONS
         with tempfile.TemporaryDirectory() as folder:
             store = emotion_tags.Store(folder)
-            store.update(BOOK, 'words', ['— Bir.', '— İki.'], ['[laughs]', ''])
-            store.update(BOOK, 'llm', ['— Bir.', '— İki.'], ['', '[angry]'])
+            self.assertIsNone(store.info(BOOK))
+            self.assertEqual(store.tag(BOOK, '— Yeter!'), '')
+            info = store.save(BOOK, 'llm', sections, [['[laughs]', ''], ['', '[angry]', '']])
+            self.assertEqual((info['method'], info['sentences'], info['tagged']), ('llm', 5, 2))
             fresh = emotion_tags.Store(folder)
-            self.assertEqual(fresh.tag(BOOK, '— Bir.', 'words'), '[laughs]')
-            self.assertEqual(fresh.tag(BOOK, '— Bir.', 'llm'), '[laughs]')   # model vermedi: kelime listesi
-            self.assertEqual(fresh.tag(BOOK, '— İki.', 'llm'), '[angry]')
-            self.assertEqual(fresh.tag(BOOK, '— Bir.', 'off'), '')
-            self.assertTrue(fresh.has_llm(BOOK, ['— Bir.']))
-            self.assertFalse(fresh.has_llm(BOOK, ['— Üç.']))
+            self.assertEqual(fresh.tag(BOOK, ' —  Yeter! '), '[angry]')
+            self.assertEqual(fresh.tag(BOOK, '— Sus.'), '')
+            self.assertEqual(fresh.books(), [BOOK])
+            text = Path(info['text']).read_text(encoding='utf-8')
+            self.assertEqual(text, '[laughs] — Çok komiksin, dedi gülerek.\n— Peki.\n\n'
+                                   'Adam öfkeyle vurdu. [angry] — Yeter!\n— Sus.\n')
             fresh.clear(BOOK)
-            self.assertEqual(emotion_tags.Store(folder).tag(BOOK, '— Bir.', 'words'), '')
+            self.assertEqual(emotion_tags.Store(folder).tag(BOOK, '— Yeter!'), '')
+            self.assertFalse(Path(info['text']).exists())
+
+    def test_old_realtime_file_is_ignored(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / emotion_tags.STORE_DIR / f'{BOOK}.json'
+            path.parent.mkdir()
+            path.write_text(json.dumps({'version': 1, 'words': {'— Bir.': '[laughs]'}, 'llm': {}}), encoding='utf-8')
+            store = emotion_tags.Store(folder)
+            self.assertEqual(store.tag(BOOK, '— Bir.'), '')
+            self.assertEqual(store.books(), [])
 
     def test_bad_book_id(self):
         with tempfile.TemporaryDirectory() as folder:
             with self.assertRaises(ValueError):
-                emotion_tags.Store(folder).update('../x', 'words', ['a'], ['[laughs]'])
+                emotion_tags.Store(folder).save('../x', 'words', [{'sentences': ['a']}], [['[laughs]']])
+
+
+class BridgeTests(unittest.TestCase):
+    """F170: kitabin etiketli surumu kitapliktan arka planda olusturulur; okurken etiketleme yapilmaz."""
+
+    def setUp(self):
+        import bridge_tts
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        patcher = patch.object(bridge_tts, 'APP_DIR', Path(self.temp.name))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        class FakeBridge(bridge_tts.TtsMixin):
+            def __init__(self):
+                self.prefs, self.events, self.logs = {}, [], []
+
+            def ui_prefs(self):
+                return {'tts': self.prefs}
+
+            def _emit(self, name, data):
+                self.events.append((name, data))
+
+            def _log(self, message):
+                self.logs.append(message)
+
+        self.bridge = FakeBridge()
+
+    def finish(self):
+        self.bridge._emotion_job.join(10)
+        return self.bridge.events[-1][1]
+
+    def test_words_method_saves_the_book_and_tags_sentences(self):
+        result = self.bridge.tts_emotions_create(BOOK, BookTaggingTests.SECTIONS, 'words', 'Kitap')
+        self.assertEqual(result, {'started': True, 'total': 5})
+        done = self.finish()
+        self.assertTrue(done['finished'])
+        self.assertEqual(done['info']['tagged'], 2)
+        self.assertEqual(self.bridge.tts_emotions_books(), [BOOK])
+        self.assertEqual(self.bridge._emotion_tag(BOOK, '— Yeter!'), '[angry]')
+        self.bridge.prefs['emotion_tags'] = 'off'
+        self.assertEqual(self.bridge._emotion_tag(BOOK, '— Yeter!'), '')
+        self.bridge.prefs['emotion_tags'] = 'llm'     # eski deger: acik sayilir
+        self.assertEqual(self.bridge._emotion_tag(BOOK, '— Yeter!'), '[angry]')
+        self.assertTrue(self.bridge.tts_emotions_clear(BOOK))
+        self.assertEqual(self.bridge._emotion_tag(BOOK, '— Yeter!'), '')
+
+    def test_model_method_loads_and_releases_the_model(self):
+        class FakeClient:
+            def __init__(self, cfg, log=None):
+                self.cfg = {'model': 'sohbet'}
+
+            def chat(self, messages, temperature=None, max_tokens=None):
+                return '{"1": "[sighs]"}' if 'Peki' in messages[0]['content'] else '{}'
+
+        with patch('app_core.Client', FakeClient), patch('app_core.load_config', return_value={}), \
+                patch('app_core.keep_loaded', return_value=['sohbet:1']) as keep, \
+                patch('app_core.unload_models') as unload:
+            self.bridge.tts_emotions_create(BOOK, BookTaggingTests.SECTIONS, 'llm')
+            done = self.finish()
+        self.assertEqual(done['info']['method'], 'llm')
+        self.assertEqual(keep.call_args[0][1], ['sohbet'])
+        self.assertEqual(unload.call_args[0][1], ['sohbet:1'])
+        self.assertEqual(self.bridge._emotion_tag(BOOK, '— Peki.'), '[sighs]')
+
+    def test_model_error_is_reported(self):
+        with patch('app_core.Client', side_effect=RuntimeError('Model sunucusuna bağlanılamadı')), \
+                patch('app_core.load_config', return_value={}):
+            self.bridge.tts_emotions_create(BOOK, BookTaggingTests.SECTIONS, 'llm')
+            done = self.finish()
+        self.assertIn('bağlanılamadı', done['error'])
+        self.assertEqual(self.bridge.tts_emotions_books(), [])
+
+    def test_refusals(self):
+        self.assertIn('error', self.bridge.tts_emotions_create('../x', BookTaggingTests.SECTIONS, 'words'))
+        self.assertIn('error', self.bridge.tts_emotions_create(BOOK, [{'sentences': []}], 'words'))
+        release = threading.Event()
+        self.bridge._prepare_job = threading.Thread(target=release.wait)
+        self.bridge._prepare_job.start()
+        try:
+            self.assertIn('error', self.bridge.tts_emotions_create(BOOK, BookTaggingTests.SECTIONS, 'words'))
+        finally:
+            release.set()
+            self.bridge._prepare_job.join()
+
+    def test_engine_is_not_loaded_while_tagging(self):
+        release = threading.Event()
+        self.bridge._emotion_job = threading.Thread(target=release.wait)
+        self.bridge._emotion_job.start()
+        try:
+            self.assertEqual(self.bridge.tts_load('tr')['state'], 'error')
+            self.assertIn('error', self.bridge.tts_emotions_create(BOOK, BookTaggingTests.SECTIONS, 'words'))
+        finally:
+            release.set()
+            self.bridge._emotion_job.join()
 
 
 class Drama3TextTests(unittest.TestCase):

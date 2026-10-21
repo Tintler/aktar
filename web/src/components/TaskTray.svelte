@@ -60,6 +60,12 @@
       list.push({ id: 'audiobook', icon: 'headphones', title: 'Sesli kitap kaydediliyor', detail: [a.title, a.chapters ? `Bölüm ${a.chapter} / ${a.chapters}` : 'bölümler okunuyor'].filter(Boolean).join(' · '),
         percent: a.total ? pct(a.done, a.total) : null, count: a.total ? `${a.done} / ${a.total} cümle` : '', go: () => go('reading') });
     }
+    const e = app.emotionJob;
+    if (e) {
+      list.push({ id: 'emotions', icon: 'sparkles', title: 'Duygu etiketleri oluşturuluyor', detail: [e.title, e.reading ? 'bölümler okunuyor' : ''].filter(Boolean).join(' · '),
+        percent: e.total ? pct(e.done, e.total) : null, count: e.total ? `${e.done} / ${e.total} cümle` : '',
+        go: () => go('reading') });
+    }
     return list;
   });
 

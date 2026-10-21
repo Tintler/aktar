@@ -1,8 +1,9 @@
 <script>
   import Icon from '../lib/Icon.svelte';
   import BookCover from '../components/BookCover.svelte';
-  import { app, act, openPdfImport, toast } from '../lib/state.svelte.js';
-  import { confirm } from '../lib/confirm.svelte.js';
+  import { app, act, openPdfImport, toast, refreshEmotionBooks } from '../lib/state.svelte.js';
+  import { confirm, choose } from '../lib/confirm.svelte.js';
+  import { bookSections } from '../lib/emotions.js';
 
   let { onopen } = $props();
   let menu = $state(null);
@@ -27,12 +28,61 @@
     if (books) { app.shelf = books; toast('Kitap kaldırıldı.'); }
   }
 
+  // F170: Drama 3 duygu etiketleri butun kitap icin bir kez olusturulur; okuyucu Drama 3 ile okurken bu etiketli
+  // surumu kullanir. Kitaplikta tek kitap kalir, etiketler APP_DIR/duygu-etiketleri altinda saklanir.
+  const tagged = (book) => app.emotionBooks.includes(book.id);
+
+  async function createEmotions(book) {
+    menu = null;
+    if (app.emotionJob) { toast('Başka bir kitabın duygu etiketleri oluşturuluyor.'); return; }
+    if (app.ttsPrepare || app.ttsAudiobook) { toast('Ses hazırlanırken ya da sesli kitap kaydedilirken duygu etiketi oluşturulamaz.'); return; }
+    const method = await choose({
+      title: tagged(book) ? 'Duygu etiketlerini yeniden oluştur' : 'Duygu etiketleri oluştur',
+      message: `"${book.title}" kitabının diyaloglarına gülme, iç çekme, fısıltı, bağırma ve öfke etiketleri eklenir ` +
+        "(Fish Audio Drama 3 ile okurken kullanılır). Model kipi Ayarlar → Modeller'deki sohbet modelini kullanır; " +
+        'bu sırada ses motoru durdurulur, bitince model boşaltılır.',
+      options: [
+        { value: 'llm', label: 'Model sunucusuyla (bağlamdan; anlatıcı ipuçları da geçerli)' },
+        { value: 'words', label: 'Yalnızca kelime listesiyle ("gülerek", "fısıldadı" gibi ipuçları; hızlı)' },
+      ],
+      ok: 'Oluştur',
+    });
+    if (!method) return;
+    app.emotionJob = { book: book.id, title: book.title, done: 0, total: 0, reading: true };
+    let sections;
+    try {
+      sections = await bookSections(book.id, app.ttsPrefs.split ?? {});
+    } catch (error) {
+      app.emotionJob = null;
+      toast(String(error?.message ?? error), 'error');
+      return;
+    }
+    const result = await act('tts_emotions_create', book.id, sections, method, book.title);
+    if (!result?.started) app.emotionJob = null;
+    else if (app.emotionJob?.reading) app.emotionJob = { book: book.id, title: book.title, done: 0, total: result.total };
+  }
+
+  async function removeEmotions(book) {
+    menu = null;
+    const yes = await confirm({ title: 'Duygu etiketlerini sil', message: `"${book.title}" kitabının duygu etiketleri silinsin mi?`,
+      ok: 'Sil', cancel: 'Vazgeç', danger: true });
+    if (!yes) return;
+    if (await act('tts_emotions_clear', book.id)) { await refreshEmotionBooks(); toast('Duygu etiketleri silindi.'); }
+  }
+
+  async function showEmotions(book) {
+    menu = null;
+    const result = await act('tts_emotions_info', book.id, book.language || 'tr');
+    if (result?.info?.text) act('reveal', result.info.text);
+  }
+
   function open(book) {
     if (!book.exists) { toast('Kitap dosyası bulunamadı: ' + book.path, 'error'); return; }
     onopen(book);
   }
 
-  const progressLabel = (b) => (!b.exists ? 'Dosya bulunamadı' : b.percent >= 100 ? 'Bitti' : b.percent ? `%${Math.round(b.percent)} okundu` : 'Yeni');
+  const progressLabel = (b) => (!b.exists ? 'Dosya bulunamadı' : b.percent >= 100 ? 'Bitti' : b.percent ? `%${Math.round(b.percent)} okundu` : 'Yeni')
+    + (tagged(b) ? ' · duygu etiketli' : '');
 </script>
 
 <svelte:window onclick={() => (menu = null)} />
@@ -82,6 +132,16 @@
 {#if menu}
   <div class="menu" style:left="{menu.x}px" style:top="{menu.y}px">
     <button onclick={() => open(menu.book)}><Icon name="book" size={15} />Aç</button>
+    {#if app.emotionJob?.book === menu.book.id}
+      <button onclick={() => { menu = null; act('tts_emotions_cancel'); }}><Icon name="stop" size={15} />Duygu etiketlemeyi durdur</button>
+    {:else}
+      <button disabled={!menu.book.exists || Boolean(app.emotionJob)} onclick={() => createEmotions(menu.book)}>
+        <Icon name="sparkles" size={15} />{tagged(menu.book) ? 'Duygu etiketlerini yeniden oluştur' : 'Duygu etiketleri oluştur'}</button>
+    {/if}
+    {#if tagged(menu.book)}
+      <button onclick={() => showEmotions(menu.book)}><Icon name="fileText" size={15} />Etiketli metni göster</button>
+      <button onclick={() => removeEmotions(menu.book)}><Icon name="trash" size={15} />Duygu etiketlerini sil</button>
+    {/if}
     <button onclick={() => remove(menu.book)}><Icon name="trash" size={15} />Kitaplıktan kaldır</button>
   </div>
 {/if}
@@ -117,5 +177,6 @@
 
   .menu { position: fixed; z-index: 40; background: var(--overlay); border: 1px solid var(--outline); border-radius: 10px; padding: 4px; box-shadow: 0 8px 28px var(--shadow); }
   .menu button { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 7px; font-size: 13px; width: 100%; }
-  .menu button:hover { background: var(--surface-hover); }
+  .menu button:hover:not(:disabled) { background: var(--surface-hover); }
+  .menu button:disabled { opacity: .5; }
 </style>

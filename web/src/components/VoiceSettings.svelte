@@ -239,14 +239,14 @@
     {/each}
     {#if engine.emotion_tags}
       <div class="fr sub">
-        <div class="l">Duygu etiketleri (deneysel)<small>Kitap okurken diyaloglara gülme, iç çekme, fısıltı, bağırma ve öfke
-          etiketi eklenir ("gülerek", "fısıldadı", "bağırdı" gibi anlatıcı ipuçlarından ya da model sunucusuyla bağlamdan).
-          Okuyucudaki metin değişmez; yalnızca {engine.name}'e giden metne eklenir. Model kipi Ayarlar → Modeller'deki sohbet modelini kullanır; açık anlatıcı ipuçları her iki kipte de geçerlidir.</small></div>
-        <select class="field w" value={app.ttsPrefs.emotion_tags ?? 'off'} aria-label="Duygu etiketleri"
+        <div class="l">Duygu etiketleri (deneysel)<small>Kitaplıkta kitaba sağ tıklayıp "Duygu etiketleri oluştur" deyince kitabın
+          diyaloglarına gülme, iç çekme, fısıltı, bağırma ve öfke etiketleri bir kez eklenir (anlatıcı ipuçlarından ya da model
+          sunucusuyla bağlamdan). Okurken model çalışmaz. Okuyucudaki metin değişmez; etiketli sürüm yalnızca {engine.name}'e
+          giden metne eklenir. Okuyucudaki "Duygulu" düğmesiyle de açılıp kapanır.</small></div>
+        <select class="field w" value={app.ttsPrefs.emotion_tags === 'off' ? 'off' : 'on'} aria-label="Duygu etiketleri"
           onchange={(e) => { app.ttsPrefs.emotion_tags = e.currentTarget.value; saveTtsPrefs(); }}>
+          <option value="on">Etiketli sürüm varsa kullan</option>
           <option value="off">Kapalı</option>
-          <option value="words">Kelime listesiyle</option>
-          <option value="llm">Model sunucusuyla</option>
         </select>
       </div>
     {/if}

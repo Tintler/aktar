@@ -67,7 +67,6 @@
     ({ sentences, breaks } = segment(article, splitOptions()));
     showMatches();
     setSentences(sentences, { book: book.id, language: book.language || 'tr', breaks });
-    await tagEmotions(sentences, breaks);
     refreshCached();
     savePosition(true);
   }
@@ -76,18 +75,23 @@
 
   const splitOptions = () => ({ ...QUOTE_DEFAULTS, ...(app.ttsPrefs.split ?? {}) });
 
-  // F168: Drama 3 duygu etiketleri (deneysel): bolumun diyaloglari etiketlenip kitabin yanina saklanir; etiket
-  // yalnizca sunucuya giden metne eklenir (tts_say arka ucta bulur), okuyucudaki metin degismez.
-  async function tagEmotions(list, ends) {
-    if ((app.ttsPrefs.emotion_tags ?? 'off') === 'off' || !list.length) return;
-    await call('tts_emotions', book.id, list, [...ends]);
+  // F170: Drama 3 duygu etiketleri okurken cikarilmaz; kitapliktan olusturulan etiketli surum varsa ve kitabin motoru
+  // etiket destekliyorsa (Drama 3) okuyucuda acilip kapatilabilir. Etiket yalnizca sunucuya giden metne eklenir
+  // (tts_say arka ucta bulur), okuyucudaki metin degismez.
+  let emotions = $state(null);   // {info, engine, enabled}
+  async function refreshEmotions() {
+    const result = book ? await call('tts_emotions_info', book.id, book.language || 'tr').catch(() => null) : null;
+    emotions = result && !result.error ? result : null;
   }
-
-  // Ayar degisince acik bolum yeniden etiketlenir (hazir cumle sayisi etikete gore degisir).
   $effect(() => {
-    app.ttsPrefs.emotion_tags;
-    untrack(() => { if (book && sentences.length) tagEmotions(sentences, breaks).then(refreshCached); });
+    book?.id; app.emotionBooks; app.ttsPrefs.voices; app.ttsPrefs.emotion_tags;
+    untrack(refreshEmotions);
   });
+  async function toggleEmotions() {
+    app.ttsPrefs.emotion_tags = emotions?.enabled ? 'off' : 'on';
+    await saveTtsPrefs();
+    await voiceChanged();   // hazir cumle sayisi etikete gore degisir; okuyorsa kaldigi cumleden surer
+  }
 
   $effect(() => setPauses(resolvePauses(app.ttsPrefs.pauses)));
   function highlight(index) {
@@ -179,6 +183,7 @@
   async function voiceChanged() {
     const index = player.active ? player.index : null;
     if (player.active) stop();
+    refreshEmotions();
     await refreshCached();
     if (index === null || !(await ensureEngine())) return;
     setSpeed(app.ttsPrefs.speed);
@@ -207,7 +212,6 @@
         const holder = document.createElement('div');
         holder.innerHTML = result.html;
         const cut = segment(holder, splitOptions());
-        await tagEmotions(cut.sentences, cut.breaks);
         list.push(...cut.sentences);
       }
     }
@@ -601,6 +605,11 @@
       </div>
       <div class="right">
         <VoicePicker onchange={voiceChanged} />
+        {#if emotions?.info && emotions.engine}
+          <button class="chip" class:acc={emotions.enabled} onclick={toggleEmotions}
+            title={`Duygu etiketli okuma ${emotions.enabled ? 'açık' : 'kapalı'}: ${emotions.info.tagged} konuşma etiketli (gülme, iç çekme, fısıltı, bağırma, öfke). Tıklayınca ${emotions.enabled ? 'kapanır' : 'açılır'}.`}>
+            <Icon name="sparkles" size={14} />Duygulu</button>
+        {/if}
         <button class="chip acc" title="Okuma hızı" onclick={cycleSpeed}>{app.ttsPrefs.speed.toLocaleString('tr-TR')}×</button>
         {#if app.ttsPrepare?.book === book.id}
           <button class="chip acc" title="Hazırlamayı durdur" onclick={cancelPrepare}>
