@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.11.1 — 2026-10-21
+
+### Düzeltme
+- **Drama 3 TR Linux'ta yüklendikten hemen sonra kapanıyordu (F176):** Sunucuyu "Aktar kapanınca kapan" diye işaretleyen Linux yöntemi, süreci başlatan iş parçacığına bağlıydı; yükleme bitince sunucu da kapanıyordu. Artık sunucu, Aktar'ın açık tuttuğu boru kapanınca kendini kapatır: Aktar kapanır ya da çökerse sunucu her platformda arkada kalmaz.
+
 ## 2.11.0 — 2026-10-21
 
 ### Yeni

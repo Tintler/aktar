@@ -1,10 +1,10 @@
-"""Drama 3 TR ses motoru (F173): kasparovabi/drama-3-tr (tam Drama 3 okuyucu + 32 uzmanli Turkce konusmaci).
+"""Drama 3 TR ses motoru (F176): kasparovabi/drama-3-tr (tam Drama 3 okuyucu + 32 uzmanli Turkce konusmaci).
 
 Model Aktar klasorunde degil, kullanicinin sectigi klasorde durur (ui.json tts.drama3_tr_dir; ~45 GB, hizli
 NVMe onerilir). Klasor reponun kendisidir: engine.py, fish-speech/, models/drama-3/ (orijinal fishaudio/drama-3
 checkpoint'i ve codec), speaker.safetensors ve Python ortami (.venv). Aktar, engines/drama3-tr/server.py'yi o
-ortamin Python'uyla alt surec olarak baslatir; surec ses motoru durunca ya da Aktar kapaninca (Windows'ta is
-nesnesi, Linux'ta PR_SET_PDEATHSIG ile Aktar cokse de) kapanir. Klon kaydi istek basina gider, sunucu yeniden
+ortamin Python'uyla alt surec olarak baslatir; surec ses motoru durunca ya da Aktar kapaninca kapanir; Aktar
+cokse de: Windows'ta is nesnesi, her platformda da sunucu betigi stdin borusu kapaninca kendini kapatir. Klon kaydi istek basina gider, sunucu yeniden
 baslamaz (dublajda konusmaci basina ses).
 
 Metin bolme, duygu etiketi, klon kaydi hazirlama ve atlama denetimleri drama3 ile ortaktir.
@@ -121,16 +121,6 @@ def _bind_to_parent(process):
     return job
 
 
-def _die_with_parent():
-    """Linux: Aktar kapaninca alt surece SIGTERM (preexec_fn)."""
-    try:
-        import ctypes
-        import signal
-        ctypes.CDLL('libc.so.6').prctl(1, signal.SIGTERM)   # PR_SET_PDEATHSIG
-    except Exception:
-        pass
-
-
 def free_port():
     with socket.socket() as probe:
         probe.bind(('127.0.0.1', 0))
@@ -163,9 +153,10 @@ class Server:
         env = dict(os.environ, PYTHONUNBUFFERED='1', PYTHONIOENCODING='utf-8')
         command = [str(self.python), '-u', str(self.script), '--folder', str(self.folder), '--port', str(self.port),
                    '--speaker', str(self.folder / 'speaker.safetensors')]
-        extra = ({'creationflags': getattr(subprocess, 'CREATE_NO_WINDOW', 0)} if os.name == 'nt'
-                 else {'preexec_fn': _die_with_parent})
-        self.process = subprocess.Popen(command, cwd=str(self.folder), env=env, stdin=subprocess.DEVNULL,
+        # stdin acik kalir: Aktar kapanir ya da cokerse boru kapanir, sunucu betigi kendini kapatir (F176: Linux'ta
+        # PR_SET_PDEATHSIG sureci baslatan is parcacigina bagli; yukleme is parcacigi bitince sunucu kapaniyordu)
+        extra = {'creationflags': getattr(subprocess, 'CREATE_NO_WINDOW', 0)} if os.name == 'nt' else {}
+        self.process = subprocess.Popen(command, cwd=str(self.folder), env=env, stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **extra)
         try:
             self._job = _bind_to_parent(self.process)
@@ -215,9 +206,9 @@ class Server:
                     process.wait(STOP_TIMEOUT)
                 except subprocess.TimeoutExpired:
                     pass
-        if process.stdout:
+        for pipe in (process.stdin, process.stdout):
             try:
-                process.stdout.close()
+                pipe.close()
             except OSError:
                 pass
         if self._job is not None and os.name == 'nt':

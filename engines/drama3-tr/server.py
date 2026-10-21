@@ -1,4 +1,4 @@
-"""Aktar'in Drama 3 TR sunucusu (F173): kasparovabi/drama-3-tr motorunu istek basina klon kaydiyla calistirir.
+"""Aktar'in Drama 3 TR sunucusu (F176): kasparovabi/drama-3-tr motorunu istek basina klon kaydiyla calistirir.
 
 Aktar bu dosyayi kullanicinin sectigi drama-3-tr klasorundeki Python ortamiyla baslatir ve pencere kapaninca
 durdurur; Aktar disinda calistirilmasi gerekmez. Reponun kendi server.py'si klon kaydini acilista sabitler;
@@ -31,6 +31,20 @@ def stage(text):
     print(f'AKTAR STAGE {text}', flush=True)
 
 
+def exit_with_aktar():
+    """Aktar stdin borusunu acik tutar; Aktar kapanir ya da cokerse boru kapanir ve sunucu da kapanir
+    (uygulama kapaliyken arka planda hicbir sey calismaz)."""
+    def watch():
+        try:
+            while sys.stdin.buffer.read(1):
+                pass
+        except (OSError, ValueError, AttributeError):
+            pass
+        os._exit(0)
+    if sys.stdin is not None:
+        threading.Thread(target=watch, name='aktar-watch', daemon=True).start()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--folder', required=True)
@@ -39,6 +53,7 @@ def main():
     parser.add_argument('--slots', type=int, default=300)
     parser.add_argument('--ram', action='store_true', help='uzmanlari diskten okumak yerine bellekte tut (40 GB+)')
     args = parser.parse_args()
+    exit_with_aktar()
 
     folder = os.path.abspath(args.folder)
     os.chdir(folder)

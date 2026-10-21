@@ -132,6 +132,19 @@ class ServerTests(unittest.TestCase):
         self.assertIsNotNone(process.poll())
         self.assertFalse(server.alive)
 
+    def test_server_script_exits_when_aktar_pipe_closes(self):
+        # gercek sunucu betigi: Aktar kapanir ya da cokerse stdin borusu kapanir, sunucu kendini kapatir
+        import subprocess
+        code = ('import runpy, sys, time; sys.argv = ["server.py"]; '
+                f'ns = runpy.run_path({str(REPO / "engines" / "drama3-tr" / "server.py")!r}, run_name="aktar_test"); '
+                'ns["exit_with_aktar"](); time.sleep(30)')
+        process = subprocess.Popen([sys.executable, '-c', code], stdin=subprocess.PIPE)
+        self.addCleanup(lambda: process.poll() is None and process.kill())
+        time.sleep(0.5)
+        self.assertIsNone(process.poll())
+        process.stdin.close()
+        self.assertEqual(process.wait(10), 0)
+
     def test_crash_before_ready_shows_output(self):
         (self.folder / 'crash').write_text('', encoding='utf-8')
         server = drama3_tr.Server(self.folder, sys.executable, self.script)
