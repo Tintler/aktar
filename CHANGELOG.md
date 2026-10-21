@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.11.3 — 2026-10-21
+
+### Düzeltme
+- **Drama 3 TR Windows'ta "torch yükleniyor"da takılıyordu (F176):** 2.11.1'de sunucuya Aktar kapanınca kapanması için stdin borusunu izleyen bir iş parçacığı eklenmişti; Windows'ta bu okuma beklerken stdin'e bakan başka çağrılar (torch'un yüklenmesi) donuyordu. Windows'ta boru kullanılmaz (Aktar çökerse sunucuyu iş nesnesi kapatır); boru izleme yalnızca Linux'ta.
+
 ## 2.11.2 — 2026-10-21
 
 ### Düzeltme

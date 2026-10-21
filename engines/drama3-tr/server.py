@@ -32,8 +32,12 @@ def stage(text):
 
 
 def exit_with_aktar():
-    """Aktar stdin borusunu acik tutar; Aktar kapanir ya da cokerse boru kapanir ve sunucu da kapanir
-    (uygulama kapaliyken arka planda hicbir sey calismaz)."""
+    """Linux: Aktar stdin borusunu acik tutar; Aktar kapanir ya da cokerse boru kapanir ve sunucu da kapanir
+    (uygulama kapaliyken arka planda hicbir sey calismaz). Windows'ta yapilmaz: stdin'i okuyan bir is parcacigi
+    stdin'e bakan diger cagrilari (torch import'u) kilitliyor; orada Aktar sureci is nesnesine koyar."""
+    if os.name == 'nt':
+        return
+
     def watch():
         try:
             while sys.stdin.buffer.read(1):

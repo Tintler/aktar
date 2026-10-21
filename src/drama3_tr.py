@@ -191,10 +191,14 @@ class Server:
         env = child_env()
         command = [str(self.python), '-u', str(self.script), '--folder', str(self.folder), '--port', str(self.port),
                    '--speaker', str(self.folder / 'speaker.safetensors')]
-        # stdin acik kalir: Aktar kapanir ya da cokerse boru kapanir, sunucu betigi kendini kapatir (F176: Linux'ta
-        # PR_SET_PDEATHSIG sureci baslatan is parcacigina bagli; yukleme is parcacigi bitince sunucu kapaniyordu)
-        extra = {'creationflags': getattr(subprocess, 'CREATE_NO_WINDOW', 0)} if os.name == 'nt' else {}
-        self.process = _spawn(command, cwd=str(self.folder), env=env, stdin=subprocess.PIPE,
+        # Aktar cokerse sunucu arkada kalmasin. Windows: is nesnesi (_bind_to_parent); stdin DEVNULL, cunku stdin
+        # borusunu okuyan bir is parcacigi torch import'unu kilitliyordu (stdin'e bakan cagri okuma bitene kadar
+        # bekliyor). Linux: stdin acik kalir, Aktar kapanir ya da cokerse boru kapanir, sunucu betigi kendini
+        # kapatir (PR_SET_PDEATHSIG sureci baslatan is parcacigina bagli; yukleme bitince sunucu kapaniyordu).
+        windows = os.name == 'nt'
+        extra = {'creationflags': getattr(subprocess, 'CREATE_NO_WINDOW', 0)} if windows else {}
+        self.process = _spawn(command, cwd=str(self.folder), env=env,
+                              stdin=subprocess.DEVNULL if windows else subprocess.PIPE,
                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **extra)
         try:
             self._job = _bind_to_parent(self.process)
@@ -244,7 +248,7 @@ class Server:
                     process.wait(STOP_TIMEOUT)
                 except subprocess.TimeoutExpired:
                     pass
-        for pipe in (process.stdin, process.stdout):
+        for pipe in filter(None, (process.stdin, process.stdout)):
             try:
                 pipe.close()
             except OSError:

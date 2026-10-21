@@ -121,6 +121,7 @@ class ServerTests(unittest.TestCase):
         server.wait_ready(timeout=30, on_stage=stages.append)
         if os.name == 'nt':
             self.assertIsNotNone(server._job)    # Aktar cokse de surec is nesnesiyle kapanir
+            self.assertIsNone(server.process.stdin)   # stdin borusu yok: okuyan is parcacigi torch'u kilitliyordu
         data = drama3_tr.speech(server.url, 'Merhaba.', {'key': 'k', 'path': 'p.wav', 'text': 'Selam.'},
                                 {'cfg': 4.0, 'temperature': 1.0})
         self.assertTrue(data.startswith(b'RIFF'))
@@ -132,6 +133,7 @@ class ServerTests(unittest.TestCase):
         self.assertIsNotNone(process.poll())
         self.assertFalse(server.alive)
 
+    @unittest.skipIf(os.name == 'nt', 'Windows: is nesnesi; stdin okuyan is parcacigi torch import unu kilitliyordu')
     def test_server_script_exits_when_aktar_pipe_closes(self):
         # gercek sunucu betigi: Aktar kapanir ya da cokerse stdin borusu kapanir, sunucu kendini kapatir
         import subprocess
