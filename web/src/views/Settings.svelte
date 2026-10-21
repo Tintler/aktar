@@ -3,6 +3,8 @@
   import Toggle from '../components/Toggle.svelte';
   import TemplateEditor from '../components/TemplateEditor.svelte';
   import VoiceSettings from '../components/VoiceSettings.svelte';
+  import FoldHead from '../components/FoldHead.svelte';
+  import { isOpen } from '../lib/folds.js';
   import { app, act, savePref, setTheme, reloadThemes, toast } from '../lib/state.svelte.js';
   import { resolveTheme } from '../lib/theme.js';
   import { call, on } from '../lib/api.js';
@@ -453,7 +455,8 @@
       <div class="cat-body" data-cat="voice" hidden={!searching && tab !== 'voice'}>
         {#if searching}<div class="cat-label">{CATS.find((c) => c.id === 'voice').label}</div>{/if}
           <section>
-            <h2>Konuşmadan metin (Whisper)</h2>
+            <FoldHead key="whisper" title="Konuşmadan metin (Whisper)" open={isOpen('whisper') || searching} />
+            {#if isOpen('whisper') || searching}
             <div class="fr">
               <div class="l">Whisper modeli<small>İlk kullanımda models/whisper altına indirilir (large-v3-turbo ~1,6 GB).</small></div>
               <select class="field n" bind:value={cfg.whisper_model}>
@@ -481,9 +484,10 @@
                 <button class="btn sm" onclick={() => browse('whisper_cuda_dir', true)}>Gözat…</button>
               </div>
             </div>
+            {/if}
           </section>
 
-          <VoiceSettings />
+          <VoiceSettings {searching} />
       </div>
 
       <div class="cat-body" data-cat="video" hidden={!searching && tab !== 'video'}>

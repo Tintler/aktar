@@ -137,6 +137,8 @@ class DubProjectTests(unittest.TestCase):
         self.assertIsNone(dub_project.clean_line({'start': 1, 'end': 2, 'text': ' '}, 1))
         ducks = dub_project.clean_ducks([{'start': 5, 'end': 6, 'level': 2}, {'start': 1, 'end': 1.01}])
         self.assertEqual(ducks, [{'start': 5.0, 'end': 6.0, 'level': 1.0}])
+        # F179: elle tum araliklar silinince kaydirici etkisiz kaliyordu; bos liste otomatik kisma demektir
+        self.assertIsNone(dub_project.clean_ducks([]))
 
     def test_duck_commands_use_span_level(self):
         text = dub.duck_commands([(2.0, 4.0, 0.0), (6.0, 7.0)], 0.5, fade=0.5, steps=1)

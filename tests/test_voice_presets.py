@@ -67,6 +67,13 @@ class VoicePresetTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             voice_presets.remove(self.app, saved['id'])
 
+    def test_reorder(self):
+        # F179: kullanicinin siralamasi presets.json'a yazilir; listede olmayan ses sonda kalir
+        ids = [voice_presets.save(self.app, {'name': name, 'voice': 'ema-lightning/default'}, VOICES)['id']
+               for name in ('A', 'B', 'C')]
+        voice_presets.reorder(self.app, [ids[2], ids[0], 'bilinmeyen'])
+        self.assertEqual([item['name'] for item in voice_presets.list_presets(self.app)], ['C', 'A', 'B'])
+
     def test_validation(self):
         for values, part in (({'name': '', 'voice': 'voxcpm/design'}, 'ad'),
                              ({'name': 'X', 'voice': 'yok/ses'}, 'bulunamadı'),

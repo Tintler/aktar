@@ -54,7 +54,11 @@ def load(video):
         data = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return None
-    return data if isinstance(data, dict) and data.get('version') == VERSION else None
+    if not isinstance(data, dict) or data.get('version') != VERSION:
+        return None
+    if data.get('ducks') is not None:
+        data['ducks'] = clean_ducks(data['ducks'])   # eski kayitlarda bos liste kalmis olabilir
+    return data
 
 
 def _write(video, project):
@@ -105,7 +109,7 @@ def clean_ducks(ducks):
         level = _number(item.get('level'), None, 0.0, 1.0)
         result.append({'start': start, 'end': end, 'level': level})
     result.sort(key=lambda item: item['start'])
-    return result
+    return result or None   # F179: elle tum araliklar silinince otomatik kismaya donulur
 
 
 def signature(line, project):

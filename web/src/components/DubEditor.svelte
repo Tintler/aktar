@@ -325,6 +325,10 @@
     remember(true);
     materialize();
     project.ducks.splice(selected.index, 1);
+    if (!project.ducks.length) {   // hic aralik kalmazsa duzey kaydiricisi etkisiz kalirdi: otomatige don
+      project.ducks = null;
+      toast('Son kısma aralığı silindi; otomatik kısmaya dönüldü.', 'info');
+    }
     selected = null;
     changed();
   }

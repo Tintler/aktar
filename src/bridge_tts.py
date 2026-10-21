@@ -544,6 +544,14 @@ class TtsMixin:
             self.save_ui_prefs({'tts': tts})
         return self.tts_presets()
 
+    def tts_preset_order(self, ids):
+        """F179: kayitli seslerin sirasi (Metinden ses > Kayitli sesler); tum ses secicileri bu sirayla listeler."""
+        try:
+            voice_presets.reorder(APP_DIR, [str(ident) for ident in ids or []])
+        except OSError as error:
+            return _error(error)
+        return self.tts_presets()
+
     def tts_preset_image(self, path=None):
         """Ses resmi: yol verilmezse dosya penceresi acilir. {'image': data URL}; vazgecilirse None."""
         path = path or self._dialog('open_file', 'Ses resmi seç', ('Görseller (' + ';'.join(voice_presets.IMAGE_TYPES) + ')',))

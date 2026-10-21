@@ -267,6 +267,9 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(drama3_tags.allowed(['[laughs]', '[yok]', '[sad]']), ('[sad]', '[laughs]'))
         self.assertEqual(drama3_tags.allowed([]), ())
         self.assertEqual(set(drama3.EMOTION_TAGS), set(drama3_tags.ALL_TAGS))
+        # F179: Ayarlar etiketleri gruplarla gosterir; eklenen etiketler varsayilana girmez
+        self.assertTrue(all(entry['group'] for entry in drama3_tags.public()))
+        self.assertIn('[sarcastic]', drama3_tags.ALL_TAGS)
 
     def test_words_use_only_chosen_tags(self):
         sentences = ['— Yine mi geldin? dedi üzgünce.', '— Gel buraya, diye bağırdı hüzünle.']

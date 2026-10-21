@@ -1,8 +1,9 @@
 <script>
   // Metinden ses (F178): yazilan metni secilen sesle (kayitli ses, motor sesi ya da Ayarlardaki ses) okutup
   // secilen klasore WAV/MP3 olarak yazar. Secimler ui.json 'speech' altinda kalir; kayit arka planda surer
-  // (bridge_tts.tts_speech_create, olay 'tts_speech').
+  // (bridge_tts.tts_speech_create, olay 'tts_speech'). F179: 'Kayitli sesler' sekmesinde sesler eklenir ve siralanir.
   import Icon from '../lib/Icon.svelte';
+  import VoicePresetList from '../components/VoicePresetList.svelte';
   import { app, act, savePref, onDrop, toast } from '../lib/state.svelte.js';
   import { call } from '../lib/api.js';
   import { confirm } from '../lib/confirm.svelte.js';
@@ -13,7 +14,7 @@
   const FORMATS = [['wav', 'WAV'], ['mp3', 'MP3']];
 
   const s = app.speech;
-  const prefs = $derived({ voice: '', folder: '', format: 'wav', speed: 1, ...(app.prefs.speech ?? {}) });
+  const prefs = $derived({ voice: '', folder: '', format: 'wav', speed: 1, tab: 'text', ...(app.prefs.speech ?? {}) });
   let voices = $state([]);
 
   const groups = $derived.by(() => {
@@ -26,7 +27,8 @@
   const chars = $derived(s.text.trim().length);
   const ready = $derived(split.sentences.length > 0 && !!prefs.folder && !s.job);
 
-  call('tts_voices').then((list) => { if (Array.isArray(list)) voices = list; });
+  const loadVoices = () => call('tts_voices').then((list) => { if (Array.isArray(list)) voices = list; });
+  loadVoices();
 
   const save = (values) => savePref({ speech: { ...prefs, ...values } });
 
@@ -67,7 +69,15 @@
 <section class="page">
   <div class="page-head">
     <h1>Metinden ses</h1>
+    <div class="tabs" role="tablist">
+      {#each [['text', 'Metin'], ['presets', 'Kayıtlı sesler']] as [value, label]}
+        <button role="tab" aria-selected={prefs.tab === value} class:on={prefs.tab === value} onclick={() => save({ tab: value })}>{label}</button>
+      {/each}
+    </div>
   </div>
+  {#if prefs.tab === 'presets'}
+    <div class="page-body list"><VoicePresetList onchange={loadVoices} /></div>
+  {:else}
   <div class="page-body body">
     <div class="text card">
       <textarea class="selectable" bind:value={s.text} disabled={!!s.job}
@@ -143,9 +153,14 @@
       {/if}
     </aside>
   </div>
+  {/if}
 </section>
 
 <style>
+  .tabs { display: flex; gap: 4px; background: var(--surface); border-radius: 999px; padding: 3px; margin-left: 12px; }
+  .tabs button { padding: 5px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--secondary); }
+  .tabs button.on { background: var(--surface-active); color: var(--text); }
+  .list { display: flex; flex-direction: column; max-width: 760px; }
   .body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; }
   .text { display: flex; flex-direction: column; min-height: 0; }
   .text textarea { flex: 1; min-height: 240px; resize: none; padding: 16px 18px; border: 0; outline: none; background: transparent;

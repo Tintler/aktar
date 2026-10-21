@@ -219,3 +219,11 @@ def remove(app_dir, ident):
     (base / f'{ident}.png').unlink(missing_ok=True)
     _drop_recordings(base, ident)
     _save(app_dir, remaining)
+
+
+def reorder(app_dir, ids):
+    """F179: sesleri `ids` sirasina dizer (secicilerde bu sirayla gorunur); listede olmayanlar sonda kalir."""
+    items = _load(app_dir)
+    rank = {str(ident): index for index, ident in enumerate(ids or [])}
+    items.sort(key=lambda item: rank.get(item['id'], len(rank)))   # sort kararli: bilinmeyenler eski sirasinda
+    _save(app_dir, items)

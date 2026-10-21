@@ -2,6 +2,16 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.15.0 — 2026-10-21
+
+### Yeni
+- **Kayıtlı sesler sekmesi ve sıralama (F180):** Metinden ses sayfasına "Kayıtlı sesler" sekmesi eklendi. Sesler burada eklenir, düzenlenir ve sürükle-bırak ya da oklarla sıralanır; okuyucudaki, dublajdaki ve Metinden ses'teki ses seçicileri bu sırayla gösterir. Son açılan sekme hatırlanır.
+- **Ayarlar > Ses açılır/kapanır:** Whisper, Ses motorları, Okuma sesi ve Okuma ayarları bölümleri ile her ses motorunun ayrıntıları başlığa tıklanarak kapatılabilir; son durum hatırlanır. Arama sırasında bütün bölümler açık görünür. Drama 3 etiket listesi varsayılan olarak kapalıdır ve gruplara ayrılmıştır.
+- **Daha fazla Drama 3 etiketi:** Duygu, ses yüksekliği ve konuşma biçimi, gülme/ağlama/nefes sesleri, duraklama ve vurgu gruplarında 48 yeni etiket ([sarcastic], [scared], [speaking slowly], [gasp], [pitch up]…). Hepsi "Denenmedi" olarak gelir ve varsayılan seçime girmez; anlatıcı ipucu olanlar kelime listesinde de bulunur.
+
+### Düzeltme
+- **Dublaj düzenleyicisinde özgün ses düzeyi etkisizdi:** Elle düzenlenen kısma aralıklarının hepsi silinince düzey kaydırıcısı ne önizlemede ne dışa aktarmada bir şey değiştiriyordu. Son aralık silinince artık otomatik kısmaya dönülür; böyle kalmış projeler de açılışta otomatik kısmaya geçer.
+
 ## 2.14.0 — 2026-10-21
 
 ### Yeni

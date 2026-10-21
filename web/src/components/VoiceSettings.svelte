@@ -4,8 +4,14 @@
   import { call } from '../lib/api.js';
   import { confirm } from '../lib/confirm.svelte.js';
   import Toggle from './Toggle.svelte';
+  import FoldHead from './FoldHead.svelte';
+  import { isOpen, toggleOpen } from '../lib/folds.js';
   import { PAUSE_KEYS, PAUSE_PRESETS, PAUSE_DEFAULTS, resolvePauses } from '../lib/pauses.js';
   import { QUOTE_DEFAULTS } from '../lib/sentences.js';
+
+  // F179: Ayarlar aramasi surerken butun bolumler acik (eslesen satirlar gizli bolumde kalmasin)
+  let { searching = false } = $props();
+  const shown = (key, fallback = true) => searching || isOpen(key, fallback);
 
   const LANGUAGES = { tr: 'Ses', en: 'İngilizce ses' };
   const DEFAULT_ENGINE = { tr: 'ema-lightning' };
@@ -70,6 +76,7 @@
   $effect(() => {
     if (app.engines.some((e) => e.emotion_tags) && !catalog) call('tts_emotion_catalog').then((c) => { if (c?.tags) catalog = c; });
   });
+  const tagGroups = $derived(catalog ? [...new Set(catalog.tags.map((t) => t.group))] : []);
   const allowedTags = $derived(app.ttsPrefs.emotion_allowed ?? catalog?.tags.filter((t) => t.default).map((t) => t.tag) ?? []);
   function toggleTag(tag, on) {
     const chosen = new Set(allowedTags);
@@ -232,10 +239,10 @@
 </script>
 
 <section>
-  <div class="head">
-    <h2>Sesli okuma</h2>
+  <FoldHead key="tts-engines" title="Ses motorları" open={shown('tts-engines')}>
     <button class="btn sm primary" onclick={installFile} title="DERLE_SES.cmd ile oluşturduğunuz ses motoru paketini (.zip) kurun"><Icon name="download" size={14} />Dosyadan kur</button>
-  </div>
+  </FoldHead>
+  {#if shown('tts-engines')}
   {#if !app.engines.some((e) => e.mode)}
     <div class="info"><span>Kurulu ses motoru yok. Kaynak koddan çalışırken <code>requirements-tts.txt</code> paketleri kuruluysa motorlar doğrudan çalışır. Paketleri proje klasöründe <b>DERLE_SES.cmd</b> ile oluşturun
       (<code>dist-engines</code> klasörüne yazılır), sonra <b>Dosyadan kur</b> ile seçin.</span></div>
@@ -243,7 +250,10 @@
 
   {#each app.engines as engine (engine.id)}
     {@const badge = modeBadge(engine)}
+    {@const open = shown('engine:' + engine.id)}
     <div class="fr engine">
+      <button class="icon-btn sm chev" class:open aria-expanded={open} title={open ? 'Ayrıntıları gizle' : 'Ayrıntıları göster'}
+        onclick={() => toggleOpen('engine:' + engine.id)}><Icon name="forward" size={16} /></button>
       <div class="l">
         {engine.name} <span class="ver">{engine.version}</span>{#if engine.attribution}<span class="attr">{engine.attribution}</span>{/if}
         <small>{engine.description}</small>
@@ -255,7 +265,9 @@
         <button class="icon-btn" title="Kaldır" onclick={() => remove(engine)}><Icon name="trash" size={16} /></button>
       {/if}
     </div>
-    {#if engine.folder}
+    {#if !open}
+      <!-- F179: motor kapali: alt satirlar gizli -->
+    {:else if engine.folder}
       <div class="fr sub">
         <div class="l">Model klasörü<small>Model Aktar klasörüne kopyalanmaz; seçtiğiniz klasörden (hızlı bir SSD önerilir) çalışır.
           Aktar sunucuyu bu klasördeki .venv Python'uyla kendisi başlatır ve kapanınca durdurur.</small></div>
@@ -282,7 +294,7 @@
         </div>
       {/if}
     {/if}
-    {#each engine.settings ?? [] as s (engine.id + s.key)}
+    {#each open ? engine.settings ?? [] : [] as s (engine.id + s.key)}
       <div class="fr sub">
         <div class="l">{s.label}{#if s.hint}<small>{s.hint}</small>{/if}</div>
         <input class="range" type="range" min={s.min} max={s.max} step={s.step} value={engineValue(engine, s)} aria-label={s.label}
@@ -291,7 +303,7 @@
         <span class="dim-text num wide">{settingText(s, engineValue(engine, s))}</span>
       </div>
     {/each}
-    {#if engine.emotion_tags}
+    {#if engine.emotion_tags && open}
       <div class="fr sub">
         <div class="l">Duygu etiketleri (deneysel)<small>Kitaplıkta kitaba sağ tıklayıp "Duygu etiketleri oluştur" deyince kitabın
           diyaloglarına gülme, iç çekme, fısıltı, bağırma ve öfke etiketleri bir kez eklenir (anlatıcı ipuçlarından ya da model
@@ -310,20 +322,28 @@
             etiketler konuşmanın başına eklenir, &lt;çift&gt; etiketler konuşmayı sarar. Yeni seçtiğiniz etiket için kitabı
             kitaplıktan yeniden etiketleyin; kaldırdığınız etiket hemen uygulanmaz.</small></div>
           <button class="btn sm" onclick={defaultTags} disabled={!app.ttsPrefs.emotion_allowed}><Icon name="refresh" size={14} />Varsayılana dön</button>
+          <button class="btn sm" aria-expanded={shown('tags:' + engine.id, false)} onclick={() => toggleOpen('tags:' + engine.id, false)}>
+            <Icon name={shown('tags:' + engine.id, false) ? 'up' : 'down'} size={14} />{shown('tags:' + engine.id, false) ? 'Gizle' : 'Etiketleri göster'}</button>
         </div>
-        <div class="tags">
-          {#each catalog.tags as item (item.tag)}
-            <label class="tag" class:on={allowedTags.includes(item.tag)}>
-              <input type="checkbox" checked={allowedTags.includes(item.tag)} onchange={(e) => toggleTag(item.tag, e.currentTarget.checked)} />
-              <span class="tb"><code>{item.kind === 'paired' ? `${item.tag}…</${item.tag.slice(1)}` : item.tag}</code>
-                <b>{item.label}</b><i class="st {item.status}">{STATUS[item.status]}</i>
-                <small>{item.examples}</small></span>
-            </label>
+        {#if shown('tags:' + engine.id, false)}
+          {#each tagGroups as group (group)}
+            {@const items = catalog.tags.filter((t) => t.group === group)}
+            <div class="tags">
+              <div class="group">{group} <span>· {items.filter((t) => allowedTags.includes(t.tag)).length} / {items.length}</span></div>
+              {#each items as item (item.tag)}
+                <label class="tag" class:on={allowedTags.includes(item.tag)}>
+                  <input type="checkbox" checked={allowedTags.includes(item.tag)} onchange={(e) => toggleTag(item.tag, e.currentTarget.checked)} />
+                  <span class="tb"><code>{item.kind === 'paired' ? `${item.tag}…</${item.tag.slice(1)}` : item.tag}</code>
+                    <b>{item.label}</b><i class="st {item.status}">{STATUS[item.status]}</i>
+                    <small>{item.examples}</small></span>
+                </label>
+              {/each}
+            </div>
           {/each}
-        </div>
+        {/if}
       {/if}
     {/if}
-    {#if engine.settings?.length && app.ttsPrefs.engine_settings?.[engine.id]}
+    {#if open && engine.settings?.length && app.ttsPrefs.engine_settings?.[engine.id]}
       <div class="fr sub">
         <div class="l"><small>Değiştirilen ayarlarla hazırlanan cümleler yeniden üretilir.</small></div>
         <button class="btn sm" onclick={() => resetEngine(engine)}><Icon name="refresh" size={14} />Varsayılana dön</button>
@@ -337,7 +357,12 @@
       <span class="selectable">{stateText}</span>
     </div>
   {/if}
+  {/if}
+</section>
 
+<section>
+  <FoldHead key="tts-voices" title="Okuma sesi" open={shown('tts-voices')} />
+  {#if shown('tts-voices')}
   {#each languages as language}
     {@const list = options(language)}
     <div class="fr">
@@ -380,7 +405,12 @@
       {#each CHAT_SPEEDS as s}<option value={String(s)}>{s.toLocaleString('tr-TR')}×</option>{/each}
     </select>
   </div>
+  {/if}
+</section>
 
+<section>
+  <FoldHead key="tts-reading" title="Okuma ayarları" open={shown('tts-reading')} />
+  {#if shown('tts-reading')}
   <div class="fr">
     <div class="l">Hazırlanan sesler<small>Okuyucudaki "Hazırla" ile önceden üretilen sesler; motor yüklenmeden anında okunur.
       Kitap başına program klasöründeki ses-onbellegi altında tutulur.</small></div>
@@ -442,11 +472,14 @@
       <span class="dim-text num">{split.maxQuoted} cümle</span>
     </div>
   {/if}
+  {/if}
 </section>
 
 <style>
-  .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-  h2 { font-size: 20px; font-weight: 700; letter-spacing: -.01em; }
+  section > :global(.fold) { margin-bottom: 6px; }
+  .chev { color: var(--secondary); transition: transform .15s; }
+  .chev.open { transform: rotate(90deg); }
+  .engine { gap: 12px; }
   .fr { display: flex; align-items: center; gap: 20px; padding: 12px 0; border-bottom: 1px solid var(--outline); }
   .fr:last-child { border-bottom: 0; }
   .l { flex: 1; min-width: 0; font-weight: 500; }
@@ -471,6 +504,8 @@
   .seg button.on { background: var(--surface-active); color: var(--text); }
   .tags-head { border-bottom: 0; }
   .tags { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px; padding: 0 0 12px 16px; border-bottom: 1px dashed var(--outline); }
+  .group { grid-column: 1 / -1; font-size: 12px; font-weight: 700; color: var(--secondary); text-transform: uppercase; letter-spacing: .04em; padding-top: 8px; }
+  .group span { font-weight: 500; color: var(--dim); text-transform: none; letter-spacing: 0; }
   .tag { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--outline); cursor: pointer; }
   .tag.on { border-color: color-mix(in srgb, var(--accent) 60%, var(--outline)); background: color-mix(in srgb, var(--accent) 7%, transparent); }
   .tag input { margin-top: 3px; accent-color: var(--accent); }
