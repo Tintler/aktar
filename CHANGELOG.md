@@ -2,6 +2,14 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.14.0 — 2026-10-21
+
+### Yeni
+- **Dublaj düzenleyicisinde arka plan konuşmasını bastırma (F179):** Proje sekmesine "Müziği ve efektleri koru" anahtarı eklendi. Açıkken dışa aktarmada videonun sesi konuşma ve müzik/efekt olarak ayrılır; kısma yalnızca özgün konuşmaya uygulanır. Düzey %0 yapılırsa özgün konuşma tamamen bastırılır, müzik ve efektler tam düzeyde kalır.
+
+### Düzeltme
+- **Dublaj kaydedilemiyordu:** Elle düzenlenen kısma aralıklarının hepsi silinince FFmpeg "No commands were specified" hatasıyla duruyordu.
+
 ## 2.13.0 — 2026-10-21
 
 ### Yeni

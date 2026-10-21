@@ -143,6 +143,10 @@ class DubProjectTests(unittest.TestCase):
         self.assertIn('1.500 volume@duck volume 0.0000;', text)
         self.assertIn('5.500 volume@duck volume 0.5000;', text)
 
+    def test_duck_commands_never_empty(self):
+        # elle tum kisma araliklari silinince FFmpeg asendcmd bos dosyada 'No commands were specified' veriyordu
+        self.assertEqual(dub.duck_commands([], 0.25), '0.000 volume@duck volume 1.0000;\n')
+
     def test_generate_cancel(self):
         self._create()
         with self.assertRaises(GracefulStop):

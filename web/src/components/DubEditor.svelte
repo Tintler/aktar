@@ -569,6 +569,13 @@
       <Toggle checked={opts.overlap} label="Çakışan satırları üst üste koy" onchange={(v) => setOption('overlap', v)} />
       <Toggle checked={opts.normalize} label="Ses düzeyini eşitle" onchange={(v) => setOption('normalize', v)} />
       <div class="stack">
+        <Toggle checked={opts.separate} label="Müziği ve efektleri koru (yalnızca özgün konuşma kısılır)"
+          onchange={(v) => setOption('separate', v)} />
+        <span class="hint">Dışa aktarırken videonun sesi konuşma ve müzik/efekt olarak ayrılır; kısma yalnızca özgün konuşmaya
+          uygulanır, düzeyi %0 yaparsanız arka plandaki konuşma tamamen bastırılır (ilk kullanımda ~65 MB model iner, sonuç
+          saklanır). Önizlemede videonun tüm sesi kısılır.</span>
+      </div>
+      <div class="stack">
         <span class="label">{opts.separate ? 'Özgün konuşma düzeyi' : 'Özgün ses düzeyi'} (kısma aralıklarında): %{Math.round(opts.background * 100)}</span>
         <input type="range" min="0" max="1" step="0.05" value={opts.background} oninput={(e) => setOption('background', Number(e.currentTarget.value))} />
         {#if manualDucks}
@@ -583,8 +590,7 @@
           <option value="mkv">Video (.dublaj.mkv)</option>
           <option value="m4a">Yalnızca ses (.dublaj.m4a)</option>
         </select></label>
-      <span class="hint">Hız, eşitleme ya da üst üste koyma değişince satırların sesi eski sayılır; "Eksikleri seslendir" yeniden üretir.
-        {opts.separate ? ' Müzik ve efektler korunur (yalnızca özgün konuşma kısılır).' : ''}</span>
+      <span class="hint">Hız, eşitleme ya da üst üste koyma değişince satırların sesi eski sayılır; "Eksikleri seslendir" yeniden üretir.</span>
       <button class="btn" disabled={!canSetup || busy} onclick={onsetup}><Icon name="rotate" size={15} />Projeyi altyazıdan yeniden oluştur…</button>
     </div>
   {:else}

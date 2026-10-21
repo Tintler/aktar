@@ -239,7 +239,9 @@ def duck_commands(spans, level, fade=FADE, steps=FADE_STEPS):
         own = min(1.0, max(0.0, float(span[2]))) if len(span) > 2 and span[2] is not None else level
         ramp(begin - fade, 1.0, own)
         ramp(end, own, 1.0)
-    return '\n'.join(lines) + ('\n' if lines else '')
+    if not lines:   # bos dosyada asendcmd 'No commands were specified' ile durur (elle tum araliklar silinince)
+        lines.append('0.000 volume@duck volume 1.0000;')
+    return '\n'.join(lines) + '\n'
 
 
 def _clip(data):
