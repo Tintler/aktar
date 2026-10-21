@@ -51,7 +51,8 @@ TOP_P = 0.9                # sunucu varsayilani; daha dari modeli susturabilir
 SETTINGS = {'max_chars': (MAX_CHARS, 60, 250), 'temperature': (TEMPERATURE, 0.3, 1.5), 'top_p': (TOP_P, 0.5, 1.0)}
 SILENT_RETRY_TEMPERATURES = (None, None)   # susan parca icin yeniden denemeler (None: sunucu varsayilani)
 MAX_LETTERS_PER_SECOND = 24   # konusulan sureye gore bundan hizli parca "susmus" sayilir (normal 10-17)
-CHECK_MIN_LETTERS = 25        # bundan kisa parcada harf orani denetimi yapilmaz
+CHECK_MIN_LETTERS = 25        # bundan kisa parcada harf orani yerine en az konusma suresi aranir:
+SHORT_MIN_VOICED, SHORT_LETTERS_PER_SECOND = 0.3, 18.0   # max(0,3 sn, harf/18)
 OVERLONG_BASE, OVERLONG_LETTERS_PER_SECOND = 2.0, 5.0   # ses bundan uzunsa (2 sn + harf/5) model takilmis sayilir
 VOICED_LEVEL = 1500           # 100 ms pencerede bu tepeyi asan bolum konusma sayilir
 ABRUPT_LEVEL = 1000           # son 50 ms'de bu tepeyi asan ses 'erken bitmis' sayilir (873 parcada ~%11)
@@ -329,9 +330,11 @@ def fell_silent(text, samples, rate):
     count = letters(text)
     if len(samples) / rate > OVERLONG_BASE + count / OVERLONG_LETTERS_PER_SECOND:
         return True
+    voiced = voiced_seconds(samples, rate)
     if count < CHECK_MIN_LETTERS:
-        return False
-    return count / max(voiced_seconds(samples, rate), 0.05) > MAX_LETTERS_PER_SECOND
+        # F165: kisa parcada model bazen hic konusmuyor ('Dedi.' 0,2 sn, 'Gevezeligi birak.' 0,4 sn)
+        return count >= 2 and voiced < max(SHORT_MIN_VOICED, count / SHORT_LETTERS_PER_SECOND)
+    return count / max(voiced, 0.05) > MAX_LETTERS_PER_SECOND
 
 
 def join_clips(clips, rate):

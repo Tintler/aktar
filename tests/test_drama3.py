@@ -227,7 +227,10 @@ class SilentPieceTests(unittest.TestCase):
     def test_detects_model_falling_silent(self):
         self.assertTrue(drama3.fell_silent(self.LONG, tone(1.0) + silence(6.0), RATE))
         self.assertFalse(drama3.fell_silent(self.LONG, tone(6.0) + silence(0.5), RATE))
-        self.assertFalse(drama3.fell_silent('Ya da başka bir şey...', tone(0.3), RATE))   # kisa parca denetlenmez
+        self.assertFalse(drama3.fell_silent('Ya da başka bir şey...', tone(1.0), RATE))   # kisa parca: oran degil sure
+        self.assertTrue(drama3.fell_silent('Dedi.', tone(0.2) + silence(0.1), RATE))       # neredeyse hic konusmadi
+        self.assertTrue(drama3.fell_silent('— Gevezeliği bırak.', tone(0.4), RATE))
+        self.assertFalse(drama3.fell_silent('— Gevezeliği bırak.', tone(1.2), RATE))
 
     def test_letters_ignore_tags_and_punctuation(self):
         self.assertEqual(drama3.letters('[laughs] <whisper>Bak, şu!</whisper> 44.'), 7)
@@ -364,13 +367,13 @@ class HttpTests(unittest.TestCase):
     def test_engine_say_joins_pieces_and_shortens_silence(self):
         self.server.replies = [(200, drama3.wav_bytes(tone(1.5) + silence(3.0) + tone(1.5) + silence(TAIL), RATE)),
                                (500, b'{"detail": "generated no audio frames"}'),
-                               (200, spoken(1.0))]
+                               (200, spoken(1.5))]
         prefs = {'drama3_url': self.server.url, 'engine_settings': {'drama3': {'max_chars': 60}}}
         engine = drama3.Engine(tempfile.gettempdir(), prefs=lambda: prefs)
         engine.reference = {'text': 'Kayıt.', 'data': 'QUJD', 'seconds': 3}
         first, second = 'Birinci cümle biraz uzunca yazıldı.', 'İkinci cümle de öyle yazıldı.'
         data, duration = engine.say(f'{first} {second}')
-        expected = 3.0 + drama3.SILENCE_KEEP + TAIL + drama3.SENTENCE_GAP + 1.0 + TAIL
+        expected = 3.0 + drama3.SILENCE_KEEP + TAIL + drama3.SENTENCE_GAP + 1.5 + TAIL
         self.assertAlmostEqual(duration, expected, delta=0.05)
         self.assertEqual(len(self.server.requests), 3)
         self.assertEqual([body['input'] for _, body in self.server.requests], [first, second, second])
