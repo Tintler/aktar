@@ -3,7 +3,8 @@
 Bir onayar bir motor sesi ('<motor>/<ses>', orn. 'voxcpm/clone') ile o sesin seceneklerini
 (motor.json "options": ses tarifi, klonlanacak kayit ve metni) tasir. Kayitlar APP_DIR/ses-presetleri/
 altindadir: presets.json, resimler <kimlik>.png, klon kayitlari <kimlik>-kayit.<uzanti>. Klon kaydi
-kopyalanir; kullanicinin dosyasi tasinsa ya da silinse de onayar calisir.
+kopyalanir; kullanicinin dosyasi tasinsa ya da silinse de onayar calisir. F173: kaydin bir araligi secildiyse
+('trim') yalnizca o parca kesilip <kimlik>-kayit.wav olarak yazilir (audio_trim).
 
 Onayar secmek ui.json 'tts' tercihlerini (voices/options) gunceller; ses motoru (tts.Engines) ve
 onbellek anahtarlari degismeden ayni tercihleri okur.
@@ -107,7 +108,8 @@ def get(app_dir, ident):
 
 
 def save(app_dir, values, voices):
-    """values: {id?, name, voice, options, image?}. voices: '<motor>/<ses>' -> motor.json ses kaydi.
+    """values: {id?, name, voice, options, image?, trim?}. trim: {secenek: {start, end}} klon kaydinin kesilecek
+    araligi (F173). voices: '<motor>/<ses>' -> motor.json ses kaydi.
     image: None dokunma, '' sil, data URL kaydet. Kaydedilen onayari (resmiyle) dondurur."""
     values = dict(values or {})
     name = ' '.join(str(values.get('name', '')).split())[:NAME_LIMIT]
@@ -132,7 +134,8 @@ def save(app_dir, values, voices):
         key = option['key']
         text = str(given.get(key, '') or '').strip()[:TEXT_LIMIT]
         if option.get('type') == 'file':
-            text = _keep_recording(base, ident, text)
+            cut = (values.get('trim') or {}).get(key)
+            text = _trim_recording(base, ident, text, cut) if cut and text else _keep_recording(base, ident, text)
         if text:
             options[key] = text
     for option in spec.get('options', []):
@@ -177,6 +180,24 @@ def _keep_recording(base, ident, path):
     _drop_recordings(base, ident)
     target = base / f'{ident}-kayit{suffix}'
     shutil.copyfile(source, target)
+    return str(target)
+
+
+def _trim_recording(base, ident, path, cut):
+    """F173: kaydin [start, end] araligini onayar klasorune <kimlik>-kayit.wav olarak keser; yeni yolu dondurur."""
+    import audio_trim
+    source = Path(path)
+    if not source.is_file():
+        raise ValueError('Ses kaydı bulunamadı: ' + path)
+    if source.suffix.lower() not in AUDIO_TYPES:
+        raise ValueError('Ses kaydı WAV, MP3, FLAC, OGG ya da M4A olmalı.')
+    target = base / f'{ident}-kayit.wav'
+    try:
+        start, end = float(cut['start']), float(cut['end'])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError('Kesilecek aralık geçersiz.') from None
+    audio_trim.cut(source, target, start, end)
+    _drop_recordings(base, ident, keep=[str(target)])
     return str(target)
 
 

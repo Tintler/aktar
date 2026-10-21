@@ -12,6 +12,7 @@ import threading
 import time
 from pathlib import Path
 
+import audio_trim
 import audiobook
 import drama3_tags
 import emotion_tags
@@ -402,6 +403,20 @@ class TtsMixin:
     def tts_choose_reference(self):
         """Ses klonlamak icin kayit (yalnizca yol; dosyayi motor okur)."""
         return self._dialog('open_file', 'Ses kaydı seç', ('Ses kaydı (*.wav;*.mp3;*.flac;*.ogg;*.m4a)',))
+
+    def tts_reference_peaks(self, path):
+        """F173: klon kaydinin dalga bicimi {'duration', 'peaks'} (onayar penceresinde aralik secmek icin)."""
+        try:
+            return audio_trim.peaks(str(path))
+        except (ValueError, RuntimeError, OSError) as error:
+            return _error(error)
+
+    def tts_reference_clip(self, path, start, end):
+        """F173: kaydin secilen araligi dinlemek icin {'audio': base64 WAV}."""
+        try:
+            return {'audio': audio_trim.clip_base64(str(path), float(start), float(end))}
+        except (ValueError, TypeError, RuntimeError, OSError) as error:
+            return _error(error)
 
     def tts_install_file(self):
         """Diskten secilen ses motoru paketini (zip) kurar."""

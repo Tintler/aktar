@@ -5,8 +5,10 @@
 
 <script>
   // Ses onayari olusturma/duzenleme (F137): ad, resim, motor sesi ve sesin secenekleri.
+  // F173: klon kaydinin bir araligi secilebilir (AudioTrim); kaydedince o parca onayar klasorune WAV olarak kesilir.
   import Modal from './Modal.svelte';
   import Icon from '../lib/Icon.svelte';
+  import AudioTrim from './AudioTrim.svelte';
   import { app, act, toast } from '../lib/state.svelte.js';
   import { call } from '../lib/api.js';
   import { confirm } from '../lib/confirm.svelte.js';
@@ -23,6 +25,7 @@
   // svelte-ignore state_referenced_locally
   let form = $state({ id: preset?.id ?? '', name: preset?.name ?? '', voice: preset?.voice ?? '',
     options: { ...(preset?.options ?? {}) }, image: preset?.image ?? '' });
+  let trims = $state({});         // F173: {secenek: {start, end}} (yoksa kaydin tamami)
   let imageChanged = $state(false);
   let saving = $state(false);
   let error = $state('');
@@ -63,7 +66,10 @@
 
   async function pickRecording(key) {
     const path = await call('tts_choose_reference');
-    if (path) form.options[key] = path;
+    if (path) {
+      form.options[key] = path;
+      trims[key] = null;
+    }
   }
 
   const fileName = (path) => String(path ?? '').split(/[\\/]/).pop();
@@ -76,6 +82,7 @@
     // Yalnizca secili sesin secenekleri gider; resim degismediyse dokunulmaz.
     values.options = Object.fromEntries((spec?.options ?? []).map((o) => [o.key, values.options[o.key] ?? '']));
     if (!imageChanged) delete values.image;
+    values.trim = Object.fromEntries(Object.entries($state.snapshot(trims)).filter(([key, value]) => value && values.options[key]));
     const result = await call('tts_preset_save', values);
     saving = false;
     if (result?.error) { error = result.error; return; }
@@ -127,6 +134,10 @@
             <span class="path selectable" title={form.options[option.key] ?? ''}>{fileName(form.options[option.key]) || 'Seçilmedi'}</span>
             <button class="btn sm" onclick={() => pickRecording(option.key)}>Seç…</button>
           </div>
+          {#if form.options[option.key]}
+            {#key form.options[option.key]}<AudioTrim path={form.options[option.key]} bind:trim={trims[option.key]}
+              whole={form.options[option.key] === preset?.options?.[option.key]} />{/key}
+          {/if}
         {:else}
           <textarea class="field" rows="2" bind:value={form.options[option.key]} placeholder={option.default ?? ''}></textarea>
         {/if}
