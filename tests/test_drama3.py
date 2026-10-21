@@ -158,6 +158,13 @@ class SplitTests(unittest.TestCase):
         self.assertEqual([p for p, _ in drama3.split_text(text, limit=36)],
                          ["Çöküşü'nün 44. bölümünü izliyordum.", '"Gelir misin?" diye sordu.', 'Sonra gitti.'])
 
+    def test_model_text_keeps_short_tail_after_question(self):
+        self.assertEqual(drama3.model_text('– “Fethün karib” değil mi? işte…'), '– “Fethün karib” değil mi, işte…')
+        self.assertEqual(drama3.model_text('Gelmeyecek misin?” sahi.'), 'Gelmeyecek misin,” sahi.')
+        for unchanged in ('Gelmeyecek misin? Sahi…', '"Gelir misin?" diye sordu.', 'Nereye gidiyorsun? dedi annem.',
+                          'Bu bir cümle. işte', 'Kaç yaşında? 44.'):
+            self.assertEqual(drama3.model_text(unchanged), unchanged)
+
     def test_empty_text(self):
         self.assertEqual(drama3.split_text('   '), [])
 

@@ -5,7 +5,7 @@ Degistirirken ayni numarayi CHANGELOG.md'nin en ustune ve web/package.json'a da 
 (tests/test_version.py uc yerin ayni oldugunu denetler). Windows .exe'nin dosya surumu
 tools/version_info.py ile buradan uretilir.
 """
-VERSION = '2.3.4'
+VERSION = '2.3.5'
 NAME = 'Aktar'
 
 

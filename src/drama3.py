@@ -216,6 +216,19 @@ def bisect(text, limit):
     return [piece for half in halves for piece in bisect(half, limit)]
 
 
+_SHORT_TAIL = re.compile(r'[?!]+(["”’»)]*)\s+(?=[^\W\d_]{1,10}[.…!?]*$)')
+
+
+def model_text(piece):
+    """Sunucuya giden metin: soru/unlem isaretinden sonra tek kisa kelimeyle biten parcada ('degil mi? iste…') isaret
+    virgule cevrilir (F166: model soruda bitirip son kelimeyi atliyordu, 24 denemede 16 -> virgulle 22; Whisper soru
+    tonlamasini yine duyuyor). Kelime kucuk harfle baslamali (devam eden cumle); okuyucuda gorunen metin degismez."""
+    match = _SHORT_TAIL.search(piece)
+    if not match or not piece[match.end()].islower():
+        return piece
+    return piece[:match.start()] + ',' + match.group(1) + ' ' + piece[match.end():]
+
+
 def split_text(text, limit=MAX_CHARS):
     """Metni sunucuya gidecek parcalara boler: [(parca, sonraki_sessizlik_sn)]. Ardisik cumleler sinira kadar
     tek parcada gider (F163: tek basina kalan 'dedi.', 'iste...' gibi kisa parcalari model susarak ya da
@@ -525,7 +538,8 @@ class Engine:
         best = None
         attempts = ((settings['temperature'], settings['top_p']),) + tuple((t, None) for t in SILENT_RETRY_TEMPERATURES)
         for attempt, (temperature, top_p) in enumerate(attempts):
-            samples, rate = read_pcm(speech(self.url, piece, references, temperature=temperature, top_p=top_p))
+            samples, rate = read_pcm(speech(self.url, model_text(piece), references, temperature=temperature,
+                                            top_p=top_p))
             if len(samples) / rate >= CAP_SECONDS and depth < 3:
                 halves = halve(piece)
                 if len(halves) > 1:

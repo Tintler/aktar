@@ -1,8 +1,8 @@
 {
   "id": "drama3",
   "name": "Drama 3 (Türkçe)",
-  "version": "1.7.0",
-  "cache_tag": "f165-short-silent",
+  "version": "1.8.0",
+  "cache_tag": "f166-question-tail",
   "protocol": 1,
   "builtin": "drama3",
   "server": true,
