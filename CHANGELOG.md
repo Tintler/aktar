@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.13.0 — 2026-10-21
+
+### Yeni
+- **Metinden ses (F178):** Sol menüde yeni sayfa. Yazılan ya da yapıştırılan (veya .txt dosyası bırakılarak açılan) metin, seçilen kayıtlı sesle, bir motor sesiyle ya da Ayarlar'daki sesle okunur ve seçilen klasöre WAV ya da MP3 olarak yazılır. Hız, biçim, klasör ve ses seçimi hatırlanır; dosya adı boşsa metnin ilk kelimeleri kullanılır, aynı adda dosya varsa üzerine yazılmaz. Cümleler okuyucudaki gibi bölünür ve aradaki duraklamalar Ayarlar'daki duraklama ayarından gelir; Drama 3 TR'de aynı paragraftaki cümleler birleştirilerek okunur. Kayıt arka planda sürer (sağ üstteki işlerde görünür, durdurulabilir); bitince sayfada dinlenebilir.
+
 ## 2.12.0 — 2026-10-21
 
 ### Değişiklik

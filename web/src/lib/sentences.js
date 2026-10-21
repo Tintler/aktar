@@ -67,6 +67,17 @@ function sentenceRanges(text, options) {
     .filter(([a, b]) => b > a && LETTER.test(text.slice(a, b)));
 }
 
+// Plain text (Metinden ses, F178): every non-empty line is a block, split like a rendered chapter.
+export function splitText(text, options = QUOTE_DEFAULTS) {
+  const sentences = [];
+  const breaks = new Set();
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    for (const [a, b] of sentenceRanges(line, { ...QUOTE_DEFAULTS, ...options })) sentences.push(line.slice(a, b).replace(/\s+/g, ' '));
+    if (sentences.length) breaks.add(sentences.length - 1);
+  }
+  return { sentences, breaks };
+}
+
 export function segment(root, options = QUOTE_DEFAULTS) {
   const groups = [];
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {

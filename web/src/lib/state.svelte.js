@@ -43,6 +43,8 @@ export const app = $state({
   ttsAudiobook: null,         // F141: {book, title, done, total, chapter, chapters}: sesli kitap kaydedilirken
   emotionJob: null,           // F170: {book, title, done, total, reading}: kitabin duygu etiketleri olusturulurken
   emotionBooks: [],           // F170: etiketli surumu olan kitaplar (tts_emotions_books)
+  // F178 Metinden ses: yazilan metin, cikti adi, suren kayit {done, total, loading} ve son kaydedilen dosya {path, url, duration}.
+  speech: { text: '', name: '', job: null, last: null },
   ttsPrefs: { device: 'auto', speed: 1, voices: {}, options: {} },
   // Komut satirindan ya da baska sayfadan acilmak uzere bekleyen video (Translate acilinca alir).
   pendingVideo: null,
@@ -79,7 +81,7 @@ export function setThink(value) {
   savePref({ think: app.think });
 }
 
-const VIEWS = ['chat', 'library', 'files', 'translate', 'books', 'reading', 'subscriptions', 'console'];
+const VIEWS = ['chat', 'library', 'files', 'translate', 'books', 'reading', 'speech', 'subscriptions', 'console'];
 
 export const READER_DEFAULTS = { size: 19, font: 'serif', leading: 1.75, width: 680, paper: 'theme' };
 
@@ -258,6 +260,13 @@ export async function init() {
     app.ttsExport = null;
     if (data.error) toast('Ses kaydedilemedi: ' + data.error, 'error');
     else toast(`Ses kaydedildi (${data.count} cümle): ${data.path}`, 'ok');
+  });
+  on('tts_speech', (data) => {
+    if (!data.finished) { app.speech.job = { total: app.speech.job?.total ?? 0, ...data }; return; }
+    app.speech.job = null;
+    if (data.error) toast('Ses kaydedilemedi: ' + data.error, 'error');
+    else if (data.cancelled) toast('Ses kaydı durduruldu.');
+    else { app.speech.last = { path: data.path, url: data.url, duration: data.duration }; toast('Ses kaydedildi: ' + data.path, 'ok'); }
   });
   // F170: kitabin duygu etiketleri (kitapliktan, butun kitap icin).
   on('tts_emotions', (data) => {

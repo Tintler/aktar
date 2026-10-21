@@ -16,6 +16,7 @@ import audio_trim
 import audiobook
 import drama3_tags
 import emotion_tags
+import text_speech
 import voice_presets
 from app_core import APP_DIR, ROOT
 from tts import Engines
@@ -247,21 +248,30 @@ class TtsMixin:
         try:
             override = self._voice_override(voice)
             language = self._override_language(override, 'tr')
-            engines = self._engines()
-            device = self.ui_prefs().get('tts', {}).get('device', 'auto')
-            for _attempt in range(3):   # baska bir ses yukleniyorsa o bitince yeniden istenir
-                engines.load(language, device, override)
-                deadline = time.monotonic() + 600
-                while engines.state == 'loading' and time.monotonic() < deadline:
-                    time.sleep(0.2)
-                if engines.state != 'ready':
-                    return {'error': engines.message or 'Ses motoru yüklenemedi.'}
-                if (engines.current.get('engine'), engines.current.get('voice')) == engines.choice(language, override):
-                    break
+            error = self._load_and_wait(language, override)
+            if error:
+                return {'error': error}
             text = ' '.join(str(text or '').split())[:200] or PREVIEW_TEXT
-            return engines.say(text, 1.0, None, language, override)
+            return self._engines().say(text, 1.0, None, language, override)
         except Exception as error:
             return _error(error)
+
+    def _load_and_wait(self, language, override, cancel=None):
+        """Motoru o sese hazirlar ve bitmesini bekler (bloklar). Hata metni ya da None."""
+        engines = self._engines()
+        device = self.ui_prefs().get('tts', {}).get('device', 'auto')
+        for _attempt in range(3):   # baska bir ses yukleniyorsa o bitince yeniden istenir
+            engines.load(language, device, override)
+            deadline = time.monotonic() + 600
+            while engines.state == 'loading' and time.monotonic() < deadline:
+                if cancel is not None and cancel.is_set():
+                    return 'Durduruldu.'
+                time.sleep(0.2)
+            if engines.state != 'ready':
+                return engines.message or 'Ses motoru yüklenemedi.'
+            if (engines.current.get('engine'), engines.current.get('voice')) == engines.choice(language, override):
+                return None
+        return 'Ses motoru başka bir ses için kullanılıyor.'
 
     def _preset_recording(self, ref):
         """Kayitli sesin (preset:<kimlik>) klon kaydi dosyasi; yoksa None (tarifli ses ya da motor sesi)."""
@@ -570,10 +580,97 @@ class TtsMixin:
         self.save_ui_prefs({'tts': tts})
         return tts
 
+    # ------------------------------------------------------------------ metinden ses (F178)
+    def _speech_running(self):
+        job = getattr(self, '_speech_job', None)
+        return job is not None and job.is_alive()
+
+    def tts_speech_folder(self):
+        """Ciktinin yazilacagi klasor (pencereyle secilir): {'folder'}; vazgecilirse None."""
+        chosen = self._dialog('open_folder', 'Ses dosyalarının kaydedileceği klasörü seç')
+        return {'folder': str(chosen)} if chosen else None
+
+    def tts_speech_read(self, path):
+        """Birakilan metin dosyasinin icerigi: {'text', 'name'}."""
+        try:
+            return {'text': text_speech.read_text(path), 'name': Path(path).stem}
+        except (ValueError, OSError) as error:
+            return _error(error)
+
+    def tts_speech_create(self, sentences, gaps=None, breaks=None, voice='', folder='', name='', speed=1.0, fmt='wav'):
+        """Metni `voice` sesiyle (''=Ayarlardaki ses, 'preset:<kimlik>', '<motor>/<ses>') okutup `folder`'a yazar.
+        `breaks`: paragraf sonu cumle dizinleri. Arka planda; ilerleme ve sonuc 'tts_speech' olayiyla gelir."""
+        if self._speech_running():
+            return {'error': 'Bir ses kaydı zaten sürüyor.'}
+        running = getattr(self, '_tool_running', None)
+        if (running is not None and running() and self._tool['kind'] in ('dub', 'dubgen')) or self._audiobook_running():
+            return {'error': 'Ses motoru şu an dublaj ya da sesli kitap için kullanılıyor.'}
+        sentences = list(sentences or ())
+        pairs = text_speech.clean(sentences, gaps)
+        if not pairs:
+            return {'error': 'Seslendirilecek metin yok.'}
+        if sum(len(text) for text, _gap in pairs) > text_speech.TEXT_LIMIT:
+            return {'error': 'Metin çok uzun (en fazla 200.000 karakter).'}
+        folder = str(folder or '').strip()
+        if not folder or not Path(folder).is_dir():
+            return {'error': 'Kayıt klasörü bulunamadı; bir klasör seçin.'}
+        fmt = fmt if fmt in text_speech.FORMATS else 'wav'
+        override = self._voice_override(voice)
+        if voice and override is None:
+            return {'error': 'Seçilen ses bulunamadı.'}
+        language = self._override_language(override, 'tr')
+        # breaks gelen dizinlerdir; bos cumleler atlandigi icin pairs dizinlerine cevrilir
+        kept = [i for i, text in enumerate(sentences) if ' '.join(str(text).split())]
+        wanted = {int(i) for i in (breaks or ()) if isinstance(i, (int, float))}
+        marks = [index for index, original in enumerate(kept) if original in wanted]
+        try:
+            target = text_speech.output_path(folder, name, pairs[0][0], fmt)
+        except OSError as error:
+            return _error(error)
+        cancel = threading.Event()
+        self._speech_cancel = cancel
+
+        def work():
+            try:
+                self._emit('tts_speech', {'done': 0, 'total': len(pairs), 'loading': True})
+                error = self._load_and_wait(language, override, cancel)
+                if cancel.is_set():
+                    raise text_speech.Cancelled('Durduruldu.')
+                if error:
+                    raise RuntimeError(error)
+                engines = self._engines()
+                groups = text_speech.group(pairs, engines.group_chars(language, override), marks)
+                seconds = text_speech.write(engines, groups, speed, target, language, override,
+                                            lambda done, total: self._emit('tts_speech', {'done': done, 'total': total}),
+                                            cancel)
+                self._log('Metinden ses kaydedildi: ' + str(target))
+                try:
+                    url = self._media.file_url(target)   # sayfada dinlemek icin
+                except Exception:
+                    url = ''
+                self._emit('tts_speech', {'finished': True, 'path': str(target), 'url': url, 'duration': seconds,
+                                          'count': len(pairs)})
+            except text_speech.Cancelled:
+                self._emit('tts_speech', {'finished': True, 'cancelled': True})
+            except Exception as error:
+                self._log(f'HATA: Metinden ses kaydedilemedi: {error}')
+                self._emit('tts_speech', {'finished': True, 'error': str(error)})
+
+        self._speech_job = threading.Thread(target=work, name='aktar-tts-speech', daemon=True)
+        self._speech_job.start()
+        return {'started': True, 'path': str(target), 'total': len(pairs)}
+
+    def tts_speech_cancel(self):
+        cancel = getattr(self, '_speech_cancel', None)
+        if cancel:
+            cancel.set()
+        return True
+
     def _stop_tts_for_close(self):
         """Pencere kapaninca: hazirlama durur, motor sureci kapatilir."""
         self.tts_prepare_cancel()
         self.tts_audiobook_cancel()
+        self.tts_speech_cancel()
         cancel = getattr(self, '_emotion_cancel', None)
         if cancel is not None:
             cancel.set()   # F168: model sunucusuyla etiketleme

@@ -15,6 +15,7 @@
   import Translate from './views/Translate.svelte';
   import Books from './views/Books.svelte';
   import Reading from './views/Reading.svelte';
+  import TextSpeech from './views/TextSpeech.svelte';
   import PdfReview from './views/PdfReview.svelte';
   import Settings from './views/Settings.svelte';
   import Player from './views/Player.svelte';
@@ -39,6 +40,7 @@
     ['translate', 'Altyazı Çevir', 'languages'],
     ['books', 'Kitap Çevir', 'bookA'],
     ['reading', 'Okuma', 'book'],
+    ['speech', 'Metinden ses', 'waveform'],
     ['subscriptions', 'Abonelikler', 'creditCard'],
     ['console', 'Konsol', 'terminal'],
   ];
@@ -90,6 +92,7 @@
     : app.view === 'books' ? 'EPUB, PDF ya da çeviri klasörünü açmak için bırakın'
     : app.view === 'reading' ? "E-kitabı (EPUB, MOBI, AZW3, FB2) ya da PDF'yi kitaplığa eklemek için bırakın"
     : app.view === 'files' ? 'İncelemek için bırakın'
+    : app.view === 'speech' ? 'Metin dosyasını (.txt) açmak için bırakın'
     : app.view === 'subscriptions' ? 'Logo olarak eklemek için bırakın' : 'Koleksiyona eklemek için bırakın');
 
   async function submitBookReview(values) {
@@ -157,6 +160,7 @@
       {:else if app.view === 'translate'}<Translate />
       {:else if app.view === 'books'}<Books />
       {:else if app.view === 'reading'}<Reading />
+      {:else if app.view === 'speech'}<TextSpeech />
       {:else if app.view === 'pdfreview' && app.pdfReview}{#key app.pdfReview.path}<PdfReview />{/key}
       {:else if app.view === 'player'}<Player />
       {:else if app.view === 'document'}<Document />
