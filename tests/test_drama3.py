@@ -290,6 +290,12 @@ class SilentPieceTests(unittest.TestCase):
         self.assertFalse(drama3.ends_abruptly(noisy, RATE))
         self.assertTrue(drama3.ends_abruptly(tone(2.0) + tone(1.0, level=700) + tone(0.1, level=8000), RATE))
 
+    def test_abrupt_threshold_uses_reference_floor(self):
+        # kisa ve kesintisiz konusan parca: kendi tabani konusmanin kendisi; klon kaydinin tabaniyla kesilme yakalanir
+        self.assertFalse(drama3.ends_abruptly(tone(1.7), RATE))
+        self.assertTrue(drama3.ends_abruptly(tone(1.7), RATE, floor=740))
+        self.assertFalse(drama3.ends_abruptly(tone(1.7) + silence(0.06), RATE, floor=740))
+
     def test_fade_out(self):
         faded = drama3.fade_out(tone(1.0), RATE)
         self.assertEqual(faded[-1], 0)

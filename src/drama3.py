@@ -324,12 +324,14 @@ def noise_floor(samples, rate):
     return peaks[len(peaks) // 10] if peaks else 0
 
 
-def ends_abruptly(samples, rate, level=ABRUPT_LEVEL):
+def ends_abruptly(samples, rate, level=ABRUPT_LEVEL, floor=None):
     """Ses sessizlige inmeden mi bitiyor (son 50 ms'de konusma): model parcayi erken bitirmis, son kelime ya da hece
     eksik (F162: 'ifadeler icin [tariyorum]'). Esik sesin gurultu tabaninin 3 kati (F164: gurultulu klon seste
-    parcalar bosuna yeniden isteniyordu)."""
+    parcalar bosuna yeniden isteniyordu). `floor`: klon kaydinin gurultu tabani (F167: parcanin kendisinden olculunce
+    kisa ve kesintisiz konusan parcada taban konusmanin kendisi oluyor, hicbir kesilme yakalanmiyordu)."""
     tail = samples[-max(1, int(rate * 0.05)):]
-    return max(map(abs, tail), default=0) > max(level, 3 * noise_floor(samples, rate))
+    floor = noise_floor(samples, rate) if floor is None else floor
+    return max(map(abs, tail), default=0) > max(level, 3 * floor)
 
 
 def letters(text):
@@ -499,6 +501,7 @@ class Engine:
         self._log = log or (lambda _message: None)
         self._lock = threading.Lock()
         self.reference = None
+        self.floor = None      # klon kaydinin gurultu tabani (ends_abruptly esigi)
         self.voice = None
 
     @property
@@ -515,6 +518,10 @@ class Engine:
         self._stage('Klon kaydı hazırlanıyor…')
         self.reference = prepare_reference(reference, (options or {}).get('reference_text'),
                                            self.data_dir / 'kayitlar', self._transcribe, language, self._log)
+        try:
+            self.floor = noise_floor(*read_pcm(base64.b64decode(self.reference['data'])))
+        except (ValueError, EOFError, wave.Error, ServerError):
+            self.floor = None    # okunamazsa her parcanin kendi tabani
         self.voice = voice
         return {'device': 'sunucu', 'reference_text': self.reference['text'], 'reference_seconds': self.reference['seconds']}
 
@@ -545,7 +552,7 @@ class Engine:
                 if len(halves) > 1:
                     self._log(f'Drama 3: parça sunucunun süre sınırına takıldı, bölünüyor: {piece[:60]}')
                     return [clip for half in halves for clip in self._piece(half, references, settings, depth + 1)]
-            silent, abrupt = fell_silent(piece, samples, rate), ends_abruptly(samples, rate)
+            silent, abrupt = fell_silent(piece, samples, rate), ends_abruptly(samples, rate, floor=self.floor)
             if not silent and not abrupt:
                 return [(samples, rate)]
             reason = 'cümlenin bir kısmını atladı' if silent else 'parçayı erken bitirdi'
