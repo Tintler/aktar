@@ -607,7 +607,8 @@
         <VoicePicker onchange={voiceChanged} />
         {#if emotions?.info && emotions.engine}
           <button class="chip" class:acc={emotions.enabled} onclick={toggleEmotions}
-            title={`Duygu etiketli okuma ${emotions.enabled ? 'açık' : 'kapalı'}: ${emotions.info.tagged} konuşma etiketli (gülme, iç çekme, fısıltı, bağırma, öfke). Tıklayınca ${emotions.enabled ? 'kapanır' : 'açılır'}.`}>
+            title={`Duygu etiketli okuma ${emotions.enabled ? 'açık' : 'kapalı'}: ${emotions.info.tagged} konuşma etiketli. Tıklayınca ${emotions.enabled ? 'kapanır' : 'açılır'}.`
+              + (emotions.missing?.length ? ` Ayarlarda yeni seçilen ${emotions.missing.join(' ')} bu kitapta yok: kitaplıktan yeniden etiketleyin.` : '')}>
             <Icon name="sparkles" size={14} />Duygulu</button>
         {/if}
         <button class="chip acc" title="Okuma hızı" onclick={cycleSpeed}>{app.ttsPrefs.speed.toLocaleString('tr-TR')}×</button>

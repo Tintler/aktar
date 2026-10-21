@@ -36,10 +36,13 @@
     menu = null;
     if (app.emotionJob) { toast('Başka bir kitabın duygu etiketleri oluşturuluyor.'); return; }
     if (app.ttsPrepare || app.ttsAudiobook) { toast('Ses hazırlanırken ya da sesli kitap kaydedilirken duygu etiketi oluşturulamaz.'); return; }
+    const catalog = await act('tts_emotion_catalog');
+    if (!catalog) return;
+    if (!catalog.allowed.length) { toast("Ayarlar → Ses'te Drama 3 için en az bir duygu etiketi seçin.", 'error'); return; }
     const method = await choose({
       title: tagged(book) ? 'Duygu etiketlerini yeniden oluştur' : 'Duygu etiketleri oluştur',
-      message: `"${book.title}" kitabının diyaloglarına gülme, iç çekme, fısıltı, bağırma ve öfke etiketleri eklenir ` +
-        "(Fish Audio Drama 3 ile okurken kullanılır). Model kipi Ayarlar → Modeller'deki sohbet modelini kullanır; " +
+      message: `"${book.title}" kitabının diyaloglarına Ayarlar → Ses'te seçtiğiniz etiketler eklenir (Fish Audio Drama 3 ` +
+        `ile okurken kullanılır): ${catalog.allowed.join(' ')}. Model kipi Ayarlar → Modeller'deki sohbet modelini kullanır; ` +
         'bu sırada ses motoru durdurulur, bitince model boşaltılır.',
       options: [
         { value: 'llm', label: 'Model sunucusuyla (bağlamdan; anlatıcı ipuçları da geçerli)' },

@@ -187,6 +187,15 @@ class BridgeTests(unittest.TestCase):
         done = self.finish()
         self.assertTrue(done['finished'])
         self.assertEqual(done['info']['tagged'], 2)
+        catalog = self.bridge.tts_emotion_catalog()
+        self.assertEqual(catalog['allowed'], ['[fısıldar]', '[shouting]', '[angry]', '[laughs]', '[sighs]'])
+        self.assertEqual(len(catalog['tags']), len(drama3.EMOTION_TAGS))
+        self.bridge.prefs['emotion_allowed'] = ['[laughs]', '[sad]']
+        self.assertEqual(self.bridge._emotion_tag(BOOK, '— Yeter!'), '')   # [angry] secimden cikarildi
+        self.assertEqual(self.bridge.tts_emotions_info(BOOK)['missing'], ['[sad]'])
+        self.bridge.prefs['emotion_allowed'] = []
+        self.assertIn('error', self.bridge.tts_emotions_create(BOOK, BookTaggingTests.SECTIONS, 'words'))
+        del self.bridge.prefs['emotion_allowed']
         self.assertEqual(self.bridge.tts_emotions_books(), [BOOK])
         self.assertEqual(self.bridge._emotion_tag(BOOK, '— Yeter!'), '[angry]')
         self.bridge.prefs['emotion_tags'] = 'off'
@@ -246,13 +255,65 @@ class BridgeTests(unittest.TestCase):
             self.bridge._emotion_job.join()
 
 
+class CatalogTests(unittest.TestCase):
+    """F171: Drama 3 etiket katalogu; yalnizca Ayarlar'da secilenler kullanilir."""
+
+    def test_catalog_is_consistent(self):
+        import drama3_tags
+        self.assertEqual(len(set(drama3_tags.ALL_TAGS)), len(drama3_tags.ALL_TAGS))
+        self.assertEqual(drama3_tags.DEFAULT_TAGS, ('[fısıldar]', '[shouting]', '[angry]', '[laughs]', '[sighs]'))
+        self.assertTrue(all(tag.startswith('<') for tag in drama3_tags.PAIRED_TAGS))
+        self.assertEqual(drama3_tags.allowed(None), drama3_tags.DEFAULT_TAGS)
+        self.assertEqual(drama3_tags.allowed(['[laughs]', '[yok]', '[sad]']), ('[sad]', '[laughs]'))
+        self.assertEqual(drama3_tags.allowed([]), ())
+        self.assertEqual(set(drama3.EMOTION_TAGS), set(drama3_tags.ALL_TAGS))
+
+    def test_words_use_only_chosen_tags(self):
+        sentences = ['— Yine mi geldin? dedi üzgünce.', '— Gel buraya, diye bağırdı hüzünle.']
+        self.assertEqual(emotion_tags.tag_sentences(sentences, [0, 1]), ['', '[shouting]'])
+        self.assertEqual(emotion_tags.tag_sentences(sentences, [0, 1], ['[sad]']), ['[sad]', '[sad]'])
+        self.assertEqual(emotion_tags.tag_sentences(sentences, [0, 1], []), ['', ''])
+
+    def test_prompt_and_answer_follow_the_choice(self):
+        prompt = emotion_tags.llm_prompt(['[sad]', '<soft>'])
+        self.assertIn('[sad] (', prompt)
+        self.assertIn('<soft> (', prompt)
+        self.assertNotIn('[laughs]', prompt)
+        self.assertIn('{"12": "[sad]", "15": "<soft>"}', prompt)
+        sentences = ['— Bir.', '— İki.', '— Üç.']
+        answer = '{"0": "<soft>", "1": "laughs", "2": "sad"}'
+        self.assertEqual(emotion_tags.parse_llm(answer, sentences, 0, 3, ['<soft>', '[sad]']), {0: '<soft>', 2: '[sad]'})
+
+    def test_store_skips_tags_removed_from_the_choice(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = emotion_tags.Store(folder)
+            info = store.save(BOOK, 'words', [{'sentences': ['— Bir.', '— İki.']}], [['[sad]', '[laughs]']],
+                              ['[sad]', '[laughs]'])
+            self.assertEqual(info['allowed'], ['[sad]', '[laughs]'])
+            self.assertEqual(store.tag(BOOK, '— Bir.', ['[sad]', '[laughs]']), '[sad]')
+            self.assertEqual(store.tag(BOOK, '— Bir.'), '')        # varsayilan secimde [sad] yok
+            self.assertEqual(store.tag(BOOK, '— İki.'), '[laughs]')
+
+    def test_paired_tag_wraps_the_speech_and_is_balanced(self):
+        self.assertEqual(drama3.tagged('O fısıldayarak: “Sessiz ol,” dedi.', '<whisper>'),
+                         'O fısıldayarak: <whisper>“Sessiz ol,”</whisper> dedi.')
+        self.assertEqual(drama3.tagged('— Ne yapalım.', '<slow>'), '— <slow>Ne yapalım.</slow>')
+        long = drama3.tagged('— Bir iki üç dört beş altı yedi sekiz dokuz on, on bir on iki on üç on dört on beş on '
+                             'altı on yedi.', '<soft>')
+        pieces = [p for p, _gap in drama3.split_text(long, 60)]
+        self.assertEqual(len(pieces), 2)
+        self.assertTrue(all(p.count('<soft>') == 1 and p.endswith('</soft>') for p in pieces))
+        self.assertEqual(drama3.untag('[laughs] <soft>Gel.</soft>'), 'Gel.')
+        self.assertEqual(drama3.untag('Gel.'), '')
+
+
 class Drama3TextTests(unittest.TestCase):
     def test_tag_goes_before_the_quote(self):
         self.assertEqual(drama3.tagged('O fısıldayarak: “Sessiz ol,” dedi.', '[fısıldar]'),
                          'O fısıldayarak: [fısıldar] “Sessiz ol,” dedi.')
         self.assertEqual(drama3.tagged('"Gel!" diye bağırdı.', '[shouting]'), '[shouting] "Gel!" diye bağırdı.')
         self.assertEqual(drama3.tagged('— Ne yapalım.', '[sighs]'), '[sighs] — Ne yapalım.')
-        self.assertEqual(drama3.tagged('Metin.', '[crying]'), 'Metin.')
+        self.assertEqual(drama3.tagged('Metin.', '[dances]'), 'Metin.')
 
     def test_split_puts_the_tag_at_a_piece_start(self):
         pieces = [p for p, _gap in drama3.split_text('Adam öfkeyle vurdu. [angry] “Yeter, git!”')]

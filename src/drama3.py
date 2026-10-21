@@ -32,6 +32,8 @@ import urllib.request
 import wave
 from pathlib import Path
 
+import drama3_tags
+
 DEFAULT_URL = 'http://127.0.0.1:7861'
 MODEL = 'drama-3'
 MAX_CHARS = 150            # bir istekte en fazla karakter (Ayarlar'dan 60-250); kisa parca daha az atlar ama
@@ -60,7 +62,7 @@ TAG_SECONDS = 1.5             # F168: duygu etiketiyle baslayan parcada gulme/ic
 # denemeler cogunlukla en kisik olanlardi (konusma duzeyi -26...-30 dB, siradan -17...-23 dB). Fisilti etiketli
 # parca icin WHISPER_TAKES saglam deneme uretilip duzeyi en dusuk olan secilir.
 WHISPER_TAG = '[fısıldar]'
-WHISPER_TAKES = 3
+WHISPER_TAKES = 3             # F171: [whisper], [whispering] ve <whisper> icin de (drama3_tags.WHISPER_TAGS)
 LEVEL_WINDOW = 0.05           # speech_level: 50 ms pencerelerin RMS'i...
 LEVEL_QUANTILE = 0.8          # ...%80'lik dilimi (sessiz araliklar ve tek tepeler etkilemez)
 VOICED_LEVEL = 1500           # 100 ms pencerede bu tepeyi asan bolum konusma sayilir
@@ -81,10 +83,15 @@ RECORDING_HINT = ('En iyi sonuç: 8-15 saniyelik, sakin, gürültüsüz ve tam b
 _SENTENCE_END = re.compile(r'(?<=[.!?…])["\'»”’)\]]*\s+')
 _CLAUSE_END = re.compile(r'(?<=[,;:])\s+')
 _SPEAKER = re.compile(r'<\|speaker:\d+\|>')
-# F168: Turkce Drama 3'te calisan duygu etiketleri (emotion_tags.TAGS); yalnizca parcanin basinda etkili
-EMOTION_TAGS = ('[laughs]', '[sighs]', '[fısıldar]', '[shouting]', '[angry]')
-_EMOTION = re.compile('|'.join(re.escape(tag) for tag in EMOTION_TAGS))
+# F168: duygu etiketleri; F171: katalogdaki butun etiketler (drama3_tags, Ayarlar'da secilir). Nokta etiketleri
+# ([laughs] ...) yalnizca parcanin basinda etkili; cift etiketler (<soft>...</soft>) konusmayi sarar.
+EMOTION_TAGS = drama3_tags.ALL_TAGS
+_EMOTION = re.compile('|'.join(re.escape(tag) for tag in drama3_tags.POINT_TAGS))
 _BEFORE_EMOTION = re.compile(r'\s+(?=' + _EMOTION.pattern + ')')
+_PAIRED = re.compile(r'<(/?)(' + '|'.join(re.escape(tag[1:-1]) for tag in drama3_tags.PAIRED_TAGS) + r')>')
+PAIRED_KEEP = 80              # bundan kisa cift etiket araligi (kelime vurgusu) bolunmez
+_CLOSE_QUOTE = re.compile(r'[”»"]')
+_LEADING_DASH = re.compile(r'[—–-]\s*')
 _OPEN_QUOTE = re.compile(r'[“«]|(?:(?<=\s)|^)"')
 
 
@@ -167,7 +174,8 @@ def _detail(error):
 
 # ---------------------------------------------------------------- metni parcalara bolme
 def _protected(text):
-    """Bolunmemesi gereken araliklar: <whisper>...</whisper> gibi acik etiketlerin ici ve <|...|>."""
+    """Bolunmemesi gereken araliklar: <whisper>...</whisper> gibi acik etiketlerin ici (F171: PAIRED_KEEP'ten uzunsa
+    bolunur, balance_pairs her parcada yeniden acip kapatir: butun konusmayi saran etiket) ve <|...|>."""
     spans, stack = [], []
     for match in re.finditer(r'<\|[^|>]*\|>|<(/?)([A-Za-z][\w-]*)>', text):
         if match.group(0).startswith('<|'):
@@ -175,8 +183,10 @@ def _protected(text):
         elif not match.group(1):
             stack.append((match.group(2), match.start()))
         elif stack and stack[-1][0] == match.group(2):
-            spans.append((stack.pop()[1], match.end()))
-    if stack:   # kapanmayan etiket: sonuna kadar
+            start = stack.pop()[1]
+            if match.end() - start <= PAIRED_KEEP:
+                spans.append((start, match.end()))
+    if stack and len(text) - stack[0][1] <= PAIRED_KEEP:   # kapanmayan etiket: sonuna kadar
         spans.append((stack[0][1], len(text)))
     return spans
 
@@ -245,13 +255,45 @@ def model_text(piece):
 
 def tagged(text, tag):
     """F168: sunucuya giden metne duygu etiketi: tirnaktan once ('Ali gulerek: [laughs] "Merhaba!"'), tirnak yoksa
-    (cizgili diyalog) en basa. Etiket yalnizca parcanin basinda calistigi icin split_text etiketten once boler."""
+    (cizgili diyalog) en basa. Etiket yalnizca parcanin basinda calistigi icin split_text etiketten once boler.
+    F171: cift etiket konusmayi sarar: tirnakli soz ('<soft>"Gel."</soft> dedi.'), yoksa cizgiden sonrasi."""
     text = ' '.join(str(text or '').split())
     if tag not in EMOTION_TAGS or not text:
         return text
     match = _OPEN_QUOTE.search(text)
+    if tag in drama3_tags.PAIRED_TAGS:
+        name = tag[1:-1]
+        if match:
+            start = match.start()
+            close = _CLOSE_QUOTE.search(text, start + 1)
+            end = close.end() if close else len(text)
+        else:
+            dash = _LEADING_DASH.match(text)
+            start, end = (dash.end() if dash else 0), len(text)
+        return f'{text[:start]}<{name}>{text[start:end]}</{name}>{text[end:]}'
     position = match.start() if match and re.search(r'[^\W\d_]', text[:match.start()]) else 0
     return (text[:position] + tag + ' ' + text[position:]).strip()
+
+
+def balance_pairs(pieces):
+    """F171: bolunen metinde cift etiketi her parcada kapatir ve sonrakinde yeniden acar ('<soft>Bir, iki.</soft>'
+    -> '<soft>Bir,</soft>' + '<soft>iki.</soft>'); sunucuya her istek kendi icinde tutarli gider."""
+    result, open_name = [], ''
+    for piece in pieces:
+        if open_name:
+            piece = f'<{open_name}>{piece}'
+        for match in _PAIRED.finditer(piece):
+            open_name = '' if match.group(1) else match.group(2)
+        if open_name:
+            piece = f'{piece}</{open_name}>'
+        result.append(re.sub(r'<(\w+)>\s*</\1>', '', piece).strip())
+    return result
+
+
+def untag(piece):
+    """Etiketsiz parca (yeniden deneme icin): bastaki nokta etiketi ve butun cift etiketler cikar; etiket yoksa ''."""
+    plain = ' '.join(_PAIRED.sub('', _EMOTION.sub('', piece, count=1) if _EMOTION.match(piece) else piece).split())
+    return plain if plain != piece else ''
 
 
 def split_text(text, limit=MAX_CHARS):
@@ -273,6 +315,7 @@ def split_text(text, limit=MAX_CHARS):
             result[-1] = (result[-1][0] + ' ' + sentence, SENTENCE_GAP)
         else:
             result.append((sentence, SENTENCE_GAP))
+    result = list(zip(balance_pairs([piece for piece, _gap in result]), [gap for _piece, gap in result]))
     speaker = ''
     tagged = []
     for piece, gap in result:
@@ -584,8 +627,9 @@ class Engine:
         icin WHISPER_TAKES saglam deneme istenir ve ses duzeyi en dusuk olan secilir (etiketsiz deneme yalnizca hicbiri
         saglam degilse); sinira bir kez takilan fisilti denemesi basarisiz sayilir, ikincisinde etiketsiz istenir."""
         best, passed, capped = None, [], False
-        untagged = _EMOTION.sub('', piece, count=1).strip() if _EMOTION.match(piece) else ''
-        takes = WHISPER_TAKES if piece.startswith(WHISPER_TAG) else 1
+        untagged = untag(piece)
+        whisper = any(piece.startswith(tag) for tag in drama3_tags.WHISPER_TAGS) or '<whisper>' in piece
+        takes = WHISPER_TAKES if whisper else 1
         attempts = (((settings['temperature'], settings['top_p']),) * takes
                     + tuple((t, None) for t in SILENT_RETRY_TEMPERATURES))
         for attempt, (temperature, top_p) in enumerate(attempts):
@@ -603,7 +647,7 @@ class Engine:
                 self._log(f'Drama 3: etiketli parça süre sınırına takıldı, etiketsiz yeniden isteniyor: {piece[:60]}')
                 return self._piece(untagged, references, settings, depth + 1)
             if len(samples) / rate >= CAP_SECONDS and depth < 3:
-                halves = halve(text)
+                halves = balance_pairs(halve(text))
                 if len(halves) > 1:
                     self._log(f'Drama 3: parça sunucunun süre sınırına takıldı, bölünüyor: {piece[:60]}')
                     return [clip for half in halves for clip in self._piece(half, references, settings, depth + 1)]

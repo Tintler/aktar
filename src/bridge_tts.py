@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 import audiobook
+import drama3_tags
 import emotion_tags
 import voice_presets
 from app_core import APP_DIR, ROOT
@@ -49,14 +50,22 @@ class TtsMixin:
         """ui.json tts.emotion_tags: 'off' kapali; yoksa (ya da eski 'words'/'llm') etiketli surum kullanilir."""
         return (self.ui_prefs().get('tts', {}).get('emotion_tags') or 'on') != 'off'
 
+    def _emotion_allowed(self):
+        """F171: Ayarlar'da secilen etiketler (ui.json tts.emotion_allowed; yoksa calistigi bilinenler)."""
+        return drama3_tags.allowed(self.ui_prefs().get('tts', {}).get('emotion_allowed'))
+
     def _emotion_tag(self, book, text):
         """tts.Engines'in sordugu cumle etiketi: kitabin etiketli surumunden; kapaliysa ya da surum yoksa ''."""
         if not self._emotion_enabled():
             return ''
         try:
-            return self._emotion_store().tag(book, text)
+            return self._emotion_store().tag(book, text, self._emotion_allowed())
         except (OSError, ValueError):
             return ''
+
+    def tts_emotion_catalog(self):
+        """F171: Drama 3 etiket katalogu ve secili olanlar (Ayarlar)."""
+        return {'tags': drama3_tags.public(), 'allowed': list(self._emotion_allowed())}
 
     def tts_emotions_books(self):
         """F170: etiketli surumu olan kitaplar (kitaplikta isaret icin)."""
@@ -74,7 +83,10 @@ class TtsMixin:
         engines = self._engines()
         engine_id, _voice = engines.choice(language)
         supported = bool(engine_id and engines._manifests().get(engine_id, {}).get('emotion_tags'))
-        return {'info': info, 'engine': supported, 'enabled': self._emotion_enabled()}
+        allowed = self._emotion_allowed()
+        missing = [tag for tag in allowed if info and tag not in (info.get('allowed') or drama3_tags.DEFAULT_TAGS)]
+        return {'info': info, 'engine': supported, 'enabled': self._emotion_enabled(), 'allowed': list(allowed),
+                'missing': missing}
 
     def tts_emotions_create(self, book, sections, method='llm', title=''):
         """F170: butun kitabin etiketli surumunu arka planda olusturur (kitapligin sag tik menusu). `sections`:
@@ -84,6 +96,9 @@ class TtsMixin:
         if not hasattr(self, '_emotion_lock'):
             self._emotion_lock = threading.Lock()
         method = method if method in emotion_tags.METHODS else 'llm'
+        allowed = self._emotion_allowed()
+        if not allowed:
+            return _error("Ayarlar → Ses'te Drama 3 için en az bir duygu etiketi seçin.")
         try:
             self._emotion_store()._path(book)
         except ValueError as error:
@@ -122,8 +137,8 @@ class TtsMixin:
                         ask = lambda prompt: client.chat([{'role': 'user', 'content': prompt}], temperature=0,
                                                          max_tokens=1500)
                     progress(0, total)
-                    tags = emotion_tags.tag_book(sections, ask, cancel, progress)
-                    info = self._emotion_store().save(book, method, sections, tags)
+                    tags = emotion_tags.tag_book(sections, ask, cancel, progress, allowed)
+                    info = self._emotion_store().save(book, method, sections, tags, allowed)
                     self._log(f'Duygu etiketleri: {info["tagged"]} konuşma etiketlendi ({title or book}).')
                     self._emit('tts_emotions', {'book': book, 'title': title, 'finished': True, 'info': info})
                 except emotion_tags.Cancelled:

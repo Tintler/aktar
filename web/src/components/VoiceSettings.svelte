@@ -63,6 +63,26 @@
     if (path) setOption(value, key, path);
   }
 
+  // F171: Drama 3 etiket katalogu (drama3_tags): hangi etiketlerin kullanilacagi burada secilir (ui.json
+  // tts.emotion_allowed). Yeni secilen etiket icin kitap kitapliktan yeniden etiketlenmeli; kaldirilan hemen uygulanmaz.
+  const STATUS = { works: 'Çalıştı', fails: 'Çalışmadı', untested: 'Denenmedi' };
+  let catalog = $state(null);
+  $effect(() => {
+    if (app.engines.some((e) => e.emotion_tags) && !catalog) call('tts_emotion_catalog').then((c) => { if (c?.tags) catalog = c; });
+  });
+  const allowedTags = $derived(app.ttsPrefs.emotion_allowed ?? catalog?.tags.filter((t) => t.default).map((t) => t.tag) ?? []);
+  function toggleTag(tag, on) {
+    const chosen = new Set(allowedTags);
+    if (on) chosen.add(tag); else chosen.delete(tag);
+    app.ttsPrefs.emotion_allowed = catalog.tags.map((t) => t.tag).filter((t) => chosen.has(t));
+    saveTtsPrefs();
+  }
+  function defaultTags() {
+    delete app.ttsPrefs.emotion_allowed;
+    app.ttsPrefs = { ...app.ttsPrefs };
+    saveTtsPrefs();
+  }
+
   let cache = $state(null);
   const refreshCache = async () => { cache = await call('tts_cache_info'); };
   $effect(() => { app.ttsPrepare; refreshCache(); });
@@ -249,6 +269,25 @@
           <option value="off">Kapalı</option>
         </select>
       </div>
+      {#if catalog && app.ttsPrefs.emotion_tags !== 'off'}
+        <div class="fr sub tags-head">
+          <div class="l">Kullanılacak etiketler · {allowedTags.length} / {catalog.tags.length}<small>Drama 3'te sabit bir etiket
+            listesi yok; bunlar Fish Audio belgelerinde ve örneklerinde geçenler. Durum sizin dinleme setinize göre. [köşeli]
+            etiketler konuşmanın başına eklenir, &lt;çift&gt; etiketler konuşmayı sarar. Yeni seçtiğiniz etiket için kitabı
+            kitaplıktan yeniden etiketleyin; kaldırdığınız etiket hemen uygulanmaz.</small></div>
+          <button class="btn sm" onclick={defaultTags} disabled={!app.ttsPrefs.emotion_allowed}><Icon name="refresh" size={14} />Varsayılana dön</button>
+        </div>
+        <div class="tags">
+          {#each catalog.tags as item (item.tag)}
+            <label class="tag" class:on={allowedTags.includes(item.tag)}>
+              <input type="checkbox" checked={allowedTags.includes(item.tag)} onchange={(e) => toggleTag(item.tag, e.currentTarget.checked)} />
+              <span class="tb"><code>{item.kind === 'paired' ? `${item.tag}…</${item.tag.slice(1)}` : item.tag}</code>
+                <b>{item.label}</b><i class="st {item.status}">{STATUS[item.status]}</i>
+                <small>{item.examples}</small></span>
+            </label>
+          {/each}
+        </div>
+      {/if}
     {/if}
     {#if engine.settings?.length && app.ttsPrefs.engine_settings?.[engine.id]}
       <div class="fr sub">
@@ -396,4 +435,15 @@
   .num { width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
   .num.wide { width: 96px; }
   .seg button.on { background: var(--surface-active); color: var(--text); }
+  .tags-head { border-bottom: 0; }
+  .tags { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px; padding: 0 0 12px 16px; border-bottom: 1px dashed var(--outline); }
+  .tag { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--outline); cursor: pointer; }
+  .tag.on { border-color: color-mix(in srgb, var(--accent) 60%, var(--outline)); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+  .tag input { margin-top: 3px; accent-color: var(--accent); }
+  .tb { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; font-size: 13px; }
+  .tb code { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+  .tb small { flex-basis: 100%; color: var(--dim); font-size: 11px; }
+  .st { font-style: normal; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px; color: var(--secondary); background: var(--surface); }
+  .st.works { color: var(--success, #22c55e); background: color-mix(in srgb, var(--success, #22c55e) 12%, transparent); }
+  .st.fails { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
 </style>
