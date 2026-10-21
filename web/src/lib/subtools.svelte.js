@@ -9,7 +9,8 @@ export const subtool = $state({ job: null });
 export const KIND_NAMES = { align: 'Otomatik hizalama', ocr: 'Altyazı OCR', whisper: 'Kelime zamanları', clip: 'Klip kaydı', dub: 'Dublaj', diarize: 'Konuşmacı ayrımı' };
 const STAGE_NAMES = { whisper: 'Konuşmadan metin', frames: 'Altyazı görüntüleri', ocr: 'OCR', align: 'Hizalanıyor', clip: 'Klip kodlanıyor',
   engine: 'Ses motoru hazırlanıyor', voice: 'Seslendiriliyor', mix: 'Ses karıştırılıyor',
-  download: 'Model indiriliyor', separate: 'Konuşma ve müzik ayrılıyor', diarize: 'Konuşmacılar ayrılıyor' };
+  download: 'Model indiriliyor', separate: 'Konuşma ve müzik ayrılıyor', diarize: 'Konuşmacılar ayrılıyor',
+  expression: 'İfadeler çıkarılıyor' };
 const listeners = new Set();
 
 // Is bitince (done/error/cancelled) cagrilir: fn(job). Donen fonksiyon dinlemeyi birakir.
@@ -34,7 +35,8 @@ on('subtool', async (data) => {
     if (await confirm({ title: 'Klip kaydedildi', message: result.name + extra, ok: 'Konumu aç', cancel: 'Kapat' })) act('reveal', result.output);
   } else if (data.kind === 'dub') {
     const notes = [result.faster ? `${result.faster} satır sığması için hızlandırıldı` : '', result.shifted ? `${result.shifted} satır biraz kaydırıldı` : '',
-      result.overlapped ? `${result.overlapped} satır üst üste bindi` : '']
+      result.overlapped ? `${result.overlapped} satır üst üste bindi` : '',
+      result.tagged ? `${result.tagged} satıra ifade etiketi eklendi` : '', result.paused ? `${result.paused} duraklama aktarıldı` : '']
       .filter(Boolean).join(', ');
     if (await confirm({ title: 'Dublaj hazır', message: `${result.name} · ${result.lines} satır${notes ? '\n' + notes + '.' : ''}`, ok: 'Konumu aç', cancel: 'Kapat' })) {
       act('reveal', result.output);

@@ -12,6 +12,7 @@ Kullanim: aktar-whisper.exe <ses.wav> --model large-v3-turbo --device auto
 F146: ayni paket ses ayirma ve konusmaci ayrimini da yapar (sherpa-onnx, voice_split.py):
           aktar-whisper.exe --task separate <44k-stereo.wav> --vocals <a.wav> --background <b.wav> --model <onnx>
           aktar-whisper.exe --task diarize <16k-mono.wav> --segmentation <onnx> --embedding <onnx> [--speakers N]
+F172: aktar-whisper.exe --task expression <16k-mono.wav> --tagging <onnx> --labels <csv> --vad <onnx>
 """
 from __future__ import annotations
 
@@ -28,7 +29,7 @@ def main(argv=None):
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(prog='aktar-whisper')
-    parser.add_argument('--task', default='transcribe', choices=('transcribe', 'separate', 'diarize'))
+    parser.add_argument('--task', default='transcribe', choices=('transcribe', 'separate', 'diarize', 'expression'))
     parser.add_argument('audio')
     parser.add_argument('--model', default='large-v3-turbo')
     parser.add_argument('--device', default='auto', choices=('auto', 'cuda', 'cpu'))
@@ -40,6 +41,9 @@ def main(argv=None):
     parser.add_argument('--segmentation', default='')
     parser.add_argument('--embedding', default='')
     parser.add_argument('--speakers', type=int, default=0)
+    parser.add_argument('--tagging', default='')
+    parser.add_argument('--labels', default='')
+    parser.add_argument('--vad', default='')
     args = parser.parse_args(argv)
     if args.task != 'transcribe':
         return run_task(args)
@@ -64,6 +68,8 @@ def run_task(args):
         if args.task == 'separate':
             voice_split.run_separate(args.audio, args.vocals, args.background, args.model, progress=report)
             result = {'vocals': args.vocals, 'background': args.background}
+        elif args.task == 'expression':
+            result = voice_split.run_expression(args.audio, args.tagging, args.labels, args.vad, progress=report)
         else:
             result = voice_split.run_diarize(args.audio, args.segmentation, args.embedding, args.speakers,
                                              progress=report)

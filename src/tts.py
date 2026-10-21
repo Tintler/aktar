@@ -397,14 +397,22 @@ class Engines:
             return ''
         return self._emotion(book, ' '.join(str(text).split())) or ''
 
-    def _cache_path(self, book, text, speed, language, override=None):
+    def _tag_for(self, book, text, language='tr', override=None, tag=None):
+        """The emotion tag sent with a sentence: `tag` given by the caller (F172 dubbing, any voice of an engine with
+        "emotion_tags"), else the book's tag (emotion_tag)."""
+        if tag is None:
+            return self.emotion_tag(book, text, language, override)
+        engine_id, _voice = self.choice(language, override)
+        return str(tag or '') if engine_id and self._manifests().get(engine_id, {}).get('emotion_tags') else ''
+
+    def _cache_path(self, book, text, speed, language, override=None, tag=None):
         """Where a sentence rendered with the voice chosen for `language` is kept (None: no caching)."""
         if not book or not re.fullmatch(r'[0-9a-f]{8,40}', str(book)):
             return None
         engine_id, voice_id = self.choice(language, override)
         if engine_id is None:
             return None
-        emotion = self.emotion_tag(book, text, language, override)
+        emotion = self._tag_for(book, text, language, override, tag)
         options = self._voice_options(engine_id, voice_id, override)
         parts = [engine_id, voice_id, options, round(float(speed), 2), text]
         tag = self._manifests().get(engine_id, {}).get('cache_tag')   # motor.json: bump to re-render old sentences
@@ -425,19 +433,20 @@ class Engines:
             duration = clip.getnframes() / clip.getframerate()
         return {'audio': base64.b64encode(data).decode('ascii'), 'duration': duration}
 
-    def say(self, text, speed=1.0, book=None, language='tr', override=None):
-        """One sentence as base64 WAV: from the book's cache when it was rendered before, else from the engine."""
+    def say(self, text, speed=1.0, book=None, language='tr', override=None, tag=None):
+        """One sentence as base64 WAV: from the book's cache when it was rendered before, else from the engine.
+        `tag`: emotion tag chosen by the caller (F172); None reads the book's own (F168)."""
         text = ' '.join(str(text).split())
         if not text:
             return {'audio': '', 'duration': 0.0}
-        path = self._cache_path(book, text, speed, language, override)
+        path = self._cache_path(book, text, speed, language, override, tag)
         if path is not None and path.exists():
             return dict(self._clip(path.read_bytes()), cached=True)
         worker = self._ready_worker()
         engine_id, voice_id = self.choice(language, override)
         if (self.current.get('engine'), self.current.get('voice')) != (engine_id, voice_id):
             raise RuntimeError('Ses motoru hazır değil.')
-        tag = self.emotion_tag(book, text, language, override)
+        tag = self._tag_for(book, text, language, override, tag)
         extra = {'tag': tag} if tag else {}
         result = worker.request('say', text=text, speed=float(speed), rate=AUDIO_RATE, timeout=600, **extra)
         if path is not None and result.get('audio'):

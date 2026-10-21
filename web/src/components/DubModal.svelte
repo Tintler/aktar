@@ -3,6 +3,7 @@
   // varsayilan ses parcasi olarak eklenir. Is arka planda (altyazi araclari yuvasi, 'dub') calisir;
   // ilerleme oynaticidaki rozette ve sag ustteki is listesinde gorunur. Secenekler ui.json 'dub'da.
   // F146: 'separate' muzik ve efektleri korur (yalniz ozgun konusma kisilir); 'speakers' konusmaci basina ses.
+  // F172: 'expression' ozgun konusmadaki gulme, aglama, ic cekme... (Drama 3 etiketi) ve duraklamalar aktarilir.
   import Modal from './Modal.svelte';
   import Icon from '../lib/Icon.svelte';
   import Toggle from './Toggle.svelte';
@@ -15,7 +16,7 @@
   const saved = app.prefs.dub ?? {};
   let voice = $state(saved.voice ?? '');
   let opts = $state({ background: 0.25, duck: true, max_tempo: 1.35, format: 'mkv', speed: 1, separate: false, speakers: false,
-    normalize: false, overlap: false,
+    normalize: false, overlap: false, expression: false,
     ...(saved.opts ?? {}) });
   // Konusmacilar (F146): {available, message, ready, speakers: [{id, name, seconds, lines, sample}]}
   let speakerInfo = $state(null);
@@ -164,6 +165,16 @@
     <span class="label">{opts.separate ? 'Özgün konuşma düzeyi' : 'Özgün ses düzeyi'}: %{Math.round(opts.background * 100)}</span>
     <input type="range" min="0" max="1" step="0.05" bind:value={opts.background} />
     <Toggle bind:checked={opts.duck} label="Yalnızca dublaj konuşurken kıs (aralarda özgün ses tam düzeyde)" />
+  </div>
+
+  <div class="stack">
+    <Toggle bind:checked={opts.expression} disabled={speakerInfo && !speakerInfo.available}
+      label="Gülme, ağlama, iç çekme ve duraklamaları aktar" />
+    <span class="hint">{#if speakerInfo && !speakerInfo.available}{speakerInfo.message}{:else}Özgün konuşmadaki gülme, ağlama, iç çekme, fısıltı ve bağırma
+      Fish Audio Drama 3 etiketi olarak satıra eklenir (yalnızca Ayarlar → Ses'te seçili etiketler; diğer motorlar etiketsiz okur).
+      Konuşmacı cümle ortasında duraksadıysa satır en yakın noktalamadan bölünür ve kalanı özgün konuşma sürünce başlar.
+      Altyazıdaki (güler), [sighs] gibi notlar okunmaz, ifade olarak kullanılır. İlk kullanımda ~50 MB model indirilir;
+      müziği koruma açıksa ayrılmış konuşmadan çıkarılır (daha güvenilir).{/if}</span>
   </div>
 
   <div class="stack">

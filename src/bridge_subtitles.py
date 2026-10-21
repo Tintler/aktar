@@ -378,12 +378,13 @@ class SubtitleToolsMixin:
         """Secili altyaziyi seslendirip videonun yanina dublajli kopya (.dublaj.mkv) ya da ses (.m4a) yazar.
         `voice`: '' (sesli okumanin Turkce sesi), 'preset:<kimlik>' ya da '<motor>/<ses>'.
         F146: options.separate -> muzik/efekt korunur; options.speakers -> konusmaci basina ses
-        (`voices` {'0': ses}; verilmeyen konusmacilara farkli sesler otomatik atanir)."""
+        (`voices` {'0': ses}; verilmeyen konusmacilara farkli sesler otomatik atanir). F172 options.expression ->
+        ozgun konusmadaki gulme, aglama, duraklama... aktarilir (Drama 3 etiketleri Ayarlar'da secilenlerden)."""
         path = Path(str(path))
         if not key:
             return {'error': 'Seslendirilecek altyazıyı seçin (CC menüsü).'}
         options = dub.options_of(options)
-        if options['separate'] or options['speakers']:
+        if options['separate'] or options['speakers'] or options['expression']:
             ok, message = voice_split.available()
             if not ok:
                 return {'error': message}
@@ -415,23 +416,28 @@ class SubtitleToolsMixin:
         def work(cancel, progress):
             probed = info or media_server.probe(path)
             has_audio = bool(probed.get('audio'))
-            stems, plan, specs = None, None, None
+            stems, plan, specs, expression = None, None, None, None
+            if options['separate'] and has_audio:
+                stems = voice_split.separate(path, options['audio'], log=self._log, progress=progress,
+                                             cancelled=cancel.is_set)
+            if options['expression'] and has_audio:
+                analysis = voice_split.expression(path, options['audio'], stems[0] if stems else None, log=self._log,
+                                                  progress=progress, cancelled=cancel.is_set)
+                expression = {'analysis': analysis, 'allowed': self._emotion_allowed(), 'tags': True}
             if options['speakers']:
                 speakers = voice_split.diarize(path, options['audio'], log=self._log, progress=progress,
                                                cancelled=cancel.is_set)
-                lines = dub.lines_of(segments, timing)
+                lines = dub.prepare(segments, timing, expression)[0]   # build ile ayni satirlar (bolunmus)
                 mapping = dict(self._auto_voices(voice_split.summary(speakers, lines), voice), **chosen)
                 plan = dub.voice_plan(lines, speakers, {k: v for k, v in mapping.items() if v and v != voice})
                 specs = {ref: self._voice_spec(engines, ref) for ref in set(plan) if ref}
                 self._log(f'Dublaj: {speakers["count"]} konuşmacı, {len(specs) + 1} ses.')
-            if options['separate'] and has_audio:
-                stems = voice_split.separate(path, options['audio'], log=self._log, progress=progress,
-                                             cancelled=cancel.is_set)
             self._log(f'Dublaj başlıyor: {path.name} ({len(segments)} satır) -> {target.name}')
             result = dub.build(engines, path, segments, target, options, timing, language, override,
                                duration=probed.get('duration') or 0.0, has_audio=has_audio,
                                can_speed=can_speed, progress=progress, cancelled=cancel.is_set, log=self._log,
-                               plan=plan, voices=specs, stems=stems, load_voice=load_voice(cancel, progress))
+                               plan=plan, voices=specs, stems=stems, load_voice=load_voice(cancel, progress),
+                               expression=expression)
             # motor her ses grubu icin build icinde (load_voice) hazirlanir
             self._log('Dublaj kaydedildi: ' + result['output'])
             return dict(result, name=target.name)

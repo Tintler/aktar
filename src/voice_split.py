@@ -25,7 +25,7 @@ from pathlib import Path
 import media
 import qa
 import speech
-from app_core import APP_DIR, GracefulStop, digest, read, save_json
+from app_core import APP_DIR, GracefulStop, atomic, digest, read, save_json
 
 RELEASES = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/'
 MODELS = {
@@ -35,7 +35,25 @@ MODELS = {
                      'url': RELEASES + 'speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2'},
     'embedding': {'file': 'wespeaker_en_voxceleb_resnet34_LM.onnx',
                   'url': RELEASES + 'speaker-recongition-models/wespeaker_en_voxceleb_resnet34_LM.onnx'},
+    # F172: ses olaylari (AudioSet: gulme, aglama, ic cekme...) ve konusma/sessizlik (duraklamalar)
+    'tagging': {'file': 'sherpa-onnx-ced-mini-audio-tagging-2024-04-19/model.int8.onnx', 'archive': True,
+                'extra': ['sherpa-onnx-ced-mini-audio-tagging-2024-04-19/class_labels_indices.csv'],
+                'url': RELEASES + 'audio-tagging-models/sherpa-onnx-ced-mini-audio-tagging-2024-04-19.tar.bz2'},
+    'vad': {'file': 'silero_vad.onnx', 'url': RELEASES + 'asr-models/silero_vad.onnx'},
 }
+TAGGING_LABELS = 'sherpa-onnx-ced-mini-audio-tagging-2024-04-19/class_labels_indices.csv'
+# F172: dublaja aktarilan ses olaylari -> AudioSet sinif adlari (class_labels_indices.csv)
+SOUNDS = {
+    'laugh': ('Laughter', 'Giggle', 'Snicker', 'Belly laugh', 'Chuckle, chortle'),
+    'cry': ('Crying, sobbing', 'Wail, moan'),
+    'sigh': ('Sigh',),
+    'whisper': ('Whispering',),
+    'shout': ('Shout', 'Yell', 'Screaming', 'Battle cry'),
+    'breath': ('Gasp', 'Breathing'),
+    'cough': ('Cough', 'Throat clearing'),
+}
+EXPRESSION_WINDOW = 2.0   # ses olayi penceresi (sn)
+EXPRESSION_HOP = 0.5
 SEPARATION_RATE = 44100
 DIARIZATION_RATE = 16000
 CHUNK_SECONDS = 30     # ayirma bu uzunlukta parcalarla yapilir (bellek + ilerleme + durdurma)
@@ -107,9 +125,10 @@ def ensure_models(names, log=print, progress=None, cancelled=None, folder=None):
             raise RuntimeError(f'Model indirilemedi ({Path(spec["url"]).name}): {error}') from None
         if spec.get('archive'):
             with tarfile.open(download, 'r:bz2') as archive:
-                member = archive.getmember(spec['file'])
-                member.name = spec['file']
-                archive.extract(member, folder, filter='data')
+                for name in spec.get('extra', []) + [spec['file']]:   # model en son: varligi butunlugun isareti
+                    member = archive.getmember(name)
+                    member.name = name
+                    archive.extract(member, folder, filter='data')
             download.unlink(missing_ok=True)
         else:
             os.replace(download, target)
@@ -371,6 +390,63 @@ def run_diarize(audio, segmentation, embedding, speakers=0, threshold=THRESHOLD,
     return renumber(turns)[0]
 
 
+def run_expression(audio, tagging, labels, vad, progress=None, cancelled=None, threads=0):
+    """F172: 16 kHz mono WAV -> ses olaylari ve konusma araliklari:
+    {'hop', 'window', 'sounds': {grup: [olasilik, ...]} (her `hop` sn'de bir, pencere basi i*hop),
+     'speech': [[bas, son], ...]}."""
+    import numpy as np
+    import sherpa_onnx
+
+    threads = threads or max(1, min(8, (os.cpu_count() or 2) - 1))
+    tagger = sherpa_onnx.AudioTagging(sherpa_onnx.AudioTaggingConfig(
+        model=sherpa_onnx.AudioTaggingModelConfig(ced=str(tagging), num_threads=threads), labels=str(labels), top_k=60))
+    samples = np.ascontiguousarray(speech.read_wav(audio))
+    rate = DIARIZATION_RATE
+    window, hop = int(EXPRESSION_WINDOW * rate), int(EXPRESSION_HOP * rate)
+    group_of = {name: group for group, names in SOUNDS.items() for name in names}
+    starts = list(range(0, max(1, len(samples) - hop), hop))
+    sounds = {group: [0.0] * len(starts) for group in SOUNDS}
+    # konusma araliklari (sessizlikler duraklamadir)
+    config = sherpa_onnx.VadModelConfig(silero_vad=sherpa_onnx.SileroVadModelConfig(
+        model=str(vad), threshold=0.5, min_silence_duration=0.25, min_speech_duration=0.2, max_speech_duration=30),
+        sample_rate=rate, num_threads=1)
+    detector = sherpa_onnx.VoiceActivityDetector(config, buffer_size_in_seconds=60)
+    found = []
+
+    def drain():
+        while not detector.empty():
+            segment = detector.front
+            found.append([round(segment.start / rate, 2), round((segment.start + len(segment.samples)) / rate, 2)])
+            detector.pop()
+
+    step = 512
+    for begin in range(0, len(samples), step * 200):
+        if cancelled and cancelled():
+            raise GracefulStop('İfade çözümlemesi durduruldu.')
+        chunk = samples[begin:begin + step * 200]
+        for offset in range(0, len(chunk), step):
+            detector.accept_waveform(chunk[offset:offset + step])
+        drain()
+    detector.flush()
+    drain()
+    total = len(starts)
+    for number, begin in enumerate(starts):
+        if cancelled and number % 50 == 0 and cancelled():
+            raise GracefulStop('İfade çözümlemesi durduruldu.')
+        piece = samples[begin:begin + window]
+        if len(piece) < rate // 4:
+            continue
+        stream = tagger.create_stream()
+        stream.accept_waveform(rate, piece)
+        for event in tagger.compute(stream):
+            group = group_of.get(event.name)
+            if group and event.prob > sounds[group][number]:
+                sounds[group][number] = round(float(event.prob), 2)
+        if progress and (number % 50 == 0 or number + 1 == total):
+            progress(number + 1, total)
+    return {'hop': EXPRESSION_HOP, 'window': EXPRESSION_WINDOW, 'sounds': sounds, 'speech': found}
+
+
 # --- uygulama tarafi -----------------------------------------------------------------
 def _run(task, arguments, local, progress=None, cancelled=None, log=print):
     """Isi uygulama icinde (`local()`) ya da aktar-whisper paketinde calistirir."""
@@ -462,4 +538,40 @@ def diarize(video, audio_track=None, speakers=0, base=None, log=print, progress=
     data = {'version': 1, 'video': str(video), 'turns': turns, 'count': count, 'names': names}
     save_json(target, data)
     log(f'Konuşmacılar ayrıldı: {count} konuşmacı, {len(turns)} konuşma parçası.')
+    return data
+
+
+def expression_path(video, audio_track=None, vocals=False, base=None):
+    """F172: ses olaylari / konusma araliklari onbellegi (ayrilmis konusmadan cikarildiysa ayri)."""
+    return _cache_file(video, 'expression', '.vocals.json' if vocals else '.json', audio_track, base)
+
+
+def expression(video, audio_track=None, vocals=None, base=None, log=print, progress=None, cancelled=None):
+    """F172: videonun konusmasindaki gulme, aglama, ic cekme... ve duraklamalar (onbellekli). `vocals`: ayrilmis
+    konusma dosyasi (verilirse muzik karismaz, daha guvenilir). Donen: run_expression bicimi.
+    progress(islenen, toplam, asama): 'download' ya da 'expression'."""
+    target = expression_path(video, audio_track, bool(vocals), base)
+    try:
+        cached = json.loads(read(target))
+        if isinstance(cached, dict) and isinstance(cached.get('sounds'), dict):
+            log('Ses ifadeleri önbellekten yüklendi.')
+            return cached
+    except (OSError, ValueError):
+        pass
+    ensure_models(['tagging', 'vad'], log, lambda done, total: progress and progress(done, total, 'download'), cancelled)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    audio = target.with_suffix('.wav')
+    try:
+        log('Konuşmadaki gülme, ağlama, duraklama gibi ifadeler çıkarılıyor…')
+        _extract(vocals or video, audio, None if vocals else audio_track, DIARIZATION_RATE, 1)
+        tagging, vad = model_path('tagging'), model_path('vad')
+        labels = model_dir() / TAGGING_LABELS
+        report = lambda done, total: progress and progress(done, total, 'expression')  # noqa: E731
+        data = _run('expression', [str(audio), '--tagging', str(tagging), '--labels', str(labels), '--vad', str(vad)],
+                    lambda: run_expression(audio, tagging, labels, vad, progress=report, cancelled=cancelled),
+                    report, cancelled, log)
+    finally:
+        audio.unlink(missing_ok=True)
+    data = dict(data, version=1, video=str(video))
+    atomic(target, json.dumps(data, ensure_ascii=False, separators=(',', ':')))   # binlerce olasilik: sikistirilmis
     return data

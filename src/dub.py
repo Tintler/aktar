@@ -18,6 +18,8 @@ Akis:
      Sonuc videonun yanina yazilir:
        - 'mkv': goruntu ve ozgun parcalar kopyalanir, dublaj ilk (varsayilan) ses parcasi olur;
        - 'm4a': yalniz karisik ses.
+F172 'expression': ozgun konusmadaki gulme, aglama, ic cekme... Drama 3 etiketi olarak, duraklamalar satiri
+bolerek aktarilir (dub_expression.py). Altyazidaki ses notlari ('(laughs)', '[GÜLER]') her zaman okunmaz.
 Kaynak video SALT-OKUNUR. Is pencere icindeki is parcaciginda calisir; pencere kapaninca durur.
 """
 from __future__ import annotations
@@ -41,7 +43,7 @@ from app_core import GracefulStop
 
 FORMATS = ('mkv', 'm4a')
 DEFAULTS = {'background': 0.25, 'duck': True, 'max_tempo': 1.35, 'format': 'mkv', 'speed': 1.0, 'audio': None,
-            'separate': False, 'speakers': False, 'normalize': False, 'overlap': False}
+            'separate': False, 'speakers': False, 'normalize': False, 'overlap': False, 'expression': False}
 FADE = 0.25            # ozgun sesin kisilip acilma suresi (sn)
 FADE_STEPS = 5
 MERGE_GAP = 0.8        # bu kadardan kisa sessizliklerde ozgun ses kisik kalir
@@ -64,6 +66,7 @@ def options_of(values):
     options['speakers'] = bool(options['speakers'])
     options['normalize'] = bool(options['normalize'])
     options['overlap'] = bool(options['overlap'])
+    options['expression'] = bool(options['expression'])
     options['max_tempo'] = min(2.0, max(1.0, float(options['max_tempo'] or 1)))
     options['speed'] = min(2.0, max(0.5, float(options['speed'] or 1)))
     options['format'] = options['format'] if options['format'] in FORMATS else 'mkv'
@@ -93,6 +96,15 @@ def lines_of(segments, timing=None):
         result.append({'start': max(0.0, start), 'end': max(0.0, start, end), 'text': text})
     result.sort(key=lambda line: line['start'])
     return result
+
+
+def prepare(segments, timing=None, expression=None):
+    """Seslendirilecek satirlar: lines_of + F172 ifade (ses notlari cikarilir; `expression` {'analysis', 'allowed',
+    'tags'} verilirse duraklamada bolunur ve 'tag' eklenir). Donen: (satirlar, {'tagged', 'paused'})."""
+    import dub_expression
+    expression = expression or {}
+    return dub_expression.apply(lines_of(segments, timing), expression.get('analysis'), expression.get('allowed'),
+                                bool(expression.get('tags')))
 
 
 def slots(lines):
@@ -323,16 +335,17 @@ def voice_plan(lines, speakers, mapping):
 
 def build(engines, video, segments, output, options=None, timing=None, language='tr', override=None,
           duration=0.0, has_audio=True, can_speed=False, progress=None, cancelled=None, log=None,
-          plan=None, voices=None, load_voice=None, stems=None):
+          plan=None, voices=None, load_voice=None, stems=None, expression=None):
     """Dublaji yazar (bloklar). progress(done, total, stage): stage 'voice' (satir) ya da 'mix' (saniye).
     F146: `plan` her satirin ses anahtari (None: ana ses), `voices` {anahtar: {'override', 'language',
     'can_speed'}}, `load_voice(override, language)` motoru o sese hazirlar (bloklar); `stems` ayrilmis
-    (konusma, muzik/efekt) dosyalari. Donen: {'output', 'lines', 'faster', 'shifted', 'overlapped', 'voices'}."""
+    (konusma, muzik/efekt) dosyalari. F172 `expression`: prepare(); `plan` bu satirlara gore olmali.
+    Donen: {'output', 'lines', 'faster', 'shifted', 'overlapped', 'voices', 'tagged', 'paused'}."""
     import clip   # klip kaydinin FFmpeg ilerleme okuyucusu
 
     options = options_of(options)
     log = log or (lambda _message: None)
-    lines = lines_of(segments, timing)
+    lines, expressed = prepare(segments, timing, expression)
     if not lines:
         raise ValueError('Altyazıda seslendirilecek satır yok.')
     book = cache_id(video)
@@ -352,7 +365,8 @@ def build(engines, video, segments, output, options=None, timing=None, language=
                 line = lines[index]
                 if cancelled and cancelled():
                     raise GracefulStop('Dublaj durduruldu.')
-                result = engines.say(line['text'], options['speed'], book, spec['language'], spec['override'])
+                tag = {'tag': line['tag']} if line.get('tag') else {}   # F172 ifade etiketi
+                result = engines.say(line['text'], options['speed'], book, spec['language'], spec['override'], **tag)
                 done += 1
                 if not result.get('audio'):
                     continue
@@ -365,7 +379,7 @@ def build(engines, video, segments, output, options=None, timing=None, language=
                     tempo = min(options['max_tempo'], need)
                     if spec['can_speed']:
                         quick = engines.say(line['text'], round(options['speed'] * tempo, 2), book, spec['language'],
-                                            spec['override'])
+                                            spec['override'], **tag)
                         if quick.get('audio'):
                             clip_rate, _channels, _width, frames = _clip(base64.b64decode(quick['audio']))
                     else:
@@ -413,6 +427,9 @@ def build(engines, video, segments, output, options=None, timing=None, language=
                   else f'{faster} satır hızlandırıldı, {shifted} satır kaydırıldı')
         if options['normalize']:
             detail += ', ses düzeyi eşitlendi'
+        if expressed['tagged'] or expressed['paused']:
+            detail += f", {expressed['tagged']} satıra ifade etiketi, {expressed['paused']} duraklama"
+
         log(f'Dublaj: {len(lines)} satır seslendirildi ({detail}); ses karıştırılıyor…')
         output = Path(output)
         partial = output.with_name(output.stem + '.part' + output.suffix)
@@ -442,7 +459,7 @@ def build(engines, video, segments, output, options=None, timing=None, language=
                 raise RuntimeError(str(again).replace('Klip kaydedilemedi', 'Dublaj kaydedilemedi')) from again
         os.replace(partial, output)
         return {'output': str(output), 'lines': len(lines), 'faster': faster, 'shifted': shifted, 'overlapped': overlapped,
-                'voices': len(order)}
+                'voices': len(order), 'tagged': expressed['tagged'], 'paused': expressed['paused']}
     finally:
         shutil.rmtree(folder, ignore_errors=True)
 
