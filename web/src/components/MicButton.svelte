@@ -2,11 +2,12 @@
   // Sesle soru (F112): tikla konus, tekrar tikla bitir (Esc vazgecer). Ses yerelde Whisper ile
   // metne cevrilir ve kutuya eklenir; gondermek kullanicida. Whisper yoksa aciklamali devre disi.
   // F142: Ayarlar → Ses'ten kapatilabilir (ui.json mic_button: false); kapaliyken hic cizilmez.
+  // F184: Metinden ses sayfasi kendi adiyla (label, caption) ve ayardan bagimsiz (always) kullanir.
   import Icon from '../lib/Icon.svelte';
   import { app, act, toast } from '../lib/state.svelte.js';
   import { voiceStatus, startRecording, appendText } from '../lib/voice.js';
 
-  let { value = $bindable(''), disabled = false, ontext = null } = $props();
+  let { value = $bindable(''), disabled = false, ontext = null, label = 'Sesle sor', caption = '', always = false } = $props();
 
   let info = $state(null);
   let mode = $state('idle'); // idle | recording | working
@@ -18,11 +19,11 @@
   voiceStatus().then((s) => (info = s));
 
   const title = $derived(
-    !info ? 'Sesle sor' :
-    !info.available ? `Sesle sor kullanılamıyor: ${info.hint}` :
+    !info ? label :
+    !info.available ? `${label} kullanılamıyor: ${info.hint}` :
     mode === 'recording' ? 'Kaydı bitir ve metne çevir (Esc: vazgeç)' :
     mode === 'working' ? 'Konuşma metne çevriliyor…' :
-    'Sesle sor: konuşun, metin kutuya yazılır (ses bilgisayardan çıkmaz)'
+    `${label}: konuşun, metin kutuya yazılır (ses bilgisayardan çıkmaz)`
   );
 
   function micError(error) {
@@ -103,7 +104,7 @@
   });
 </script>
 
-{#if app.prefs.mic_button !== false}
+{#if always || app.prefs.mic_button !== false}
 <button type="button" class="mic" class:rec={mode === 'recording'} {title} aria-label={title} aria-pressed={mode === 'recording'}
   disabled={!info?.available || mode === 'working' || (disabled && mode === 'idle')} onclick={click}
   style:--level={Math.min(1, level * 3)}>
@@ -112,7 +113,7 @@
   {:else if mode === 'recording'}
     <Icon name="stop" size={12} /><span class="time">{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}</span>
   {:else}
-    <Icon name="mic" size={16} />
+    <Icon name="mic" size={16} />{#if caption}<span>{caption}</span>{/if}
   {/if}
 </button>
 {/if}

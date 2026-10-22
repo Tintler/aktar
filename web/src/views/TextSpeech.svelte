@@ -2,8 +2,11 @@
   // Metinden ses (F178): yazilan metni secilen sesle (kayitli ses, motor sesi ya da Ayarlardaki ses) okutup
   // secilen klasore WAV/MP3 olarak yazar. Secimler ui.json 'speech' altinda kalir; kayit arka planda surer
   // (bridge_tts.tts_speech_create, olay 'tts_speech'). F179: 'Kayitli sesler' sekmesinde sesler eklenir ve siralanir.
+  // F184: mikrofondan konusulan Whisper ile metne cevrilip kutuya eklenir; 'Konusma bitince seslendir' aciksa
+  // (ui.json speech.mic_convert) metin hemen secili sesle okutulup ayni bicimde (WAV/MP3) klasore yazilir.
   import Icon from '../lib/Icon.svelte';
   import VoicePresetList from '../components/VoicePresetList.svelte';
+  import MicButton from '../components/MicButton.svelte';
   import { app, act, savePref, onDrop, toast } from '../lib/state.svelte.js';
   import { call } from '../lib/api.js';
   import { confirm } from '../lib/confirm.svelte.js';
@@ -14,7 +17,7 @@
   const FORMATS = [['wav', 'WAV'], ['mp3', 'MP3']];
 
   const s = app.speech;
-  const prefs = $derived({ voice: '', folder: '', format: 'wav', speed: 1, tab: 'text', ...(app.prefs.speech ?? {}) });
+  const prefs = $derived({ voice: '', folder: '', format: 'wav', speed: 1, tab: 'text', mic_convert: false, ...(app.prefs.speech ?? {}) });
   let voices = $state([]);
 
   const groups = $derived.by(() => {
@@ -45,6 +48,12 @@
     const result = await act('tts_speech_create', sentences, gaps, [...breaks], prefs.voice, prefs.folder, s.name.trim(),
       prefs.speed, prefs.format);
     if (result?.started) { s.last = null; s.job = { done: 0, total: result.total, loading: true }; }
+  }
+
+  function spoken() {
+    if (!prefs.mic_convert) return;
+    if (!prefs.folder) { toast('Metin eklendi; seslendirmek için kayıt klasörünü seçin.', 'error'); return; }
+    queueMicrotask(create);
   }
 
   onDrop('speech', async (paths) => {
@@ -84,7 +93,10 @@
         placeholder="Seslendirilecek metni yazın ya da yapıştırın. Her satır ayrı paragraf sayılır; bir .txt dosyasını buraya bırakarak da açabilirsiniz."></textarea>
       <div class="meta">
         <span>{chars.toLocaleString('tr-TR')} karakter · {split.sentences.length} cümle</span>
-        {#if s.text}<button class="btn sm" disabled={!!s.job} onclick={() => (s.text = '')}><Icon name="trash" size={14} />Temizle</button>{/if}
+        <div class="tools">
+          <MicButton bind:value={s.text} disabled={!!s.job} ontext={spoken} always label="Mikrofondan yaz" caption="Mikrofon" />
+          {#if s.text}<button class="btn sm" disabled={!!s.job} onclick={() => (s.text = '')}><Icon name="trash" size={14} />Temizle</button>{/if}
+        </div>
       </div>
     </div>
 
@@ -132,6 +144,11 @@
         <small>Aynı adda dosya varsa sonuna numara eklenir.</small>
       </label>
 
+      <label class="check">
+        <input type="checkbox" checked={prefs.mic_convert} disabled={!!s.job} onchange={(e) => save({ mic_convert: e.currentTarget.checked })} />
+        <span>Mikrofon kaydı bitince seçili sesle hemen seslendir</span>
+      </label>
+
       {#if s.job}
         <div class="progress">
           <div class="bar"><i style:width="{percent}%" class:wait={s.job.loading}></i></div>
@@ -171,6 +188,10 @@
   .opts { display: flex; flex-direction: column; gap: 16px; padding: 16px; align-self: start; }
   .row { display: flex; flex-direction: column; gap: 6px; }
   .row small { font-size: 11px; color: var(--dim); }
+  .tools { display: flex; align-items: center; gap: 6px; }
+  .tools :global(.mic:not(.rec)) { border: 1px solid var(--outline); color: var(--secondary); }
+  .check { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: var(--secondary); cursor: pointer; }
+  .check input { margin-top: 2px; accent-color: var(--accent); }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .folder { display: flex; gap: 6px; }
   .folder .field { flex: 1; min-width: 0; }

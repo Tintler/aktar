@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.18.0 — 2026-10-22
+
+### Yeni
+- **Metinden seste mikrofon (F184):** Metin kutusunun altındaki "Mikrofon" düğmesiyle konuşun; konuşma yerelde Whisper ile metne çevrilip kutuya eklenir. Metin seçili sesle (kayıtlı ses, motor sesi ya da Ayarlardaki ses) okutulup WAV ya da MP3 olarak kayıt klasörüne yazılır. "Mikrofon kaydı bitince seçili sesle hemen seslendir" açıksa bu, kayıt biter bitmez kendiliğinden yapılır; kapalıyken metni düzeltip "Sese dönüştür"e basabilirsiniz. Bu düğme sohbetlerdeki mikrofon ayarından bağımsız olarak hep görünür.
+
 ## 2.17.1 — 2026-10-22
 
 ### Düzeltme
