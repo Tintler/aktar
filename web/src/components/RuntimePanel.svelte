@@ -3,6 +3,7 @@
   // model sunucusunda (LM Studio) yuklu ornekler ve Aktar'in isinmis ses motoru; ikisi de buradan bosaltilir.
   // Surekli sorgu yok: liste panel acilinca bir kez (ve yenile dugmesiyle) istenir; ses motoru durumu bellekten
   // okunur ve panel acikken 'tts' olayiyla yenilenir.
+  import { untrack } from 'svelte';
   import Icon from '../lib/Icon.svelte';
   import { call, on } from '../lib/api.js';
   import { toast } from '../lib/state.svelte.js';
@@ -15,6 +16,7 @@
   let place = $state({ left: 12, bottom: 80 });
 
   async function loadLlm() {
+    if (llm.loading) return;      // sorgu suruyorsa ikincisi gonderilmez
     llm = { ...llm, loading: true, error: '' };
     const result = await call('llm_loaded');
     llm = result?.error ? { loading: false, models: [], kept: [], error: result.error }
@@ -28,13 +30,17 @@
     loadEngine();
   }
 
+  // Yalnizca `open` izlenir: yenileme `llm`i okuyup yazdigi icin izlenirse effect kendini yeniden tetikler
+  // ve model sunucusuna art arda istek gider.
   $effect(() => {
     if (!open) return;
-    if (anchor) {
-      const rect = anchor.getBoundingClientRect();
-      place = { left: rect.left, bottom: window.innerHeight - rect.top + 8 };
-    }
-    refresh();
+    untrack(() => {
+      if (anchor) {
+        const rect = anchor.getBoundingClientRect();
+        place = { left: rect.left, bottom: window.innerHeight - rect.top + 8 };
+      }
+      refresh();
+    });
     return on('tts', () => loadEngine());
   });
 

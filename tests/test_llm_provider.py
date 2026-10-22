@@ -78,6 +78,12 @@ class LmStudioOnlyTests(unittest.TestCase):
             self.assertEqual(result, {'models': [], 'kept': ['sohbet']})
             self.assertEqual(calls[0], ('/api/v1/models/unload', {'instance_id': 'gomme'}))
             self.assertIn('error', api.llm_unload(''))
+            # Art arda sorgu (arayuz dongusu) sunucuya gitmez: saniyede en fazla bir istek.
+            listed = len(calls)
+            for _ in range(50):
+                api.llm_loaded()
+            self.assertEqual(len(calls), listed)
+            api._loaded_last = (0.0, None)
             cfg.update(provider='openai')
             self.assertEqual(api.llm_loaded(), {'models': None, 'kept': ['sohbet']})
             self.assertIn('error', api.llm_unload('sohbet'))

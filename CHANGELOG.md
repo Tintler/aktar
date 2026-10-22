@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.17.1 — 2026-10-22
+
+### Düzeltme
+- **Bellekteki modeller paneli model sunucusunu boğuyordu (F183):** Panel açıkken liste yenilemesi kendini yeniden tetikliyor ve LM Studio'ya saniyede yüzlerce `/api/v1/models` isteği gidiyordu, program da kasıyordu. Liste artık panel açılınca yalnızca bir kez istenir; ayrıca arka uç bu sorguyu saniyede en fazla bir kez sunucuya iletir.
+
 ## 2.17.0 — 2026-10-22
 
 ### Yeni

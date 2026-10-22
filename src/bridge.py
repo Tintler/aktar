@@ -18,6 +18,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -47,6 +48,7 @@ from bridge_voice import VoiceMixin
 from bridge_watch import WatchMixin
 
 UI_FILE = 'ui.json'
+LOADED_MIN_INTERVAL = 1.0   # F183 bellekteki modeller sorgusu: en sik bir istek / sn
 WHISPER_MODELS = ('large-v3-turbo', 'large-v3', 'medium', 'small', 'base')
 CUDA_MARKERS = (('cublas64_12.dll', 'cudnn64_9.dll') if os.name == 'nt'
                 else ('libcublas.so.12', 'libcudnn.so.9'))
@@ -160,13 +162,19 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
 
     def llm_loaded(self):
         """F183: sol alttaki panel acilinca bir kez sorulur (surekli sorgu yok): model sunucusunda bellekteki
-        modeller. {'models': [...]} | {'models': None} (LM Studio degil) | {'error'}."""
+        modeller. {'models': [...]} | {'models': None} (LM Studio degil) | {'error'}.
+        Koruma: LOADED_MIN_INTERVAL icinde gelen istege sunucuya gitmeden son yanit verilir."""
+        stamp, last = getattr(self, '_loaded_last', (0.0, None))
+        if last is not None and time.monotonic() - stamp < LOADED_MIN_INTERVAL:
+            return last
         try:
             cfg = dict(load_config(), timeout_seconds=5)
-            return {'models': loaded_models(Client(cfg, lambda _message: None)),
-                    'kept': list(getattr(self, '_kept_models', []))}
+            result = {'models': loaded_models(Client(cfg, lambda _message: None)),
+                      'kept': list(getattr(self, '_kept_models', []))}
         except (RuntimeError, ValueError, OSError) as error:
-            return _error(error)
+            result = _error(error)
+        self._loaded_last = (time.monotonic(), result)
+        return result
 
     def llm_unload(self, instance):
         """F183: bir model ornegini LM Studio bellekten bosaltir (eject); donen guncel liste."""
@@ -184,6 +192,7 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         with self._lock:
             self._kept_models = [name for name in getattr(self, '_kept_models', []) if name != instance]
         self._log(f'LM Studio: {instance} bellekten boşaltıldı.')
+        self._loaded_last = (0.0, None)   # bosaltma sonrasi liste sunucudan yeniden alinir
         return self.llm_loaded()
 
     # ------------------------------------------------------------------ temalar
