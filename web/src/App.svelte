@@ -11,6 +11,7 @@
   import ChatPanel from './components/ChatPanel.svelte';
   import MenuHost from './components/MenuHost.svelte';
   import TaskTray from './components/TaskTray.svelte';
+  import RuntimePanel from './components/RuntimePanel.svelte';
   import Library from './views/Library.svelte';
   import Translate from './views/Translate.svelte';
   import Books from './views/Books.svelte';
@@ -79,6 +80,8 @@
     || (app.view === 'player' && !!app.player && !app.dubEditor) || (app.view === 'document' && !!app.document));
   const models = $derived(app.models);
   const modelListed = $derived((models.names ?? []).includes(models.model));
+  let runtimeOpen = $state(false);
+  let lmBox = $state(null);
 
   let dragging = $state(false);
   const hasFiles = (event) => [...(event.dataTransfer?.types ?? [])].includes('Files');
@@ -131,10 +134,14 @@
     </nav>
     <div class="rule"></div>
     <div class="side-body" inert={app.sideCollapsed}><Collections /></div>
-    <div class="lm" title={models.message || ''}>
+    <div class="lm" class:on={runtimeOpen} bind:this={lmBox}>
       <div class="row">
-        <span class="dot {models.state === 'probing' ? 'wait' : models.state === 'failed' ? 'bad' : modelListed ? '' : 'wait'}"></span>
-        <span class="st">{models.state === 'probing' ? 'Model sunucusu sorgulanıyor…' : models.state === 'failed' ? 'Model sunucusu bağlı değil' : modelListed ? 'Model sunucusu bağlı' : 'Model listede yok'}</span>
+        <!-- F183: tiklayinca bellekteki modeller paneli acilir (ayri sayfa degil). -->
+        <button class="lm-open" title={(models.message ? models.message + '\n' : '') + 'Bellekteki modeller ve ses motoru'}
+          aria-expanded={runtimeOpen} onclick={() => (runtimeOpen = !runtimeOpen)}>
+          <span class="dot {models.state === 'probing' ? 'wait' : models.state === 'failed' ? 'bad' : modelListed ? '' : 'wait'}"></span>
+          <span class="st">{models.state === 'probing' ? 'Model sunucusu sorgulanıyor…' : models.state === 'failed' ? 'Model sunucusu bağlı değil' : modelListed ? 'Model sunucusu bağlı' : 'Model listede yok'}</span>
+        </button>
         <button class="icon-btn sm" title="Yeniden sorgula" onclick={() => call('refresh_models')}><Icon name="refresh" size={14} /></button>
       </div>
     </div>
@@ -171,6 +178,7 @@
 </div>
 <TitleBar />
 <MenuHost />
+<RuntimePanel bind:open={runtimeOpen} anchor={lmBox} />
 
 {#if app.busy}
   <!-- Video/belge acilirken: tiklamalar engellenir, ne olup bittigi gorunur. -->
@@ -221,7 +229,11 @@
   .mini .lm { background: transparent; padding-left: 22px; }
   .lm { margin-top: 8px; padding: 10px 12px; border-radius: 10px; background: var(--surface); font-size: 12px; }
   .lm .row { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }
-  .lm .st { flex: 1; min-width: 0; }
+  .lm .st { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; }
+  .lm-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; margin: -6px -4px; padding: 6px 4px; border-radius: 8px;
+    font: inherit; color: inherit; cursor: pointer; }
+  .lm-open:hover .st, .lm.on .st { color: var(--accent); }
+  .lm.on { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
   .lm .icon-btn { margin: -4px -6px -4px 0; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); flex: none; }
   .dot.wait { background: var(--warning); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 25%, transparent); }

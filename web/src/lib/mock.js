@@ -18,6 +18,12 @@ function themes() {
 }
 
 export function createMock(emit) {
+  // F183: sol alttaki panel (bellekteki modeller, isinmis ses motoru)
+  let loadedModels = [
+    { instance: 'gemma-4-26b-a4b-it-qat@q4_k_xl', key: 'gemma-4-26b-a4b-it-qat@q4_k_xl', name: 'Gemma 4 26B A4B', type: 'llm', size: 15.6 * 1024 ** 3, params: '26B', quant: 'Q4_K_XL', context: 32768 },
+    { instance: 'text-embedding-embeddinggemma-2', key: 'text-embedding-embeddinggemma-2', name: 'EmbeddingGemma', type: 'embedding', size: 0.33 * 1024 ** 3, params: '300M', quant: 'Q8_0', context: 2048 },
+  ];
+  let warmEngine = { engine: 'drama3-tr', name: 'Drama 3 TR', voice: 'Anlatıcı', device: 'sunucu', state: 'ready', message: '', kind: 'server', pid: 18244, busy: false };
   const settings = {
     base_url: 'http://127.0.0.1:1234/v1', model: 'gemma-4-26b-a4b-it-qat@q4_k_xl', batch_cues: 10, max_tokens: 8192,
     temperature: 0.2, timeout_seconds: 1800, auto_retry_count: 2, glossary_strict: false, analysis_chunk_chars: 12000,
@@ -292,6 +298,10 @@ export function createMock(emit) {
     save_ui_prefs: async (values) => (prefs = { ...prefs, ...values }),
     list_themes: async () => themes(),
     refresh_models: async () => true,
+    llm_loaded: async () => { await new Promise((r) => setTimeout(r, 300)); return { models: loadedModels, kept: ['text-embedding-embeddinggemma-2'] }; },
+    llm_unload: async (instance) => { loadedModels = loadedModels.filter((m) => m.instance !== instance); return { models: loadedModels, kept: [] }; },
+    tts_runtime: async () => ({ engine: warmEngine }),
+    tts_unload: async () => { warmEngine = null; return { engine: null }; },
     get_settings: async () => ({ config: { ...settings }, defaults: { ...settings }, locked: [], whisper_models: ['large-v3-turbo', 'large-v3', 'medium', 'small', 'base'], ocr_engines: [{ id: 'auto', label: 'Otomatik (Tesseract > OCR modeli > görü modeli)' }, { id: 'tesseract', label: 'Tesseract (yerel)' }, { id: 'model', label: 'OCR modeli (LM Studio)' }, { id: 'vision', label: 'Görü modeli' }], cuda_markers: [] }),
     save_settings: async (values) => ({ config: Object.assign(settings, values) }),
     check_tesseract: async () => ({ found: 'C:\Program Files\Tesseract-OCR\tesseract.exe' }),

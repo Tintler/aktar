@@ -330,6 +330,23 @@ def keep_loaded(client, names, log=None):
     return loaded
 
 
+def loaded_models(client):
+    """F183: LM Studio'da o an bellekte olan model ornekleri (sol alttaki panel); tek istek (/api/v1/models).
+    LM Studio disi sunucu yuklu modeli bildirmez: None."""
+    if not llm_provider.is_lmstudio(getattr(client, 'cfg', {})):
+        return None
+    result = []
+    for item in client.request('/api/v1/models').get('models') or []:
+        for instance in item.get('loaded_instances') or []:
+            result.append({'instance': str(instance.get('id') or item.get('key') or ''),
+                           'key': item.get('key') or '', 'name': item.get('display_name') or item.get('key') or '',
+                           'type': item.get('type') or '', 'size': item.get('size_bytes'),
+                           'params': item.get('params_string') or '',
+                           'quant': (item.get('quantization') or {}).get('name') or '',
+                           'context': (instance.get('config') or {}).get('context_length')})
+    return result
+
+
 def unload_models(client, instances):
     """keep_loaded ile yuklenenleri bosaltir (uygulama kapanirken); hatalar yok sayilir."""
     if not llm_provider.is_lmstudio(getattr(client, 'cfg', {})):

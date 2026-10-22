@@ -57,6 +57,31 @@ class LmStudioOnlyTests(unittest.TestCase):
         app_core.unload_models(client, ['x'])
         client.request.assert_not_called()
 
+    def test_bridge_unload_ejects_and_forgets_kept_model(self):
+        # F183: sol alttaki panelden eject; Aktar'in yukledigi model kapanista yeniden bosaltilmaz.
+        import bridge
+        calls = []
+
+        class Fake:
+            def __init__(self, cfg, _log=None):
+                self.cfg = cfg
+
+            def request(self, route, payload=None):
+                calls.append((route, payload))
+                return {'models': []} if route == '/api/v1/models' else {}
+
+        cfg = dict(app_core.DEFAULT_CONFIG)
+        with mock.patch('bridge.load_config', return_value=cfg), mock.patch('bridge.Client', Fake):
+            api = bridge.Bridge()
+            api._kept_models = ['gomme', 'sohbet']
+            result = api.llm_unload('gomme')
+            self.assertEqual(result, {'models': [], 'kept': ['sohbet']})
+            self.assertEqual(calls[0], ('/api/v1/models/unload', {'instance_id': 'gomme'}))
+            self.assertIn('error', api.llm_unload(''))
+            cfg.update(provider='openai')
+            self.assertEqual(api.llm_loaded(), {'models': None, 'kept': ['sohbet']})
+            self.assertIn('error', api.llm_unload('sohbet'))
+
     def test_rest_routes_refused_for_openai(self):
         cfg = dict(app_core.DEFAULT_CONFIG, base_url='http://127.0.0.1:11434/v1', provider='openai')
         with self.assertRaises(RuntimeError):

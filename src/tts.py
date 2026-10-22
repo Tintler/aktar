@@ -568,6 +568,35 @@ class Engines:
     def shutdown(self):
         self.stop_worker()
 
+    # ------------------------------------------------------------- warm engine (F183, sidebar panel)
+    def runtime(self):
+        """The engine kept in memory: {'engine', 'name', 'voice', 'device', 'state', 'message', 'kind', 'pid',
+        'busy'} or None. kind: 'process' (engine worker), 'server' (a model server Aktar started) or 'remote'
+        (a client of the user's server: nothing of it runs here). Reads only in-memory state."""
+        worker, state = self._worker, self.state
+        if not (worker and worker.alive) and state != 'loading':
+            return None
+        engine_id, voice_id = self.current.get('engine'), self.current.get('voice')
+        manifest = worker.engine if worker and worker.engine.get('id') == engine_id else self._manifests().get(engine_id, {})
+        voice = next((v for v in manifest.get('voices', []) if v.get('id') == voice_id), {})
+        process = getattr(worker, 'process', None)
+        server = getattr(getattr(getattr(worker, 'impl', None), 'server', None), 'process', None)
+        kind = 'process' if process else 'server' if server or manifest.get('folder') else 'remote'
+        pid = (process or server).pid if (process or server) else None
+        return {'engine': engine_id, 'name': manifest.get('name', engine_id), 'voice': voice.get('name') or voice_id,
+                'device': self.current.get('device'), 'state': state, 'message': self.message if state != 'ready' else '',
+                'kind': kind, 'pid': pid, 'busy': self._exporting}
+
+    def unload(self):
+        """Frees the warm engine on request; the next read loads it again."""
+        with self._lock:
+            if self._exporting:
+                raise RuntimeError('Ses kaydedilirken ses motoru boşaltılamaz.')
+            if self._loading and self._loading.is_alive():
+                raise RuntimeError('Ses motoru yükleniyor; yüklenince boşaltabilirsiniz.')
+            self.stop_worker()
+            self._set('idle', '')
+
     # ------------------------------------------------------------- install / remove
     def _writable_root(self):
         try:

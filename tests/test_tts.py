@@ -217,6 +217,26 @@ class EnginesTests(unittest.TestCase):
             self.engines.say('Merhaba.')
         self.assertEqual(self.load('tr')['state'], 'ready')                 # loading again restarts it
 
+    def test_runtime_lists_the_warm_engine_and_unload_frees_it(self):
+        # F183: sol alttaki panel bellekteki motoru gosterir ve bosaltir.
+        make_engine(self.root, 'ema-lightning', ('tr',))
+        self.assertIsNone(self.engines.runtime())
+        self.load('tr')
+        info = self.engines.runtime()
+        self.assertEqual((info['engine'], info['name'], info['voice'], info['state'], info['kind']),
+                         ('ema-lightning', 'Ema-Lightning', 'tr ses', 'ready', 'process'))
+        self.assertEqual(info['pid'], self.engines._worker.process.pid)
+        process = self.engines._worker.process
+        self.engines._exporting = True
+        with self.assertRaises(RuntimeError):
+            self.engines.unload()
+        self.engines._exporting = False
+        self.engines.unload()
+        self.assertIsNotNone(process.poll())
+        self.assertIsNone(self.engines.runtime())
+        self.assertEqual(self.engines.status()['state'], 'idle')
+        self.assertEqual(self.load('tr')['state'], 'ready')                 # next read loads it again
+
     def test_engine_without_runnable_source_is_not_usable(self):
         make_engine(self.root, 'piper', ('en',), module=False)
         self.assertIsNone(self.engines.engines()[0]['mode'])
@@ -313,6 +333,9 @@ class BridgeTtsTests(unittest.TestCase):
                 self.assertTrue(api.tts_export('Kitap: Bölüm/1', ['Bir.', 'İki.'], 1.0)['started'])
                 self.assertTrue(done.wait(20))
                 self.assertEqual([e['id'] for e in api.tts_engines()], ['ema-lightning'])
+                self.assertEqual(api.tts_runtime()['engine']['engine'], 'ema-lightning')
+                self.assertEqual(api.tts_unload(), {'engine': None})
+                self.assertEqual(api.tts_status()['state'], 'idle')
                 api.shutdown()
             finished = [d for e, d in events if e == 'tts_export' and d.get('finished')][0]
             self.assertEqual(finished['count'], 2)

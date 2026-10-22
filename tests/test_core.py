@@ -1068,6 +1068,22 @@ class KeepLoadedTests(unittest.TestCase):
         app_core.unload_models(client, ['a', 'b'])
         self.assertEqual(client.calls, [{'instance_id': 'a'}, {'instance_id': 'b'}])
 
+    def test_loaded_models_lists_instances_in_one_request(self):
+        # F183: sol alttaki panel: yalnizca bellekteki ornekler, tek istekle.
+        client = self.FakeClient([
+            {'key': 'sohbet', 'display_name': 'Sohbet 8B', 'type': 'llm', 'size_bytes': 5 * 1024 ** 3,
+             'params_string': '8B', 'quantization': {'name': 'Q4_K_M'},
+             'loaded_instances': [{'id': 'sohbet', 'config': {'context_length': 8192}}, {'id': 'sohbet:2'}]},
+            {'key': 'bos', 'loaded_instances': []},
+        ])
+        models = app_core.loaded_models(client)
+        self.assertEqual([m['instance'] for m in models], ['sohbet', 'sohbet:2'])
+        self.assertEqual((models[0]['name'], models[0]['quant'], models[0]['context'], models[1]['context']),
+                         ('Sohbet 8B', 'Q4_K_M', 8192, None))
+        self.assertEqual(client.calls, [('/api/v1/models', None)])
+        client.cfg = {'provider': 'openai', 'base_url': 'https://api.example.com/v1'}
+        self.assertIsNone(app_core.loaded_models(client))
+
 
 if __name__ == '__main__':
     unittest.main()

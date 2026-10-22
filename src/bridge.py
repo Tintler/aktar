@@ -28,8 +28,8 @@ import media_server
 import setup_check
 from version import VERSION
 import themes
-from app_core import (APP_DIR, DEFAULT_CONFIG, WINDOWS, Client, keep_loaded, load_config, qa_config, read, save_json,
-                      unload_models, validate_config)
+from app_core import (APP_DIR, DEFAULT_CONFIG, WINDOWS, Client, keep_loaded, load_config, loaded_models, qa_config,
+                      read, save_json, unload_models, validate_config)
 from bridge_assistant import AssistantMixin, FilesMixin
 from bridge_book import BookMixin
 from bridge_reader import ReaderMixin
@@ -157,6 +157,34 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
             unload_models(Client(cfg, self._log), kept)
         except (RuntimeError, ValueError, OSError):
             pass
+
+    def llm_loaded(self):
+        """F183: sol alttaki panel acilinca bir kez sorulur (surekli sorgu yok): model sunucusunda bellekteki
+        modeller. {'models': [...]} | {'models': None} (LM Studio degil) | {'error'}."""
+        try:
+            cfg = dict(load_config(), timeout_seconds=5)
+            return {'models': loaded_models(Client(cfg, lambda _message: None)),
+                    'kept': list(getattr(self, '_kept_models', []))}
+        except (RuntimeError, ValueError, OSError) as error:
+            return _error(error)
+
+    def llm_unload(self, instance):
+        """F183: bir model ornegini LM Studio bellekten bosaltir (eject); donen guncel liste."""
+        instance = str(instance or '').strip()
+        if not instance:
+            return _error('Model seçilmedi.')
+        try:
+            cfg = dict(load_config(), timeout_seconds=15)
+            client = Client(cfg, self._log)
+            if not llm_provider.is_lmstudio(cfg):
+                return _error('Bellekten boşaltma yalnızca LM Studio sunucusunda var.')
+            client.request('/api/v1/models/unload', {'instance_id': instance})
+        except (RuntimeError, ValueError, OSError) as error:
+            return {'error': 'Model boşaltılamadı: ' + str(error)}
+        with self._lock:
+            self._kept_models = [name for name in getattr(self, '_kept_models', []) if name != instance]
+        self._log(f'LM Studio: {instance} bellekten boşaltıldı.')
+        return self.llm_loaded()
 
     # ------------------------------------------------------------------ temalar
     def list_themes(self):

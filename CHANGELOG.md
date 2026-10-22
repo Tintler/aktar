@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.17.0 — 2026-10-22
+
+### Yeni
+- **Bellekteki modeller paneli (F183):** Sol alttaki "Model sunucusu" kutusuna tıklayınca ayrı sayfa açılmadan bir panel açılır. LM Studio'da o an bellekte (VRAM/RAM) yüklü modeller boyut, nicemleme ve bağlam uzunluğuyla listelenir ve her biri "Boşalt" ile bellekten çıkarılabilir (eject). Aktar'ın ısınmış ses motoru da (Python süreci ya da Aktar'ın başlattığı Drama 3 TR sunucusu, PID ile) burada görünür ve durdurulabilir; motoru kullanan bir iş sürerken boşaltma reddedilir. Sunucu sürekli sorgulanmaz: liste yalnızca panel açılınca (ve yenile düğmesiyle) bir kez istenir.
+
 ## 2.16.1 — 2026-10-22
 
 ### Düzeltme

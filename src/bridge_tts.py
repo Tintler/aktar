@@ -206,6 +206,28 @@ class TtsMixin:
     def tts_engines(self):
         return self._engines().engines()
 
+    def tts_runtime(self):
+        """F183: bellekte tutulan (isinmis) ses motoru, sol alttaki panel icin; motor hic acilmadiysa None.
+        Yalnizca bellekteki durumu okur, motora istek atmaz."""
+        engines = getattr(self, '_engines_cache', None)
+        return {'engine': engines.runtime() if engines is not None else None}
+
+    def tts_unload(self):
+        """F183: isinmis ses motorunu durdurur (bellek bosalir); motoru kullanan is surerken reddedilir."""
+        running = getattr(self, '_tool_running', None)
+        if (running is not None and running() and self._tool['kind'] in ('dub', 'dubgen')) or any(
+                getattr(self, name, None) is not None and getattr(self, name).is_alive()
+                for name in ('_prepare_job', '_audiobook_job', '_speech_job')):
+            return _error('Ses motoru şu an bir iş için kullanılıyor (ses hazırlama, kayıt ya da dublaj).')
+        engines = getattr(self, '_engines_cache', None)
+        if engines is not None:
+            try:
+                engines.unload()
+            except RuntimeError as error:
+                return _error(error)
+            self._log('Ses motoru bellekten boşaltıldı.')
+        return self.tts_runtime()
+
     def tts_load(self, language=None, voice=None):
         """Kitap dili icin secilen motoru ve sesi (arka planda) hazirlar. `voice`: sayfanin kendi sesi
         (sohbet, dublaj): '' okuyucunun sesi, 'preset:<kimlik>' ses kaydi ya da '<motor>/<ses>'."""
