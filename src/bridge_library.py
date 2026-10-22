@@ -17,6 +17,7 @@ import chat_templates
 import collection_qa
 import documents
 import library
+import media
 import qa
 import search_index
 import speech
@@ -30,7 +31,7 @@ CHAT_GREETING = ('Bu koleksiyondaki dosyalar hakkında soru sorun; cevaplar hang
 MIN_SEARCH_CHARS = 3     # transkript aramasi bu uzunluktan sonra baslar
 HIT_LIMIT = 200          # gosterilen en fazla transkript eslesmesi
 REPEATED_ERROR_LIMIT = 3  # ust uste ayni hata: kuyruk durur
-KIND_LABELS = {'video': 'Video', 'document': 'Belge', 'image': 'Görsel'}
+KIND_LABELS = {'video': 'Video ve ses', 'document': 'Belge', 'image': 'Görsel'}
 STATUS_TEXT = {'ready': 'Hazır', 'transcript': 'Metin hazır', 'pending': 'Bekliyor',
                'no_subtitle': 'Altyazı yok · Whisper bekliyor',
                'no_text': 'Metin yok · OCR bekliyor', 'missing': 'Bulunamadı'}
@@ -822,7 +823,7 @@ class LibraryMixin:
                 outcome = library.transcribe(entry, cfg, allow_whisper, log=log, progress=whisper_progress,
                                              cancelled=cancel.is_set, allow_vision=allow_vision,
                                              vision_progress=counted('Görü' if reader == 'görü modeli' else 'OCR'))
-                if (frames and outcome != 'skipped' and entry['kind'] == 'video'
+                if (frames and outcome != 'skipped' and entry['kind'] == 'video' and not media.is_audio(path)
                         and not qa.load_visual(path)[1]):
                     started(index, path, 'görüntüler okunuyor')
                     if not frame_reader:

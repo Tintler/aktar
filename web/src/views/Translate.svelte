@@ -5,13 +5,12 @@
   import SubtitleExportModal from '../components/SubtitleExportModal.svelte';
   import LanguagePair from '../components/LanguagePair.svelte';
   import { subtool, jobText, cancelJob } from '../lib/subtools.svelte.js';
-  import { app, act, setTranslate, onDrop, toast, go } from '../lib/state.svelte.js';
+  import { app, act, setTranslate, onDrop, toast, go, isAudio, isMedia, VIDEO_EXTS, AUDIO_EXTS } from '../lib/state.svelte.js';
   import { prompt, choose, confirm } from '../lib/confirm.svelte.js';
   import { call } from '../lib/api.js';
 
   const t = $derived(app.translate);
   const view = app.translateView;
-  const VIDEO = ['.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.ts', '.wmv', '.flv'];
 
   const supported = $derived(t.streams.filter((s) => s.supported).length);
   const whisperJob = $derived(t.running && t.job === 'whisper');
@@ -67,8 +66,8 @@
   });
 
   onDrop('translate', (paths) => {
-    const video = paths.find((p) => VIDEO.some((ext) => p.toLowerCase().endsWith(ext)));
-    if (!video) return toast('Bırakılan dosyalar arasında video yok.', 'error');
+    const video = paths.find(isMedia);
+    if (!video) return toast('Bırakılan dosyalar arasında video ya da ses dosyası yok.', 'error');
     if (t.running) return toast('Çeviri sürerken başka video açılamaz.', 'error');
     openVideo(video);
   });
@@ -153,13 +152,13 @@
     {#if !t.video}
       <button class="drop card" onclick={chooseVideo}>
         <span class="tile"><Icon name="film" size={30} /></span>
-        <b>Videoyu buraya bırakın</b>
-        <span class="dim">ya da tıklayıp seçin · {VIDEO.join(' ')}</span>
-        <span class="note">Seçilen metin altyazı seçili modelle hedef dile ({targetName}) çevrilir ve videonun yanına <span class="mono">{targetTag}</span> ekiyle yazılır. Altyazısı olmayan videoda önce Whisper ile altyazı oluşturulabilir. Kaynak video değiştirilmez.</span>
+        <b>Videoyu ya da ses dosyasını buraya bırakın</b>
+        <span class="dim">ya da tıklayıp seçin · {VIDEO_EXTS.join(' ')} · ses: {AUDIO_EXTS.join(' ')}</span>
+        <span class="note">Seçilen metin altyazı seçili modelle hedef dile ({targetName}) çevrilir ve videonun yanına <span class="mono">{targetTag}</span> ekiyle yazılır. Altyazısı olmayan videoda ve ses dosyasında önce Whisper ile zamanlı altyazı oluşturulabilir. Kaynak dosya değiştirilmez.</span>
       </button>
     {:else}
       <div class="hero card">
-        <span class="tile"><Icon name="film" size={26} /></span>
+        <span class="tile"><Icon name={isAudio(t.video.path) ? 'headphones' : 'film'} size={26} /></span>
         <div class="info">
           <div class="name selectable ellipsis" title={t.video.name}>{t.video.name}</div>
           <button class="path ellipsis" title="Klasörü aç" onclick={() => act('reveal', t.video.path)}><Icon name="folder" size={14} />{t.video.folder}</button>

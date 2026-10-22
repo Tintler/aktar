@@ -1,7 +1,7 @@
 <script>
   // Dosya incele: koleksiyona eklemeden tek dosya acip soru sorma; son incelenenler listesi.
   import Icon from '../lib/Icon.svelte';
-  import { app, act, onDrop, toast, refreshFiles, inspectFile, setLibrary, go, openInTranslate } from '../lib/state.svelte.js';
+  import { app, act, onDrop, toast, refreshFiles, inspectFile, setLibrary, go, openInTranslate, isAudio } from '../lib/state.svelte.js';
   import { choose, confirm, prompt } from '../lib/confirm.svelte.js';
   import { openMenu } from '../lib/menu.svelte.js';
 
@@ -100,7 +100,7 @@
             <span class="kind"><Icon name={KIND_ICON[item.kind] ?? 'file'} size={18} /></span>
             <span class="info">
               <span class="name ellipsis">{item.name}</span>
-              <span class="sub ellipsis">{item.missing ? 'Dosya bulunamadı · ' : ''}{KIND_LABEL[item.kind] ?? 'Dosya'} · {item.folder}</span>
+              <span class="sub ellipsis">{item.missing ? 'Dosya bulunamadı · ' : ''}{isAudio(item.path) ? 'Ses' : KIND_LABEL[item.kind] ?? 'Dosya'} · {item.folder}</span>
             </span>
             <span class="when dim">{when(item.opened)}</span>
             <button class="icon-btn sm more" title="Diğer" onclick={(e) => { e.stopPropagation(); menu(e, item); }}><Icon name="more" size={16} /></button>

@@ -189,6 +189,17 @@
     videoEl.src = result.url;   // kaynak elle verilir: MSE ile ayni ogeyi paylasir
   }
 
+  // Ses dosyasi her zaman HTML oynaticida (F181), video mpv'de olabilir: oynatici degisince oteki durur.
+  let wasNative = native;
+  $effect(() => {
+    if (native === wasNative) return;
+    wasNative = native;
+    lastRect = '';
+    if (!native) return void call('mpv_hide');
+    feed?.stop();
+    if (videoEl) { videoEl.pause(); videoEl.removeAttribute('src'); videoEl.load(); }
+  });
+
   // Ilk acilis: onceki konumdan (ya da bekleyen atiftan) basla.
   let opened = '';
   $effect(() => {
@@ -581,6 +592,7 @@
           <video class:hidden={native} bind:this={videoEl} preload="auto" onloadedmetadata={metadata} ontimeupdate={timeupdate}
             onplay={() => (playing = true)} onpause={() => (playing = false)} onwaiting={stalled}
             onplaying={resumed} oncanplay={() => (loading = false)} onerror={mediaError}></video>
+          {#if p.audio_only}<div class="audio-only"><Icon name="headphones" size={54} /><span>Ses dosyası</span></div>{/if}
           {#if subtitle.length && !native}
             <div class="subtitle">
               {#each subtitle as lines, c}
@@ -650,7 +662,7 @@
         </div>
       </div>
       {#if editing}
-        <DubEditor path={p.path} {time} {playing} {duration} {volume} {muted} canSetup={!!ccKey}
+        <DubEditor path={p.path} {time} {playing} {duration} {volume} {muted} canSetup={!!ccKey} audioOnly={p.audio_only}
           seek={(at, play = null) => seekTo(at, play)} {toggle} pause={() => (native ? call('mpv_command', 'pause') : videoEl?.pause())}
           onlevel={(value) => (duckLevel = value)} onsetup={() => (dubbing = true)} onclose={() => (editing = false)} />
       {:else if notes.open && notes.path === p.path}
@@ -664,7 +676,7 @@
       {:else if panel === 'clip' && clipRange}
         <div class="notes-wrap tools">
           <ClipPanel path={p.path} {time} {duration} bind:clip={clipRange} source={ccKey} sourceLabel={ccLabel} {cues} {timing} {audio}
-            onpreview={preview} onseek={(at) => seekTo(at)} onclose={() => (panel = '')} />
+            audioOnly={p.audio_only} onpreview={preview} onseek={(at) => seekTo(at)} onclose={() => (panel = '')} />
         </div>
       {/if}
     </div>
@@ -672,7 +684,7 @@
 </section>
 
 {#if dubbing && p && ccKey}
-  <DubModal path={p.path} source={ccKey} label={ccLabel} {timing} {audio} onclose={() => (dubbing = false)} oneditor={openEditor} />
+  <DubModal path={p.path} source={ccKey} label={ccLabel} {timing} {audio} audioOnly={p.audio_only} onclose={() => (dubbing = false)} oneditor={openEditor} />
 {/if}
 
 {#if exporting && p && ccKey}
@@ -691,6 +703,7 @@
   .player.full.idle .controls { display: none; }
   .surface { position: relative; flex: 1; min-height: 240px; container-type: size; display: grid; place-items: center; background: #000; cursor: pointer; overflow: hidden; }
   video { width: 100%; height: 100%; object-fit: contain; display: block; position: absolute; inset: 0; }
+  .audio-only { position: absolute; display: grid; justify-items: center; gap: 8px; color: rgba(255, 255, 255, .35); font-size: 13px; pointer-events: none; }
   .subtitle { position: absolute; left: 50%; bottom: 6%; transform: translateX(-50%); max-width: 86%; text-align: center; white-space: pre-line;
     font-size: clamp(14px, 5cqh, 34px); font-weight: 600; line-height: 1.3; color: #fff; padding: 2px 10px; border-radius: 4px;
     background: rgba(0, 0, 0, .55); text-shadow: 0 1px 2px #000; pointer-events: none; }

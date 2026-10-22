@@ -31,6 +31,14 @@ IMAGE_SUBTITLE_CODECS = {
 
 SUBTITLE_FILE_EXTENSIONS = ('.srt', '.ass', '.ssa', '.vtt')
 VIDEO_EXTENSIONS = ('.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.ts', '.wmv', '.flv')
+# Ses dosyalari videoyla ayni yoldan acilir (oynatici, Whisper, dublaj); goruntu adimlari atlanir (F181).
+AUDIO_EXTENSIONS = ('.mp3', '.m4a', '.aac', '.wav', '.flac', '.ogg', '.opus', '.wma', '.mka')
+MEDIA_EXTENSIONS = VIDEO_EXTENSIONS + AUDIO_EXTENSIONS
+
+
+def is_audio(path):
+    """Yalniz ses dosyasi mi (uzantiya gore)."""
+    return Path(path).suffix.lower() in AUDIO_EXTENSIONS
 
 
 def _find_binary(name):

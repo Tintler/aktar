@@ -37,7 +37,7 @@ import subtitle_ocr
 import subtitle_sync
 import voice_split
 from app_core import GracefulStop, load_config, read
-from media import extract_subtitle, subtitle_streams
+from media import extract_subtitle, is_audio, subtitle_streams
 
 WHISPER_KEY = 'whisper'
 WAVE_RATE = 10         # F175: dublaj duzenleyicisinde dalga bicimi sutunu / sn
@@ -427,6 +427,7 @@ class SubtitleToolsMixin:
         if engine_id is None:
             return {'error': 'Dublaj için kurulu ses motoru yok; Ayarlar → Ses → Sesli okuma bölümünden kurun.'}
         can_speed = any(item['id'] == engine_id and item['speed'] for item in engines.engines())
+        options = dub.options_for(path, options)
         stem = path.stem + '.dublaj'
         target = _unique(path, stem, options['format'])
         player = getattr(self, '_player_video', None)
@@ -550,7 +551,7 @@ class SubtitleToolsMixin:
         project = dub_project.load(path)
         if project is None:
             return {'error': 'Dublaj projesi bulunamadı; önce oluşturun.'}
-        options = project['options']
+        options = dub.options_for(path, project['options'])
         target = _unique(path, path.stem + '.dublaj', options['format'])
         player = getattr(self, '_player_video', None)
         info = player.info if player is not None and player.path == path and player.info else None
@@ -674,6 +675,8 @@ class SubtitleToolsMixin:
         if end - start < 0.1:
             return {'error': 'Klip en az 0,1 saniye olmalı.'}
         options = clip.options_of(options)
+        if is_audio(path):   # ses dosyasindan yalnizca ses klibi; altyazi yanina dosya olarak (F181)
+            options = clip.options_of(dict(options, format='m4a'))
         text, ext = None, 'srt'
         if options['subtitles'] != 'none':
             if not key:

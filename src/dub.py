@@ -74,6 +74,14 @@ def options_of(values):
     return options
 
 
+def options_for(video, values):
+    """options_of + kaynaga gore duzeltme: ses dosyasinin dublaji her zaman .m4a (goruntu yok; F181)."""
+    options = options_of(values)
+    if media.is_audio(video):
+        options['format'] = 'm4a'
+    return options
+
+
 def cache_id(video):
     """Videonun dublaj onbellegi icin kimlik (tts onbellek klasoru adi)."""
     return hashlib.sha1(('dublaj:' + str(Path(video).resolve()).lower()).encode('utf-8')).hexdigest()[:20]
@@ -449,7 +457,7 @@ def render(video, folder, placed, clips, rate, output, options, has_audio, spans
     kisilacagi araliklar [(bas, son[, duzey])] (None: options.duck kapali, ozgun ses hep `background`)."""
     import clip   # klip kaydinin FFmpeg ilerleme okuyucusu
 
-    options = options_of(options)
+    options = options_for(video, options)
     log = log or (lambda _message: None)
     folder = Path(folder)
     track = folder / 'dublaj.wav'

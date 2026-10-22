@@ -73,6 +73,8 @@ button:disabled { cursor: default; opacity: .45; }
 .field:disabled { opacity: .5; }
 textarea.field { height: auto; padding: 8px 12px; resize: vertical; }
 select.field { padding-right: 6px; cursor: pointer; }
+span.field.static { display: flex; align-items: center; color: var(--dim); }
+span.field.static:hover { background: var(--surface); }
 select.field option { background: var(--overlay); color: var(--text); }
 input[type='checkbox'], input[type='radio'] { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
 

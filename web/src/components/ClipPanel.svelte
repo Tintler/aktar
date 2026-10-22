@@ -8,15 +8,17 @@
 
   // clip: {start, end} (bindable); cues: secili altyazinin ozgun zamanli satirlari (words: Whisper)
   let { path, time = 0, duration = 0, clip = $bindable(), source = null, sourceLabel = '', cues = [],
-    timing = { scale: 1, offset: 0 }, audio = null, onpreview, onseek, onclose } = $props();
+    timing = { scale: 1, offset: 0 }, audio = null, audioOnly = false, onpreview, onseek, onclose } = $props();
 
   const saved = app.prefs.clip ?? {};   // son klip secenekleri (ui.json)
-  let opts = $state({ format: 'mp4', mode: 'precise', quality: 'high', height: 0, subtitles: 'none', font_size: 64, ...saved.opts });
+  let opts = $state({ format: 'mp4', mode: 'precise', quality: 'high', height: 0, subtitles: 'none', font_size: 64, ...saved.opts,
+    ...(audioOnly ? { format: 'm4a' } : {}) });
   let subFormat = $state(saved.subFormat ?? 'source');
   let style = $state({ color: '#FFD400', base: '#FFFFFF', size: 64, mode: 'kf', ...saved.style });
   let saveTimer;
   $effect(() => {
     const value = $state.snapshot({ opts, subFormat, style });
+    if (audioOnly) value.opts.format = app.prefs.clip?.opts?.format ?? 'mp4';   // ses dosyasi videolarin bicimini degistirmez (F181)
     if (JSON.stringify(value) === JSON.stringify(app.prefs.clip ?? null)) return;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => savePref({ clip: value }), 500);
@@ -144,7 +146,7 @@
       <div class="opt">
         <span class="label">Biçim</span>
         <div class="chips">
-          {#each [['mp4', 'MP4'], ['mkv', 'MKV'], ['gif', 'GIF'], ['m4a', 'Yalnız ses']] as [id, text]}
+          {#each audioOnly ? [['m4a', 'Ses (M4A)']] : [['mp4', 'MP4'], ['mkv', 'MKV'], ['gif', 'GIF'], ['m4a', 'Yalnız ses']] as [id, text]}
             <button class="chip" class:on={opts.format === id} onclick={() => { opts.format = id; opts.height = 0; }}>{text}</button>
           {/each}
         </div>

@@ -22,7 +22,7 @@ import subtitle_export
 import subtitle_ocr
 from app_core import (APP_DIR, GracefulStop, PauseController, TranslationEngine, _dedupe_glossary,
                       load_config, merge_glossaries, read, render_output)
-from media import VIDEO_EXTENSIONS, extract_subtitle, subtitle_streams, unique_output_path, unique_source_path
+from media import MEDIA_EXTENSIONS, extract_subtitle, subtitle_streams, unique_output_path, unique_source_path
 from transcript_export import srt_time
 
 WHISPER_STREAM = 'whisper'   # Whisper transkriptinin akis listesindeki anahtari
@@ -157,8 +157,8 @@ class TranslateMixin:
     def choose_video(self):
         if self._running():
             return {'error': 'Çeviri sürerken başka video açılamaz.'}
-        pattern = 'Video (' + ';'.join('*' + item for item in VIDEO_EXTENSIONS) + ')'
-        path = self._dialog('open_file', 'Video seç', (pattern,))
+        pattern = 'Video ya da ses (' + ';'.join('*' + item for item in MEDIA_EXTENSIONS) + ')'
+        path = self._dialog('open_file', 'Video ya da ses dosyası seç', (pattern,))
         return self.open_video(path) if path else None
 
     def open_video(self, path):
@@ -166,8 +166,8 @@ class TranslateMixin:
         if self._running():
             return {'error': 'Çeviri sürerken başka video açılamaz.'}
         path = Path(str(path or ''))
-        if path.suffix.lower() not in VIDEO_EXTENSIONS:
-            return {'error': 'Bu dosya bir video değil: ' + path.name}
+        if path.suffix.lower() not in MEDIA_EXTENSIONS:
+            return {'error': 'Bu dosya bir video ya da ses dosyası değil: ' + path.name}
         if not path.is_file():
             return {'error': 'Video bulunamadı: ' + str(path)}
         self._video = path

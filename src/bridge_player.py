@@ -128,8 +128,11 @@ class PlayerMixin:
                 entries.append(pending_entry(value))
             else:
                 entries.append({'kind': kind, 'text': str(value)})
+        # Ses dosyasi (goruntu akisi yok, F181): gomulu mpv kara pencere gosterirdi; HTML oynatici altyaziyi da cizer.
+        audio_only = video.info is not None and info.get('video') is None
         return {'path': str(video.path), 'name': video.path.name, 'duration': info.get('duration') or 0.0,
-                'engine': self._engine() if hasattr(self, '_engine') else 'web',
+                'engine': 'web' if audio_only or not hasattr(self, '_engine') else self._engine(),
+                'audio_only': audio_only,
                 'marks': marks, 'audio': [{'index': item['index'], 'label': audio_label(item)} for item in video.audio],
                 'subtitles': [{'key': item['key'], 'label': item['label'], 'kind': item['kind'],
                                'ready': item.get('ready', True)}

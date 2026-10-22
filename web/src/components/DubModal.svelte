@@ -12,7 +12,7 @@
   import { confirm } from '../lib/confirm.svelte.js';
   import { subtool, timingText, isIdentity, onSubtool } from '../lib/subtools.svelte.js';
 
-  let { path, source, label = '', timing = null, audio = null, onclose, oneditor = null } = $props();
+  let { path, source, label = '', timing = null, audio = null, audioOnly = false, onclose, oneditor = null } = $props();
 
   const saved = app.prefs.dub ?? {};
   let voice = $state(saved.voice ?? '');
@@ -92,9 +92,12 @@
   const TEMPOS = [[1, 'Hızlandırma (satır kayabilir)'], [1.2, 'En fazla 1,2×'], [1.35, 'En fazla 1,35×'], [1.5, 'En fazla 1,5×'], [1.75, 'En fazla 1,75×']];
   const SPEEDS = [0.9, 1, 1.1, 1.2];
 
+  // Ses dosyasinin dublaji her zaman .m4a (F181); kayitli tercih videolar icin korunur.
+  const format = $derived(audioOnly ? 'm4a' : opts.format);
+
   async function start() {
     savePref({ dub: { voice, opts: $state.snapshot(opts) } });
-    const result = await act('dub_create', path, source, { ...$state.snapshot(opts), audio }, timing, voice,
+    const result = await act('dub_create', path, source, { ...$state.snapshot(opts), format, audio }, timing, voice,
       opts.speakers ? $state.snapshot(speakerVoices) : null);
     if (result?.started) onclose();
   }
@@ -106,7 +109,7 @@
     if (hasProject && !(await confirm({ title: 'Dublaj projesini yeniden oluştur', danger: true, ok: 'Yeniden oluştur',
       message: 'Mevcut projedeki düzenlemeler ve üretilmiş satır sesleri silinir.' }))) return;
     savePref({ dub: { voice, opts: $state.snapshot(opts) } });
-    const result = await act('dub_project_create', path, source, { ...$state.snapshot(opts), audio }, timing, voice,
+    const result = await act('dub_project_create', path, source, { ...$state.snapshot(opts), format, audio }, timing, voice,
       opts.speakers ? $state.snapshot(speakerVoices) : null);
     if (result?.started) { onclose(); oneditor?.(); }
   }
@@ -233,11 +236,15 @@
 
   <label class="stack">
     <span class="label">Çıktı</span>
-    <select class="field" bind:value={opts.format}>
-      <option value="mkv">Video (.dublaj.mkv)</option>
-      <option value="m4a">Yalnızca ses (.dublaj.m4a)</option>
-    </select>
-    <span class="hint">{opts.format === 'mkv' ? 'Dublaj varsayılan ses parçası olur; özgün sesler ve altyazılar korunur. ' : ''}Videonun yanına yazılır; özgün dosyaya dokunulmaz.</span>
+    {#if audioOnly}
+      <span class="field static">Ses (.dublaj.m4a)</span>
+    {:else}
+      <select class="field" bind:value={opts.format}>
+        <option value="mkv">Video (.dublaj.mkv)</option>
+        <option value="m4a">Yalnızca ses (.dublaj.m4a)</option>
+      </select>
+    {/if}
+    <span class="hint">{format === 'mkv' ? 'Dublaj varsayılan ses parçası olur; özgün sesler ve altyazılar korunur. ' : ''}{audioOnly ? 'Ses dosyasının' : 'Videonun'} yanına yazılır; özgün dosyaya dokunulmaz.</span>
   </label>
 
   {#snippet footer()}

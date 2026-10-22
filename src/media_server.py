@@ -26,7 +26,9 @@ from urllib.parse import parse_qs, urlsplit
 
 import media
 
-BROWSER_CONTAINERS = {'.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/mp4', '.webm': 'video/webm'}
+BROWSER_CONTAINERS = {'.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/mp4', '.webm': 'video/webm',
+                      '.m4a': 'audio/mp4', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.opus': 'audio/ogg',
+                      '.flac': 'audio/flac'}
 BROWSER_VIDEO = {'h264', 'vp8', 'vp9', 'av1'}
 BROWSER_AUDIO = {'aac', 'mp3', 'opus', 'vorbis', 'flac'}
 CHUNK = 256 * 1024

@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.16.0 — 2026-10-22
+
+### Yeni
+- **Ses dosyaları (F181):** MP3, M4A, AAC, WAV, FLAC, OGG, Opus, WMA ve MKA dosyaları da videolar gibi açılır. Oynatıcıda Whisper ile zamanlı altyazı çıkarılabilir, altyazı dışa aktarılabilir, dublaj (doğrudan ya da düzenleyiciyle) yapılabilir ve soru sorulabilir; Altyazı Çevir sayfasında ses dosyasından altyazı oluşturulup çevrilebilir. Ses dosyasının dublajı ve klibi her zaman `.m4a` olarak yazılır. Ses dosyaları gömülü mpv yerine uygulamanın kendi oynatıcısında çalınır; kütüphaneye de eklenebilir (kare okuma atlanır).
+
 ## 2.15.0 — 2026-10-21
 
 ### Yeni

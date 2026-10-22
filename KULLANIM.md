@@ -267,6 +267,8 @@ Video (sürükle-bırak veya Video Seç)
 
 Desteklenen video uzantıları: `.mkv`, `.mp4`, `.m4v`, `.avi`, `.mov`, `.webm`, `.ts`, `.wmv`, `.flv`.
 
+Ses dosyaları da açılabilir: `.mp3`, `.m4a`, `.aac`, `.wav`, `.flac`, `.ogg`, `.opus`, `.wma`, `.mka`. Ses dosyasında altyazı akışı olmadığından önce **Whisper ile altyazı oluştur** kullanılır; zamanlı altyazı dosyanın yanına `.srt` olarak yazılır ve çevrilebilir. Oynatıcıda aynı dosyadan dublaj da yapılabilir; ses dosyasının dublajı her zaman `.dublaj.m4a` olur.
+
 ### 3.2 Altyazı akışları tablosu
 | Sütun | Anlamı |
 | --- | --- |

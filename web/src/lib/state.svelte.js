@@ -425,7 +425,11 @@ export function selectedPaths() {
   return app.library.rows.filter((r) => keys.has(r.key)).map((r) => r.path);
 }
 
-const VIDEO_EXT = /\.(mkv|mp4|m4v|avi|mov|webm|ts|wmv|flv)$/i;
+// Oynaticida acilan dosyalar: video ve ses (F181; media.py MEDIA_EXTENSIONS ile ayni).
+export const VIDEO_EXTS = ['.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.ts', '.wmv', '.flv'];
+export const AUDIO_EXTS = ['.mp3', '.m4a', '.aac', '.wav', '.flac', '.ogg', '.opus', '.wma', '.mka'];
+export const isAudio = (path) => AUDIO_EXTS.some((ext) => String(path).toLowerCase().endsWith(ext));
+export const isMedia =(path) => [...VIDEO_EXTS, ...AUDIO_EXTS].some((ext) => String(path).toLowerCase().endsWith(ext));
 let seekId = 0;
 
 export function seekPlayer(time, play = true) {
@@ -438,7 +442,7 @@ export async function openFile(row, at = null, origin = 'library') {
   if (row.missing) return toast('Dosya bulunamadı: ' + row.path, 'error');
   if (app.busy) return;   // acilis surerken ikinci tiklama yok sayilir
   app.fileOrigin = origin;
-  if (!VIDEO_EXT.test(row.path)) {
+  if (!isMedia(row.path)) {
     if (app.document?.path !== row.path) {
       app.busy = 'Belge açılıyor…';
       const state = await act('doc_open', row.path).finally(() => (app.busy = ''));

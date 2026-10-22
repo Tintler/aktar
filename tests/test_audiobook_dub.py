@@ -255,6 +255,17 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(audio[1]['disposition']['default'], 0)
         self.assertTrue(video.exists())
 
+    def test_dub_of_audio_file_writes_m4a_even_if_mkv_asked(self):
+        source = self.folder / 'podcast.mp3'
+        subprocess.run([FFMPEG, '-v', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
+                        '-c:a', 'libmp3lame', str(source)], check=True)
+        output = self.folder / 'podcast.dublaj.m4a'
+        dub.build(self.engines, source, [{'start': 0.5, 'end': 1.5, 'text': 'Merhaba.'}], output,
+                  {'format': 'mkv'}, duration=3, has_audio=True)
+        streams = probe(output)['streams']
+        self.assertEqual([s['codec_type'] for s in streams], ['audio'])
+        self.assertEqual(streams[0]['codec_name'], 'aac')
+
     def test_dub_with_speed_capable_engine_rerenders_faster(self):
         video = self._video(3)
         segments = [{'start': 0.2, 'end': 0.6, 'text': 'Oldukça uzun bir cümle burada.'}]

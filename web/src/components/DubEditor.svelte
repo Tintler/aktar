@@ -13,7 +13,7 @@
   import { subtool, onSubtool, jobText } from '../lib/subtools.svelte.js';
   import { confirm } from '../lib/confirm.svelte.js';
 
-  let { path, time = 0, playing = false, duration = 0, volume = 1, muted = false, canSetup = false,
+  let { path, time = 0, playing = false, duration = 0, volume = 1, muted = false, canSetup = false, audioOnly = false,
     seek, toggle, pause, onlevel, onsetup, onclose } = $props();
 
   const EDIT_KEYS = ['id', 'start', 'end', 'text', 'tag', 'voice', 'speaker', 'at', 'gain', 'speed', 'fit'];
@@ -590,10 +590,11 @@
         {/if}
       </div>
       <label class="stack"><span class="label">Çıktı</span>
+        {#if audioOnly}<span class="field static">Ses (.dublaj.m4a)</span>{:else}
         <select class="field" value={opts.format} onchange={(e) => setOption('format', e.currentTarget.value)}>
           <option value="mkv">Video (.dublaj.mkv)</option>
           <option value="m4a">Yalnızca ses (.dublaj.m4a)</option>
-        </select></label>
+        </select>{/if}</label>
       <span class="hint">Hız, eşitleme ya da üst üste koyma değişince satırların sesi eski sayılır; "Eksikleri seslendir" yeniden üretir.</span>
       <button class="btn" disabled={!canSetup || busy} onclick={onsetup}><Icon name="rotate" size={15} />Projeyi altyazıdan yeniden oluştur…</button>
     </div>

@@ -27,11 +27,12 @@ import search_index
 import series
 import speech
 from app_core import APP_DIR, FileLock, digest, load_config, read, save_json, tr_lower
-from media import VIDEO_EXTENSIONS
+from media import MEDIA_EXTENSIONS, is_audio
 
 VERSION = 1
-# Ileride: 'image', 'table' (her tur kendi metin cikaricisiyla).
-KINDS = {'video': VIDEO_EXTENSIONS, 'document': documents.SUFFIXES,
+# Ileride: 'image', 'table' (her tur kendi metin cikaricisiyla). Ses dosyalari 'video' turundedir (F181):
+# altyazi/Whisper ve konusmaci yolu ortak, kare okuma atlanir.
+KINDS = {'video': MEDIA_EXTENSIONS, 'document': documents.SUFFIXES,
          'image': documents.IMAGE_SUFFIXES}
 TEXT_KINDS = ('document', 'image')  # documents.py ile metne cevrilen turler
 DOCUMENT_LABELS = {'text': 'Metin dosyası', 'word': 'Word metni', 'sheet': 'Tablo',
@@ -637,7 +638,7 @@ def plan(entries, base=None, progress=None, cancelled=None, cfg=None):
             elif info is not None:
                 result['whisper'].append(entry)
                 result['whisper_seconds'] += info['duration']
-        if entry['kind'] == 'video' and not qa.load_visual(entry['path'], base)[1]:
+        if entry['kind'] == 'video' and not is_audio(entry['path']) and not qa.load_visual(entry['path'], base)[1]:
             result['frames'].append(entry)
             probed = cached_probe(entry['path'], base)
             result['frames_seconds'] += float((probed or {}).get('duration') or (session or {}).get('duration') or 0)
