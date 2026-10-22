@@ -35,6 +35,11 @@ CUE_SECONDS = 6.0    # bir cue'nun en uzun suresi
 LINE_CHARS = 42      # gosterimde satir genisligi
 CLIP_RATE = 16000        # sesle soru kaydi (F112): arayuz 16 kHz mono WAV gonderir
 CLIP_MAX_SECONDS = 120
+# F182: konusma algilayici (Silero VAD) sarki/koroyu konusma saymaz; hic konusma bulunmazsa VAD'siz cozulur.
+# Muzikte Whisper 30 sn'lik pencereye tek kisa ifade uydurur ("Thank you."): boyle pencereler ve dusuk
+# guvenli satirlar atilir.
+SUNG_MIN_WORDS = 6        # tek satirli pencere bundan az kelimeyse uydurma sayilir
+SUNG_MIN_LOGPROB = -1.0   # Whisper'in kendi esigi (log_prob_threshold)
 HELPER_NAME = 'aktar-whisper'
 BUILD_WHISPER_SCRIPT = 'DERLE_WHISPER.cmd' if WINDOWS else 'derle_whisper.sh'
 INSTALL_HINT = ('Konuşmadan metin için faster-whisper kurulu değil. Kurmak için uygulama '
@@ -413,7 +418,7 @@ def run_whisper(audio, model_name=DEFAULT_MODEL, device='auto', language='', pro
         try:
             model = WhisperModel(source, device=target, compute_type=compute_type,
                                  download_root=download_root)
-            result = _run_model(model, audio, language, progress, cancelled)
+            result = _run_model(model, audio, language, progress, cancelled, log)
         except GracefulStop:
             raise
         except Exception as error:  # CUDA DLL eksikligi vb. calisma aninda cikar
@@ -502,19 +507,51 @@ def read_wav(path):
     return np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
 
 
-def _run_model(model, audio, language, progress, cancelled):
-    iterator, info = model.transcribe(read_wav(audio), language=language or None, vad_filter=True,
-                                      word_timestamps=True, beam_size=5)
+def sung_segments(segments):
+    """VAD'siz cozumden (sarki, koro) uydurma satirlari atar: tek satirlik ve SUNG_MIN_WORDS'ten kisa
+    pencereler (Whisper'in muzige uydurdugu "Thank you.") ile guveni SUNG_MIN_LOGPROB'un altindaki satirlar.
+    `segments`: faster-whisper Segment'leri (seek = 30 sn'lik cozum penceresi)."""
+    windows = {}
+    for segment in segments:
+        windows.setdefault(segment.seek, []).append(segment)
+    kept = []
+    for group in windows.values():
+        if len(group) == 1 and len(group[0].text.split()) < SUNG_MIN_WORDS:
+            continue
+        kept += [segment for segment in group if segment.avg_logprob >= SUNG_MIN_LOGPROB]
+    return kept
+
+
+def _decode(model, samples, language, progress, cancelled, vad):
+    # VAD'siz (muzik) cozumde onceki pencerenin metni istem yapilmaz: yoksa ilk uydurma ifade
+    # ("We'll be right back.") butun dosyaya yayilir ve gercek sarki sozleri hic cikmaz.
+    iterator, info = model.transcribe(samples, language=language or None, vad_filter=vad,
+                                      condition_on_previous_text=vad, word_timestamps=True, beam_size=5)
     total = int(getattr(info, 'duration', 0) or 0)
-    words = []
+    if progress:
+        progress(0, total)   # VAD bitti, cozum basliyor: arayuzde ilerleme gorunsun
+    segments = []
     for segment in iterator:
         if cancelled and cancelled():
             raise GracefulStop('Konuşmadan metin durduruldu.')
+        segments.append(segment)
+        if progress:
+            progress(int(segment.end), total)
+    return segments, info, total
+
+
+def _run_model(model, audio, language, progress, cancelled, log=print):
+    samples = read_wav(audio)
+    segments, info, total = _decode(model, samples, language, progress, cancelled, True)
+    if not segments:
+        log('Konuşma algılanmadı; şarkı ya da koro olabilir, konuşma algılaması olmadan yeniden deneniyor.')
+        segments, info, total = _decode(model, samples, language, progress, cancelled, False)
+        segments = sung_segments(segments)
+    words = []
+    for segment in segments:
         if segment.words:
             words.extend((word.start, word.end, word.word) for word in segment.words)
         else:
             words.append((segment.start, segment.end, segment.text))
-        if progress:
-            progress(int(segment.end), total)
     return {'segments': regroup_words(words), 'language': getattr(info, 'language', '') or '',
             'duration': float(total)}

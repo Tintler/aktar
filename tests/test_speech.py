@@ -465,6 +465,43 @@ class HelperProtocolTests(unittest.TestCase):
         self.assertEqual(json.loads(out.getvalue()), {'error': 'bozuk'})
 
 
+def sung(seek, text, logprob=-0.4):
+    segment = FakeSegment(seek, seek + 2, text, [])
+    segment.seek, segment.avg_logprob = seek * 100, logprob
+    return segment
+
+
+class SungTests(unittest.TestCase):
+    """F182: konusma algilayici sarkiyi konusma saymaz; VAD'siz cozum ve uydurma satir ayiklama."""
+
+    def test_sung_segments_drop_lone_short_windows_and_low_confidence(self):
+        lyrics = [sung(30, ' We must bless this land'), sung(30, ' City of desert suns'),
+                  sung(30, ' Oh, Lord', logprob=-1.05)]
+        kept = speech.sung_segments([sung(0, " We'll be right back.")] + lyrics
+                                    + [sung(60, ' Thank you.'), sung(90, ' To the scales we gladly go and sing')])
+        self.assertEqual([item.text for item in kept],
+                         [' We must bless this land', ' City of desert suns', ' To the scales we gladly go and sing'])
+
+    def test_no_speech_retries_without_vad_and_previous_text(self):
+        calls = []
+
+        class Model:
+            def transcribe(self, _audio, **kwargs):
+                calls.append((kwargs['vad_filter'], kwargs['condition_on_previous_text']))
+                found = [] if kwargs['vad_filter'] else [sung(0, ' Under every sky'), sung(0, ' When voices lifted high')]
+                return iter(found), types.SimpleNamespace(duration=40.0, language='en')
+
+        audio = Path(tempfile.mkdtemp()) / 'a.wav'
+        self.addCleanup(lambda: audio.unlink(missing_ok=True))
+        write_wav(audio)
+        logs, seen = [], []
+        result = speech._run_model(Model(), audio, '', lambda done, total: seen.append((done, total)), None, logs.append)
+        self.assertEqual(calls, [(True, True), (False, False)])
+        self.assertEqual([item['text'] for item in result['segments']], ['Under every sky When voices lifted high'])
+        self.assertIn('şarkı', logs[0])
+        self.assertEqual(seen[0], (0, 40))
+
+
 class ConfigTests(unittest.TestCase):
     def test_whisper_config_is_validated(self):
         cfg = dict(app_core.DEFAULT_CONFIG)

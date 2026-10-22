@@ -2,6 +2,12 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.16.1 — 2026-10-22
+
+### Düzeltme
+- **Şarkılı seste "Seste konuşma bulunamadı" (F182):** Whisper'ın konuşma algılayıcısı şarkı ve koroyu konuşma saymadığı için müzik dosyalarından hiç metin çıkmıyordu. Konuşma bulunamazsa Whisper artık konuşma algılaması olmadan yeniden çalışır; müziğe uydurduğu kısa satırlar ("Thank you.", "We'll be right back.") ve güveni düşük satırlar ayıklanır, şarkı sözleri zamanlı altyazı olarak çıkar. Bu yeniden denemede ilerleme çubuğu baştan dolar.
+- **Durum yazısı takılı kalıyordu:** Oynatıcıda sesten metin çıkarma başarısız olunca sağ paneldeki "Konuşmadan metin çıkarılıyor…" yazısı değişmiyordu; artık "Konuşmadan metin çıkarılamadı." gösterilir.
+
 ## 2.16.0 — 2026-10-22
 
 ### Yeni

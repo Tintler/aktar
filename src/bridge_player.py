@@ -291,12 +291,16 @@ class PlayerMixin:
                                            cuda_dir=cfg.get('whisper_cuda_dir', ''), audio_track=track)
             except (GracefulStop, RuntimeError, ValueError, OSError) as error:
                 video.entries.append(('error', 'Konuşmadan metin çıkarılamadı: ' + str(error)))
+                failed = True
             else:
                 video.whisper = result
                 self._emit('whisper_ready', {'path': str(video.path)})
+                failed = False
             video.transcribing = False
             video.progress = None
-            video.status = self._ready_status(video) if video.ready else video.status
+            # Hazir degilken eski durum ("cikariliyor...") takili kalmasin (F182).
+            video.status = (self._ready_status(video) if video.ready
+                            else 'Konuşmadan metin çıkarılamadı.' if failed else 'Konuşmadan metin hazır.')
             self._push_player(video)
 
         threading.Thread(target=work, name='aktar-whisper', daemon=True).start()
