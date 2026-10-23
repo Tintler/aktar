@@ -454,12 +454,38 @@ class FreeDirectionTests(unittest.TestCase):
                              '3': '[fısıldayarak][korkuyla] "Duydun mu? Biri aşağıda."'}, ensure_ascii=False)
         sentences = ['— Bir iki.', '— Üç dört.', 'Anlatıcı konuştu.', '"Duydun mu? Biri aşağıda."']
         self.assertEqual(emotion_tags.parse_llm(answer, sentences, 0, 4, [], 'free'),
-                         {0: '— Bir [güler] iki.', 3: '[fısıldayarak][korkuyla] "Duydun mu? Biri aşağıda."'})
+                         {0: '— Bir [güler] iki.', 3: '[fısıldayarak] [korkuyla] "Duydun mu? Biri aşağıda."'})
         prompt = emotion_tags.llm_prompt(['[sad]'], 'free')
         self.assertNotIn('[sad]', prompt)        # serbest kipte katalog verilmez, yalnizca Turkce ornekler
         self.assertIn('[titrek bir sesle', prompt)
         self.assertIn('<forceful>', prompt)
         self.assertIn('derin bir nefes alır] tamam', prompt)
+
+    def test_narrator_words_stay_plain(self):
+        # kullanicinin dinlemesi: anlaticinin sozlerine konan on ek yanlis, tirnaktan sonra on ek tasabiliyor
+        sentence = 'Ve araba yol alırken, “Hırsız! Hırsız!” diye tekrarladım.'
+        self.assertEqual(emotion_tags.free_markup('[kendi kendine fısıldayarak] Ve araba yol alırken, [panikle] '
+                                                  '“Hırsız! Hırsız!” diye tekrarladım.', sentence),
+                         'Ve araba yol alırken, [panikle] “Hırsız! Hırsız!” [sakin anlatıcı sesi] diye tekrarladım.')
+        self.assertEqual(emotion_tags.free_markup('[fısıltıyla] Evet, kendi kendime, “Hırsız!” dedim.',
+                                                  'Evet, kendi kendime, “Hırsız!” dedim.'), '')
+        self.assertEqual(emotion_tags.free_markup('[alaycı] “Hah, bekçi var,” dedi biri, [tehditkar] “içeri tıkarlar.”',
+                                                  '“Hah, bekçi var,” dedi biri, “içeri tıkarlar.”'),
+                         '[alaycı] “Hah, bekçi var,” [sakin anlatıcı sesi] dedi biri, [tehditkar] “içeri tıkarlar.”')
+        self.assertEqual(emotion_tags.free_markup('[bağırarak] “Teddy!”, diye haykırdı.', '“Teddy!”, diye haykırdı.'),
+                         '[bağırarak] “Teddy!”, [sakin anlatıcı sesi] diye haykırdı.')
+        self.assertEqual(emotion_tags.free_markup('— [öfkeyle] Defol, dedi.', '— Defol, dedi.'), '— [öfkeyle] Defol, dedi.')
+        self.assertEqual(emotion_tags.free_markup('<soft>“Gel.”</soft> dedi.', '“Gel.” dedi.'),
+                         '<soft>“Gel.”</soft> [sakin anlatıcı sesi] dedi.')
+
+    def test_free_mode_fills_only_with_working_tags(self):
+        sections = [{'sentences': ['— Yine mi? dedi alayla.', '— Gel, diye bağırdı.'], 'breaks': [0, 1]}]
+        everything = list(drama3.EMOTION_TAGS)
+        self.assertEqual(emotion_tags.tag_book(sections, allowed=everything), [['[sarcastic]', '[shouting]']])
+        self.assertEqual(emotion_tags.tag_book(sections, lambda prompt: '{}', allowed=everything, style='free'),
+                         [['', '[shouting]']])
+        self.assertEqual(emotion_tags.tag_sentences(['— Kahkahaları dondu, “Buyurun!” dedi.'], [0], everything), [''])
+        self.assertEqual(emotion_tags.tag_sentences(['— Kahkahayla “Buyurun!” dedi.'], [0], everything), ['[laughs]'])
 
     def test_old_engine_gets_one_catalog_tag(self):
         import drama3_tags

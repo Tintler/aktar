@@ -63,7 +63,7 @@ CATALOG = (
      'cue': r'utanarak|mahcup(?:ça| bir)|utangaç bir|kızararak|utandı',
      'examples': 'utanarak, mahcupça, kızararak', 'llm': 'utanarak, mahcup'},
     {'tag': '[laughs]', 'kind': 'point', 'group': SOUND, 'label': 'Gülme', 'status': 'works',
-     'cue': r'gül(?:erek|dü|üyordu|üştü|üşerek|üşüyorlardı|mekten|meye başladı)|kahkaha|kıkırda(?:dı|yarak)'
+     'cue': r'gül(?:erek|dü|üyordu|üştü|üşerek|üşüyorlardı|mekten|meye başladı)|kahkaha(?:yla|larla| atarak| attı| atıyordu| koparak| kopardı|ya boğul)|kıkırda(?:dı|yarak)'
             r'|katıla katıla',
      'examples': 'gülerek, güldü, kahkaha', 'llm': 'gülerek'},
     {'tag': '[small laugh]', 'kind': 'point', 'group': SOUND, 'label': 'Hafif gülüş', 'status': 'untested',
@@ -209,6 +209,55 @@ def same_text(markup, text):
     return bool(_letters(text)) and _letters(plain(markup)) == _letters(text)
 
 
+_IGNORED = set('“”«»„"\'’‘‚')   # model JSON yazarken “ ” -> " ve ’ -> ' yapiyor (gemma denemesi)
+
+
+def reproject(markup, text):
+    """F187: modelin etiketli cumlesindeki yonergeleri `text`in kendi karakterlerine tasir: bosluklar ve tirnak/kesme
+    isaretleri karsilastirilmaz (model “Yine mi?”yi "Yine mi?" diye yaziyor), geri kalan her karakter ayni olmali.
+    Tirnaktan once yazilan yonerge tirnaktan once kalir. Sozler uyusmuyorsa ''."""
+    text, markup = ' '.join(str(text or '').split()), ' '.join(str(markup or '').split())
+    keyed = lambda ch: not ch.isspace() and ch not in _IGNORED
+    target = [i for i, ch in enumerate(text) if keyed(ch)]
+    inserts, count, last = [], 0, 0
+
+    def consume(segment):
+        nonlocal count
+        for ch in segment:
+            if keyed(ch):
+                if count >= len(target) or text[target[count]] != ch:
+                    return False
+                count += 1
+        return True
+
+    for match in re.finditer(_DIRECTION.pattern + '|' + _SCOPED.pattern, markup):
+        if not consume(markup[last:match.start()]):
+            return ''
+        last = match.end()
+        tag = match.group(0)
+        if tag.startswith('</'):
+            position = target[count - 1] + 1 if count else 0
+            if markup[match.start() - 1:match.start()] in _IGNORED:   # '..."</soft>': tirnaktan sonra kapanir
+                while position < len(text) and text[position] in _IGNORED:
+                    position += 1
+        else:
+            position = target[count] if count < len(target) else len(text)
+            following = markup[match.end():].lstrip()[:1]
+            if following in _IGNORED or following in '[<':   # '[x] "Yine': tirnaktan once kalir
+                while position > 0 and text[position - 1] in _IGNORED:
+                    position -= 1
+        inserts.append((position, len(inserts), tag))
+    if not consume(markup[last:]) or count != len(target) or not inserts:
+        return ''
+    result, last = [], 0
+    for position, _order, tag in sorted(inserts):
+        result.append(text[last:position])
+        result.append(f' {tag} ' if tag.startswith('[') else tag)
+        last = position
+    result.append(text[last:])
+    return ' '.join(''.join(result).split())
+
+
 def is_markup(value):
     """Etiketli cumle mi (tek bir katalog etiketi degil)."""
     value = str(value or '')
@@ -260,6 +309,45 @@ def valid(markup, text, chosen=None, free=True):
             if not words or len(words.split()) > MAX_WORDS or (not free and tag not in chosen):
                 return ''
     return re.sub(r'\s+([,.;:!?…])', r'\1', markup) if not re.search(r'\s[,.;:!?…]', text) else markup
+
+
+_QUOTED = re.compile(r'[“«"][^”»"]*(?:[”»"]|$)')
+_STARTS_QUOTE = re.compile(r'(?:\s*\[[^\[\]]*\])*\s*(?:<[A-Za-z]+>\s*)?[“«"]')
+
+
+def narrator_safe(markup):
+    """F187: tirnakli cumlede anlaticinin sozlerine konan [..] yonergeleri atilir ('[kendi kendine fısıldayarak] Ve
+    araba ... [panikle] “Hırsız!” diye tekrarladım.' -> yalnizca [panikle] kalir); tirnagin hemen onundekiler ve
+    icindekiler kalir. Yonergeli sozden sonra anlatici devam ediyorsa tirnak kapaninca RESET_NARRATION eklenir
+    (kullanicinin dinlemesi: on ek tirnaktan sonraki 'diye haykırıyorlardı...' kismina da tasabiliyor).
+    Tirnaksiz (cizgili) cumle degismez."""
+    markup = str(markup or '')
+    spans = [(m.start(), m.end()) for m in _QUOTED.finditer(markup)]
+    if not spans:
+        return markup
+    inside = lambda position: any(start <= position < end for start, end in spans)
+    kept, last = [], 0
+    for match in _DIRECTION.finditer(markup):
+        if not inside(match.start()) and not _STARTS_QUOTE.match(markup, match.end()):
+            kept.append(markup[last:match.start()])
+            last = match.end()
+    markup = ' '.join((''.join(kept) + markup[last:]).split())
+    result, last, styled = [], 0, False
+    for match in _QUOTED.finditer(markup):
+        styled = styled or bool(_DIRECTION.search(markup, last, match.end()) or _SCOPED.search(markup, last, match.end()))
+        end = match.end()
+        closing = re.match(r'\s*</[A-Za-z]+>', markup[end:])
+        if closing:
+            end += closing.end()
+        punctuation = re.match(r'[,.;:!?…]*', markup[end:]).end()   # '“Teddy!”, diye' -> sifirlama virgulden sonra
+        end += punctuation
+        result.append(markup[last:end])
+        last = end
+        following = markup[end:]
+        if styled and re.match(r'[\s—–-]*[^\W\d_]', following) and not _STARTS_QUOTE.match(following):
+            result.append(' ' + RESET_NARRATION)
+        styled = False
+    return ' '.join((''.join(result) + markup[last:]).split())
 
 
 def legacy_tag(markup, chosen=None):

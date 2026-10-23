@@ -64,6 +64,26 @@ def is_speech(sentence):
     return any(len(quoted.split()) >= 3 or re.search(r'[.!?,…]', quoted) for quoted in _QUOTED.findall(sentence))
 
 
+_OPENS = re.compile(r'[“«]')
+_CLOSES = re.compile(r'[”»]')
+
+
+def speech_mask(sentences, breaks=()):
+    """F187: her cumle konusma mi: is_speech ya da ayni paragrafta onceki cumlelerde acilip kapanmamis bir tirnagin
+    ici (okuyucu uzun alintiyi boler: '“Esper, yani...' sonrasi 'Telepatikler, Akil Okuyuculari.' tirnaksiz kalir)."""
+    sentences = [str(s) for s in sentences]
+    ends = {int(b) for b in breaks or ()}
+    mask, depth = [], 0
+    for i, sentence in enumerate(sentences):
+        mask.append(depth > 0 or is_speech(sentence))
+        depth = max(0, depth + len(_OPENS.findall(sentence)) - len(_CLOSES.findall(sentence)))
+        if sentence.count('"') % 2:
+            depth = 0 if depth else 1
+        if i in ends:
+            depth = 0
+    return mask
+
+
 def narration(sentence):
     """Cumlenin anlatici kismi: tirnak icleri cikarilir (cizgili diyalogda butunu, ipuclari ucuncu kisi oldugu icin)."""
     return _QUOTED.sub(' ', str(sentence))
@@ -97,7 +117,7 @@ def tag_sentences(sentences, breaks=(), allowed=None):
     ('Sinirle sordu:') sonraki paragrafin ilk cumlesine. Uzaktaki konusma etiket almaz (baska bir ana ait olabilir)."""
     sentences = [str(s) for s in sentences]
     tags = [''] * len(sentences)
-    speech = [is_speech(s) for s in sentences]
+    speech = speech_mask(sentences, breaks)
     paragraph = [0] * len(sentences)
     for number, (start, end) in enumerate(paragraphs(len(sentences), breaks)):
         paragraph[start:end] = [number] * (end - start)
@@ -136,8 +156,10 @@ LLM_FREE_PROMPT = (
     'Aşağıda bir romandan numaralı cümleler var (boş satır paragraf sonudur). Kitabı Fish Audio Drama 3 sesli '
     'okuyacak; sen yönetmensin. Konuşma cümlelerinden (tırnaklı ya da çizgiyle başlayan) anlatıcının ya da bağlamın '
     'açıkça belli ettiği bir duygu, ses ya da davranışla söylenenlere yönerge ekle:\n'
-    '- Ön ek: sözlerin önüne köşeli parantez içinde kısa Türkçe tarif, oyuncuya not verir gibi; tırnaklı konuşmada '
-    'tırnağın önüne: [titrek bir sesle, ağlamamak için kendini zorlayarak], [öfkeyle, dişlerini sıkarak].\n'
+    '- Ön ek: konuşmanın önüne köşeli parantez içinde kısa Türkçe tarif, oyuncuya not verir gibi: [titrek bir sesle, '
+    'ağlamamak için kendini zorlayarak], [öfkeyle, dişlerini sıkarak]. Tırnaklı konuşmada ön ek tırnağın hemen önüne '
+    'gelir, cümlenin başına değil. Anlatıcının sözleri (tırnak dışı: "diye bağırdı", "kendi kendime söyledim", '
+    'anlatım) her zaman yönergesiz, sakin anlatıcı sesiyle okunur; onlara asla yönerge koyma.\n'
     '- Ses ya da duraklama: tam olduğu yere köşeli parantezle, cümle ortasına da olabilir: [derin bir nefes alır], '
     '[duraksar], [iç çeker], [güler], [gasps].\n'
     '- Çift etiket: yalnızca birkaç kelimenin söylenişi değişiyorsa o kelimeleri sar; yalnızca şunlar: <whisper>, '
@@ -145,9 +167,10 @@ LLM_FREE_PROMPT = (
     'Kurallar: cümlenin kelimelerini ve noktalamasını hiç değiştirme, yalnızca yönerge ekle. Bir cümlede en fazla '
     '{most} yönerge, her biri en fazla {words} kelime; köşeli parantez iç içe olmaz. Nötr, emin olmadığın ya da '
     'anlatıcı cümlelerine dokunma. Bir konuşma birden çok cümleyse her cümleye aynı ön eki yaz.\n'
-    'Yalnızca JSON nesnesi döndür; anahtar cümle numarası, değer cümlenin yönergeli hali. Örnek: {example}. '
-    'Hiçbiri yoksa {{}}.\n\n')
+    'Yalnızca JSON nesnesi döndür; anahtar cümle numarası, değer cümlenin yönergeli hali. Yönerge eklemediğin '
+    'cümleleri JSON\'a hiç yazma. Örnek: {example}. Hiçbiri yoksa {{}}.\n\n')
 LLM_FREE_EXAMPLE = {'12': '[öfkeyle, dişlerini sıkarak] "Burada ne işin var?" dedi.',
+                    '14': 'Kapıyı aralayınca yaşlı adam, [titrek bir sesle] "Kim var orada?" diye sordu.',
                     '15': '— Peki [derin bir nefes alır] tamam, sen kazandın.'}
 
 
@@ -179,18 +202,21 @@ def free_markup(value, sentence, allowed=None):
     """F187: modelin yanit degeri -> etiketli cumle ('' gecersiz). Yalnizca yonerge yazilmissa ('[öfkeyle]') on ek
     olarak cumleye konur (tirnaktan once, drama3.tagged gibi)."""
     value = ' '.join(str(value or '').split())
+    value = drama3_tags.reproject(value, sentence) or value   # modelin tirnak/kesme isaretleri kitabinkiyle
     if value and not drama3_tags.plain(value) and re.fullmatch(r'(?:\[[^\[\]]+\]\s*)+', value):
         quote = re.search(r'[“«"]', sentence)
         position = quote.start() if quote and re.search(r'[^\W\d_]', sentence[:quote.start()]) else 0
         if _DASH.match(sentence) and not position:
             position = _DASH.match(sentence).end()
         value = (sentence[:position] + value + ' ' + sentence[position:]).strip()
-    return drama3_tags.valid(value, sentence, allowed, free=True)
+    markup = drama3_tags.narrator_safe(drama3_tags.valid(value, sentence, allowed, free=True))
+    useful = [tag for tag, _words in drama3_tags.directions(markup) if tag != drama3_tags.RESET_NARRATION]
+    return markup if useful else ''
 
 
-def parse_llm(raw, sentences, start, stop, allowed=None, style='catalog'):
+def parse_llm(raw, sentences, start, stop, allowed=None, style='catalog', speech=None):
     """Model yanitindan {numara: etiket}: yalnizca araliktaki konusma cumleleri ve secilen etiketler. F187: 'free'
-    kipinde deger cumlenin etiketli hali (drama3_tags.valid)."""
+    kipinde deger cumlenin etiketli hali (drama3_tags.valid); `speech` speech_mask (yoksa is_speech)."""
     allowed = drama3_tags.allowed(allowed)
     match = re.search(r'\{.*\}', str(raw or ''), re.S)
     if not match:
@@ -205,7 +231,7 @@ def parse_llm(raw, sentences, start, stop, allowed=None, style='catalog'):
             index = int(str(key).strip())
         except ValueError:
             continue
-        if not (start <= index < stop and is_speech(sentences[index])):
+        if not (start <= index < stop and (speech[index] if speech else is_speech(sentences[index]))):
             continue
         if style == 'free':
             markup = free_markup(value, sentences[index], allowed)
@@ -221,9 +247,11 @@ def parse_llm(raw, sentences, start, stop, allowed=None, style='catalog'):
 
 def tag_with_llm(sentences, breaks, ask, cancel=None, progress=None, allowed=None, style='catalog'):
     """Model sunucusuyla etiketleme: `ask(istem) -> yanit metni`. Donen: her cumle icin etiket ('' yok). Konusmalarin
-    yarisindan fazlasini etiketleyen yanit (kucuk model istemi anlamamis: her seye [laughs]) yok sayilir.
-    `progress(islenen_cumle)` her parcadan sonra cagrilir."""
+    yarisindan fazlasini etiketleyen yanit (kucuk model istemi anlamamis: her seye [laughs]) yok sayilir; F187
+    serbest kipte yalnizca bu etiketlerin yarisindan fazlasi ayni yonergeyse (gemma neredeyse her konusmaya ayri,
+    yerinde bir yonerge yaziyordu). `progress(islenen_cumle)` her parcadan sonra cagrilir."""
     sentences = [str(s) for s in sentences]
+    mask = speech_mask(sentences, breaks)
     tags = [''] * len(sentences)
     prompt = llm_prompt(allowed, style)
     batch = LLM_FREE_BATCH if style == 'free' else LLM_BATCH
@@ -231,16 +259,25 @@ def tag_with_llm(sentences, breaks, ask, cancel=None, progress=None, allowed=Non
         if cancel is not None and cancel.is_set():
             break
         stop = min(len(sentences), start + batch)
-        speech = sum(is_speech(sentences[i]) for i in range(start, stop))
+        speech = sum(mask[start:stop])
         if speech:
             found = parse_llm(ask(prompt + llm_lines(sentences, breaks, start, stop)), sentences, start, stop,
-                              allowed, style)
-            if len(found) <= max(LLM_MAX_TAGGED, speech // 2):
+                              allowed, style, mask)
+            if len(found) <= max(LLM_MAX_TAGGED, speech // 2) or (style == 'free' and not repetitive(found)):
                 for index, tag in found.items():
                     tags[index] = tag
         if progress:
             progress(stop)
     return tags
+
+
+def repetitive(found):
+    """F187: etiketlerin yarisindan fazlasi ayni yonerge mi (model istemi anlamamis)."""
+    if len(found) <= LLM_MAX_TAGGED:
+        return False
+    first = [' '.join(str(words).lower().split()) for words in
+             ((drama3_tags.directions(markup) or [('', '')])[0][1] for markup in found.values())]
+    return max(first.count(words) for words in set(first)) * 2 > len(first)
 
 
 class Cancelled(RuntimeError):
@@ -251,14 +288,19 @@ def tag_book(sections, ask=None, cancel=None, progress=None, allowed=None, style
     """Butun kitabi etiketler (F170). `sections`: [{'sentences', 'breaks'}] okuyucunun bolmesiyle. `ask` verilirse
     model sunucusu da sorulur; modelin etiket vermedigi konusmada kelime listesininki kalir (anlaticidaki acik
     ipucu modelden daha guvenilir). Donen: bolum basina etiket listeleri. `progress(islenen, toplam)`;
-    durdurulursa Cancelled. F187: `style` 'free' ise modelin etiketleri etiketli cumlelerdir."""
+    durdurulursa Cancelled. F187: `style` 'free' ise modelin etiketleri etiketli cumlelerdir; modelin bos biraktigi
+    konusmayi kelime listesi yalnizca calistigi bilinen etiketlerle doldurur (73 etiketin denenmemis ipuclari modelin
+    notr birakma kararini yanlis etiketlerle eziyordu: 'Kahkahaları dondu' -> [laughs], [interrupting] ...)."""
     total = sum(len(section['sentences']) for section in sections)
+    fill = allowed
+    if ask is not None and style == 'free':
+        fill = [tag for tag in drama3_tags.allowed(allowed) if tag in drama3_tags.DEFAULT_TAGS]
     result, done = [], 0
     for section in sections:
         if cancel is not None and cancel.is_set():
             raise Cancelled('Duygu etiketleme durduruldu.')
         sentences, breaks = section['sentences'], section.get('breaks') or ()
-        tags = tag_sentences(sentences, breaks, allowed)
+        tags = tag_sentences(sentences, breaks, fill)
         if ask is not None:
             step = (lambda count, base=done: progress(base + count, total)) if progress else None
             found = tag_with_llm(sentences, breaks, ask, cancel, step, allowed, style)

@@ -2,6 +2,16 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.19.4 — 2026-10-23
+
+### Düzeltme
+- **Dil modelinin yönergeleri çoğunlukla atılıyordu (F187):** Gemma 4 26B denemesinde model kitaptaki “ ” tırnaklarını JSON'da düz " olarak yazıyordu; sözlerin değişmediği denetimi bunu "söz değişti" sayıp iyi yanıtların neredeyse tamamını atıyordu (Yıkıma Giden Adam'ın iki bölümünde 311 konuşmadan 7'si etiketlendi). Artık tırnak ve kesme işaretleri karşılaştırılmaz, yönergeler kitabın kendi metnine yerleştirilir; aynı iki bölümde 350 konuşma etiketlendi.
+- **Uzun alıntının tırnaksız cümleleri konuşma sayılmıyordu:** Okuyucu uzun bir alıntıyı cümlelere böldüğünde ortadaki cümleler tırnaksız kalıyordu; artık aynı paragrafta açılıp kapanmamış bir tırnağın içindeki cümle de konuşma sayılır.
+- **Model her konuşmaya yerinde yönerge yazınca yanıt atılıyordu:** "Konuşmaların yarısından fazlası etiketlendiyse yanıtı at" koruması (küçük modelin her şeye `[laughs]` basmasına karşı) serbest kipte yalnızca yönergelerin yarısından fazlası aynıysa uygulanır.
+- **Anlatıcının sözleri yönergesiz okunur:** Tırnaklı cümlede anlatıcının sözlerine konan yönerge (`[kendi kendine fısıldayarak] Ve araba yol alırken…`) atılır, tırnağın önündeki ve içindekiler kalır. Yönergeli sözden sonra anlatıcı devam ediyorsa tırnaktan sonra `[sakin anlatıcı sesi]` eklenir (dinleme denemesinde ön ek "diye haykırıyorlardı…" kısmına taşabiliyordu). İstem de bunu açıkça söyler ve model yalnızca yönerge eklediği cümleleri döndürür (yanıtlar kısaldı, istek başına ~12 sn'den ~8 sn'ye).
+- **Kelime listesi serbest kipte modelin kararını yanlış etiketlerle eziyordu:** Model bir konuşmayı nötr bıraktığında kelime listesi seçili 73 etiketin denenmemiş ipuçlarıyla etiket koyuyordu ("Kahkahaları anında dondu" → `[laughs]`, `[interrupting]` …). Serbest kipte artık yalnızca çalıştığı bilinen beş etiketle doldurur; `[laughs]` ipucu da yalnızca "kahkahayla, kahkaha atarak…" gibi kalıplara bakar.
+- Not: Yeni sürümle kitabı yeniden etiketleyin.
+
 ## 2.19.3 — 2026-10-23
 
 ### Düzeltme
