@@ -2,6 +2,16 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.23.0 — 2026-10-23
+
+### Yeni
+- **Tam ekran okumada görünüm menüsü (F189):** Üst satırdaki "T" düğmesi yazı boyutunu (24-120, klavyede + / −), rengi ve geçişi seçtirir; seçimler saklanır. Okuyucunun sayfa rengine ek olarak uzaktan okumaya uygun sekiz renk çifti var (gece, siyah üstüne sarı, sıcak koyu, lacivert, yeşil, sepya, beyaz, sarı üstüne siyah). Seçilen boyut üst sınırdır: uzun grup ekrana sığmazsa yazı yalnızca o grup için küçülür.
+- **Belirme geçişi:** Kaymaya ek olarak eski parça hafifçe küçülüp söner, yenisi yavaşça belirir.
+
+### Değişiklik
+- Grup içinde okunan cümle artık ayrıca vurgulanmaz, bütün grup aynı parlaklıkta durur: vurgu Drama 3'ün okuduğu yerle tam örtüşmüyordu.
+- Fare durunca ilerleme çubuğu da düğmelerle birlikte gizlenir.
+
 ## 2.22.0 — 2026-10-23
 
 ### Yeni

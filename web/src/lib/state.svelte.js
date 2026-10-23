@@ -83,7 +83,9 @@ export function setThink(value) {
 
 const VIEWS = ['chat', 'library', 'files', 'translate', 'books', 'reading', 'speech', 'subscriptions', 'console'];
 
-export const READER_DEFAULTS = { size: 19, font: 'serif', leading: 1.75, width: 680, paper: 'theme' };
+// F189: focus_* tam ekran okumanin yazi boyutu, renkleri ve gecisi.
+export const READER_DEFAULTS = { size: 19, font: 'serif', leading: 1.75, width: 680, paper: 'theme',
+  focus_size: 44, focus_colors: 'paper', focus_motion: 'slide' };
 
 // EPUB'u kitapliga ekleyip Okuma sayfasinda acar (Kitap Cevir'in urettigi Turkce EPUB icin).
 export async function openInReader(path) {
