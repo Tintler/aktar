@@ -175,10 +175,11 @@ def _detail(error):
 # ---------------------------------------------------------------- metni parcalara bolme
 def _protected(text):
     """Bolunmemesi gereken araliklar: <whisper>...</whisper> gibi acik etiketlerin ici (F171: PAIRED_KEEP'ten uzunsa
-    bolunur, balance_pairs her parcada yeniden acip kapatir: butun konusmayi saran etiket) ve <|...|>."""
+    bolunur, balance_pairs her parcada yeniden acip kapatir: butun konusmayi saran etiket), <|...|> ve F187'de
+    [titrek bir sesle, ...] gibi serbest yonergeler."""
     spans, stack = [], []
-    for match in re.finditer(r'<\|[^|>]*\|>|<(/?)([A-Za-z][\w-]*)>', text):
-        if match.group(0).startswith('<|'):
+    for match in re.finditer(r'<\|[^|>]*\|>|\[[^\[\]]*\]|<(/?)([A-Za-z][\w-]*)>', text):
+        if match.group(0)[:2] == '<|' or match.group(0)[:1] == '[':
             spans.append((match.start(), match.end()))
         elif not match.group(1):
             stack.append((match.group(2), match.start()))
@@ -256,8 +257,11 @@ def model_text(piece):
 def tagged(text, tag):
     """F168: sunucuya giden metne duygu etiketi: tirnaktan once ('Ali gulerek: [laughs] "Merhaba!"'), tirnak yoksa
     (cizgili diyalog) en basa. Etiket yalnizca parcanin basinda calistigi icin split_text etiketten once boler.
-    F171: cift etiket konusmayi sarar: tirnakli soz ('<soft>"Gel."</soft> dedi.'), yoksa cizgiden sonrasi."""
+    F171: cift etiket konusmayi sarar: tirnakli soz ('<soft>"Gel."</soft> dedi.'), yoksa cizgiden sonrasi.
+    F187: `tag` dil modelinin etiketli cumlesiyse (sozleri `text` ile ayni) oldugu gibi gider."""
     text = ' '.join(str(text or '').split())
+    if text and drama3_tags.is_markup(tag) and drama3_tags.same_text(tag, text):
+        return ' '.join(str(tag).split())
     if tag not in EMOTION_TAGS or not text:
         return text
     match = _OPEN_QUOTE.search(text)
@@ -291,27 +295,31 @@ def balance_pairs(pieces):
 
 
 def untag(piece):
-    """Etiketsiz parca (yeniden deneme icin): bastaki nokta etiketi ve butun cift etiketler cikar; etiket yoksa ''."""
+    """Etiketsiz parca (yeniden deneme icin): bastaki nokta etiketi ve butun cift etiketler cikar; etiket yoksa ''.
+    F187: serbest yonergeler ([derin bir nefes alır] ...) de cikar; <|speaker:N|> kalir."""
     plain = ' '.join(_PAIRED.sub('', _EMOTION.sub('', piece, count=1) if _EMOTION.match(piece) else piece).split())
+    plain = ' '.join(re.sub(r'\[[^\[\]]*\]', ' ', plain).split())
     return plain if plain != piece else ''
 
 
-def split_text(text, limit=MAX_CHARS):
+def split_text(text, limit=MAX_CHARS, split_tags=True):
     """Metni sunucuya gidecek parcalara boler: [(parca, sonraki_sessizlik_sn)]. Ardisik cumleler sinira kadar
     tek parcada gider (F163: tek basina kalan 'dedi.', 'iste...' gibi kisa parcalari model susarak ya da
     mirildanarak okuyordu; az parca ayni zamanda az ton degisimi). Sinirdan uzun cumle ortadan, once virgul/
     noktali virgulden, o da yetmezse kelimelerden bolunur. <|speaker:N|> etiketi sonraki parcalara da tasinir.
-    Metnin ortasindaki duygu etiketinden ([laughs] ...) once her zaman bolunur: etiket parcanin basinda olmali."""
+    Metnin ortasindaki duygu etiketinden ([laughs] ...) once her zaman bolunur: etiket parcanin basinda olmali.
+    F187: `split_tags` False (Drama 3 TR, budanmamis model etiketi cumle ortasinda da izliyor) bolmez."""
     text = ' '.join(str(text or '').split())
     result = []
-    sentences = [sentence for part in _BEFORE_EMOTION.split(text) for sentence in _split(part, _SENTENCE_END)]
+    parts = _BEFORE_EMOTION.split(text) if split_tags else [text]
+    sentences = [sentence for part in parts for sentence in _split(part, _SENTENCE_END)]
     for sentence in sentences:
         if len(sentence) > limit:
             packed = bisect(sentence, limit)
             result.extend((piece, CLAUSE_GAP) for piece in packed[:-1])
             result.append((packed[-1], SENTENCE_GAP))
         elif (result and result[-1][1] == SENTENCE_GAP and len(result[-1][0]) + 1 + len(sentence) <= limit
-              and not _SPEAKER.match(sentence) and not _EMOTION.match(sentence)):
+              and not _SPEAKER.match(sentence) and not (split_tags and _EMOTION.match(sentence))):
             result[-1] = (result[-1][0] + ' ' + sentence, SENTENCE_GAP)
         else:
             result.append((sentence, SENTENCE_GAP))
@@ -423,7 +431,7 @@ def fell_silent(text, samples, rate):
     """Model parcanin bir kismini soylemeden sustu mu: konusulan sure metne gore cok kisa, ya da ses metne gore
     cok uzun (F163: 'dedi.' icin 1,2 sn konusma + 6 sn sessizlik; kisa parcada harf orani anlamsiz)."""
     count = letters(text)
-    extra = TAG_SECONDS if _EMOTION.match(text) else 0.0
+    extra = TAG_SECONDS if _EMOTION.match(text) or '[' in text else 0.0   # F187: serbest yonerge, cumle ortasi
     if len(samples) / rate > OVERLONG_BASE + extra + count / OVERLONG_LETTERS_PER_SECOND:
         return True
     voiced = voiced_seconds(samples, rate)

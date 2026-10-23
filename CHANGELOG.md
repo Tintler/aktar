@@ -2,6 +2,15 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.19.0 — 2026-10-23
+
+### Yeni
+- **Duygu etiketlerinde serbest yönerge (F187):** Kitaplıkta sağ tık → "Duygu etiketleri oluştur" artık dil modelini katalogla sınırlamaz. Model, Drama 3'ün resmi yönerge sistemine göre konuşmanın yönergeli halini yazar: sözlerin önüne Türkçe ön ek (`[titrek bir sesle, ağlamamak için kendini zorlayarak]`), olayın olduğu yere ses ya da duraklama (`Peki [derin bir nefes alır] tamam`) ve yalnızca birkaç kelimeyi saran çift etiket (`<whisper>kimseye söylemeyeceğim</whisper>`; resmi yedi etiket). Model cümlenin bir kelimesini bile değiştirirse yanıt atılır ve kelime listesinin etiketi kalır. Ayarlar → Ses → Drama 3 TR'de "Model ile etiketleme biçimi" ile eski davranışa ("Yalnızca katalog") dönülebilir; seçtiğiniz etiketler serbest kipte modele örnek olarak verilir.
+- **Drama 3 TR cümle ortasındaki etiketi izler (F187):** Budanmamış model etiketi cümle ortasında da izlediği için metin artık etiketlerden önce ayrı isteklere bölünmez.
+- **Gruplu okumada ön ek taşmıyor (F187):** Dinleme denemesinde ön ek aynı istekteki sonraki cümlelere de geçiyordu. Artık ön ekli cümleden sonraki etiketsiz cümleye `[sakin anlatıcı sesi]` (konuşmaysa `[doğal ses]`) eklenir; denemede bu taşmayı kesti.
+- Budanmış eski Drama 3 motoru serbest yönergeyi anlamadığı için ona yönergeden en yakın tek katalog etiketi gider (`[öfkeyle, dişlerini sıkarak]` → `[angry]`).
+- Not: Yeni biçimi kullanmak için kitabı yeniden etiketleyin.
+
 ## 2.18.2 — 2026-10-23
 
 ### Düzeltme

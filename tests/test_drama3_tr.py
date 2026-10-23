@@ -263,7 +263,7 @@ class BuiltinEngineTests(unittest.TestCase):
         result = self.engines.say(['Bir.', 'İki.'], 1.0, book)
         self.assertGreater(result['duration'], 0)
         texts = [request['text'] for request in self.requests()][1:]   # ilki isitma
-        self.assertEqual(texts, ['Bir.', '[laughs] İki.'])            # etiket parcanin basinda: orada bolunur
+        self.assertEqual(texts, ['Bir. [laughs] İki.'])               # F187: budanmamis model etiketi ortada da izler
         again = self.engines.say(['Bir.', 'İki.'], 1.0, book)
         self.assertTrue(again['cached'])
 

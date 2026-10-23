@@ -294,6 +294,7 @@ class Engines:
                 'server': bool(manifest.get('server')), 'folder': bool(manifest.get('folder')),
                 'settings': manifest.get('settings', []),
                 'emotion_tags': bool(manifest.get('emotion_tags')),
+                'emotion_rich': manifest.get('emotion_tags') == 'rich',
             })
         return result
 
@@ -409,10 +410,23 @@ class Engines:
     def _tag_for(self, book, text, language='tr', override=None, tag=None):
         """The emotion tag sent with a sentence: `tag` given by the caller (F172 dubbing, any voice of an engine with
         "emotion_tags"), else the book's tag (emotion_tag)."""
-        if tag is None:
-            return self.emotion_tag(book, text, language, override)
         engine_id, _voice = self.choice(language, override)
-        return str(tag or '') if engine_id and self._manifests().get(engine_id, {}).get('emotion_tags') else ''
+        if tag is None:
+            found = self.emotion_tag(book, text, language, override)
+        else:
+            found = str(tag or '') if engine_id and self._manifests().get(engine_id, {}).get('emotion_tags') else ''
+        return self._for_engine(engine_id, found)
+
+    def _rich_tags(self, engine_id):
+        """F187: motor.json "emotion_tags": "rich" (Drama 3 TR): etiketli cumle ve serbest yonerge oldugu gibi gider."""
+        return bool(engine_id) and self._manifests().get(engine_id, {}).get('emotion_tags') == 'rich'
+
+    def _for_engine(self, engine_id, found):
+        """F187: etiketli cumle (serbest yonerge) budanmis Drama 3'e tek katalog etiketi olarak gider."""
+        import drama3_tags
+        if found and drama3_tags.is_markup(found) and not self._rich_tags(engine_id):
+            return drama3_tags.legacy_tag(found, drama3_tags.ALL_TAGS)
+        return found
 
     def _cache_path(self, book, text, speed, language, override=None, tag=None):
         """Where a sentence rendered with the voice chosen for `language` is kept (None: no caching)."""
@@ -438,17 +452,26 @@ class Engines:
 
     def _request_text(self, text, book, language='tr', override=None, tag=None):
         """(text, tag) sent to the engine for one sentence or a list of consecutive sentences (F177): in a list
-        each sentence carries its own book emotion tag inside the joined text."""
+        each sentence carries its own book emotion tag inside the joined text. F187: in one request a style prefix
+        ([öfkeyle] ...) carries over to the next sentences, so an untagged sentence after one gets a calm prefix."""
         if isinstance(text, (list, tuple)):
             parts = [' '.join(str(part).split()) for part in text]
             parts = [part for part in parts if part]
             if tag is None:
-                tagged = []
+                import drama3
+                import drama3_tags
+                import emotion_tags
+                rich = self._rich_tags(self.choice(language, override)[0])
+                tagged, styled = [], False
                 for part in parts:
                     found = self._tag_for(book, part, language, override, None)
                     if found:
-                        import drama3
                         part = drama3.tagged(part, found)
+                        styled = rich and drama3_tags.starts_with_style(part)
+                    elif styled:
+                        reset = (drama3_tags.RESET_SPEECH if emotion_tags.is_speech(part)
+                                 else drama3_tags.RESET_NARRATION)
+                        part, styled = f'{reset} {part}', False
                     tagged.append(part)
                 parts, tag = tagged, ''
             text = ' '.join(parts)

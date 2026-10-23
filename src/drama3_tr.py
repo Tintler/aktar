@@ -380,7 +380,7 @@ class Engine:
         clips, rate = [], None
         settings = self.settings()
         with self._lock:
-            for piece, gap in drama3.split_text(text, settings['max_chars']):
+            for piece, gap in drama3.split_text(text, settings['max_chars'], split_tags=False):
                 parts = self._piece(piece, settings)
                 for number, (samples, piece_rate) in enumerate(parts):
                     if rate is not None and piece_rate != rate:

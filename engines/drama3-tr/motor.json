@@ -7,7 +7,7 @@
   "builtin": "drama3_tr",
   "server": true,
   "folder": true,
-  "emotion_tags": true,
+  "emotion_tags": "rich",
   "group_sentences": true,
   "attribution": "Built with Fish Audio",
   "notice": "Rızası olmadan tanınabilir kişilerin sesini klonlamak yasaktır (Fish Audio Community License). Yalnızca hakkına sahip olduğunuz kayıtları kullanın.",

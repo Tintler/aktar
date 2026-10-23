@@ -13,6 +13,8 @@ Sira kelime listesinde onceliktir (ayni cumlede fisilti ve bagirma ofkeden baski
 """
 from __future__ import annotations
 
+import re
+
 _WHISPER = r'fısılda(?:dı|yarak|yordu|mış|şarak|ştı)|fısıltıyla|fısıltı (?:halinde|ile)|alçak sesle'
 _SOFT = r'yumuşak bir sesle|şefkatle|usulca|tatlı bir sesle|yumuşacık'
 EMOTION, VOICE, SOUND, PAUSE, PAIRED = ('Duygu', 'Ses yüksekliği ve konuşma biçimi', 'Gülme, ağlama ve diğer sesler',
@@ -170,3 +172,113 @@ def public():
     groups = (EMOTION, VOICE, SOUND, PAUSE, PAIRED)
     return [{key: entry[key] for key in ('tag', 'kind', 'group', 'label', 'status', 'examples')} | {'default': entry['tag'] in DEFAULT_TAGS}
             for entry in sorted(CATALOG, key=lambda entry: groups.index(entry['group']))]
+
+
+# ---------------------------------------------------------------- F187: serbest yonerge (Drama 3 TR, budanmamis)
+# Drama 3 resmi belgesi ve teknik raporu (Ek C): yonergeler serbest metin, Turkce de olabilir. Nokta etiketi olayin
+# oldugu yere (cumle ortasi da), on ek ([titrek bir sesle]) sozlerin onune, cift etiket yalnizca sardigi kelimelere
+# etki eder; resmi cift etiketler yedi tane (katalogdaki PAIRED_TAGS). Kullanicinin Drama 3 TR dinlemesi: Turkce ve
+# Ingilizce on ek, cumle ortasindaki [derin bir nefes alir]/[gasps], tek kelimeyi saran <emphasis> calisti; ayni
+# istekteki on ek sonraki cumlelere tasiyor (RESET ile kesiliyor).
+STYLES = ('free', 'catalog')   # ui.json tts.emotion_style: serbest yonerge ya da yalnizca katalog
+MAX_DIRECTIONS = 3             # bir cumlede en fazla yonerge (on ek + nokta + cift etiket)
+MAX_WORDS = 8                  # bir yonergenin en fazla kelimesi
+RESET_NARRATION = '[sakin anlatıcı sesi]'   # ayni istekte on ekli cumleden sonraki etiketsiz cumleye
+RESET_SPEECH = '[doğal ses]'
+_DIRECTION = re.compile(r'\[([^\[\]<>\n]*)\]')
+_SCOPED = re.compile(r'<(/?)([A-Za-z]+)>')
+_CUE_PATTERNS = tuple((entry['tag'], re.compile(r'(?<!\w)(?:' + entry['cue'] + r')', re.U))
+                      for entry in CATALOG if entry['cue'])
+
+
+def style(value):
+    return value if value in STYLES else 'free'
+
+
+def plain(markup):
+    """Yonergeler cikarilmis metin (okunacak sozler)."""
+    return ' '.join(_SCOPED.sub('', _DIRECTION.sub(' ', str(markup or ''))).split())
+
+
+def _letters(text):
+    return re.sub(r'\s+', '', str(text or ''))
+
+
+def same_text(markup, text):
+    """Yonergeler cikarilinca `text` ile ayni sozler mi (bosluklar haric)."""
+    return bool(_letters(text)) and _letters(plain(markup)) == _letters(text)
+
+
+def is_markup(value):
+    """Etiketli cumle mi (tek bir katalog etiketi degil)."""
+    value = str(value or '')
+    return bool(value) and value not in ALL_TAGS and (bool(_DIRECTION.search(value)) or bool(_SCOPED.search(value)))
+
+
+def directions(markup):
+    """Yonergeler sirayla: [('[..]' ya da '<..>', metin)] (kapanan cift etiketler haric)."""
+    found = []
+    for match in re.finditer(_DIRECTION.pattern + '|' + _SCOPED.pattern, str(markup or '')):
+        if match.group(0).startswith('['):
+            found.append((match.group(0), match.group(1).strip()))
+        elif not match.group(2):
+            found.append((f'<{match.group(3)}>', match.group(3)))
+    return found
+
+
+def valid(markup, text, chosen=None, free=True):
+    """Dil modelinin etiketli cumlesi: kurallara uyuyorsa duzenlenmis hali, uymuyorsa ''. Sozler degismemeli;
+    yonerge en fazla MAX_DIRECTIONS, her biri en fazla MAX_WORDS kelime; cift etiketler resmi yedi etiketten,
+    acilip kapanmali, ic ice olmamali; <|..|> belirteci olmamali. `free` degilse yonergeler secili katalogdan."""
+    markup = ' '.join(str(markup or '').split())
+    if not markup or '<|' in markup or not same_text(markup, text):
+        return ''
+    residual = _DIRECTION.sub('', _SCOPED.sub('', markup))
+    if any(residual.count(mark) != str(text).count(mark) for mark in '[]<>'):
+        return ''   # kapanmayan ya da ic ice parantez
+    chosen = allowed(chosen)
+    open_name = ''
+    for match in _SCOPED.finditer(markup):
+        name = match.group(2)
+        if f'<{name}>' not in PAIRED_TAGS or (not free and f'<{name}>' not in chosen):
+            return ''
+        if match.group(1):
+            if open_name != name:
+                return ''
+            open_name = ''
+        elif open_name:
+            return ''
+        else:
+            open_name = name
+    if open_name:
+        return ''
+    found = directions(markup)
+    if not found or len(found) > MAX_DIRECTIONS:
+        return ''
+    for tag, words in found:
+        if tag.startswith('['):
+            if not words or len(words.split()) > MAX_WORDS or (not free and tag not in chosen):
+                return ''
+    return re.sub(r'\s+([,.;:!?…])', r'\1', markup) if not re.search(r'\s[,.;:!?…]', text) else markup
+
+
+def legacy_tag(markup, chosen=None):
+    """Budanmis Drama 3 icin etiketli cumleden tek katalog etiketi: icindeki ilk katalog etiketi, yoksa yonerge
+    metnindeki anlatim ipucu ('[öfkeyle, dişlerini sıkarak]' -> [angry]); '' yok."""
+    chosen = allowed(chosen)
+    found = directions(markup)
+    for tag, _words in found:
+        if tag in chosen:
+            return tag
+    for _tag, words in found:
+        lower = words.replace('I', 'ı').replace('İ', 'i').lower()
+        for tag, pattern in _CUE_PATTERNS:
+            if tag in chosen and tag.startswith('[') and pattern.search(lower):
+                return tag
+    return ''
+
+
+def starts_with_style(markup):
+    """Etiketli cumle on ekle mi basliyor (sonraki cumlelere tasiyabilir)."""
+    text = str(markup or '').lstrip('—–- "“«')
+    return text.startswith('[')

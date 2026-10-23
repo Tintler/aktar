@@ -306,8 +306,8 @@
     {#if engine.emotion_tags && open}
       <div class="fr sub">
         <div class="l">Duygu etiketleri (deneysel)<small>Kitaplıkta kitaba sağ tıklayıp "Duygu etiketleri oluştur" deyince kitabın
-          diyaloglarına gülme, iç çekme, fısıltı, bağırma ve öfke etiketleri bir kez eklenir (anlatıcı ipuçlarından ya da model
-          sunucusuyla bağlamdan). Okurken model çalışmaz. Okuyucudaki metin değişmez; etiketli sürüm yalnızca {engine.name}'e
+          diyaloglarına duygu, ses ve duraklama yönergeleri bir kez eklenir (anlatıcı ipuçlarından ya da model sunucusuyla
+          bağlamdan). Okurken model çalışmaz. Okuyucudaki metin değişmez; etiketli sürüm yalnızca {engine.name}'e
           giden metne eklenir. Okuyucudaki "Duygulu" düğmesiyle de açılıp kapanır.</small></div>
         <select class="field w" value={app.ttsPrefs.emotion_tags === 'off' ? 'off' : 'on'} aria-label="Duygu etiketleri"
           onchange={(e) => { app.ttsPrefs.emotion_tags = e.currentTarget.value; saveTtsPrefs(); }}>
@@ -315,11 +315,28 @@
           <option value="off">Kapalı</option>
         </select>
       </div>
+      {#if app.ttsPrefs.emotion_tags !== 'off'}
+        <div class="fr sub">
+          <div class="l">Model ile etiketleme biçimi<small>Serbest yönerge: model aşağıdaki listeyle sınırlı kalmaz, konuşmaya
+            Türkçe ön ek ([titrek bir sesle, ağlamamak için kendini zorlayarak]), cümle ortasında ses ya da duraklama
+            ([derin bir nefes alır]) ve birkaç kelimeyi saran çift etiket (&lt;whisper&gt;…&lt;/whisper&gt;) yazar; seçtiğiniz
+            etiketler modele yalnızca örnek olarak verilir. Model cümlenin kelimelerini değiştirirse o cümle etiketsiz kalır.
+            {#if !engine.emotion_rich}{engine.name} yalnızca baştaki tek etikete uyduğu için yönergeden en yakın etiket seçilir.{/if}
+            Yalnızca katalog: model yalnızca seçtiğiniz etiketlerden birini konuşmanın başına koyar. Değişiklik için kitabı
+            yeniden etiketleyin.</small></div>
+          <select class="field w" value={app.ttsPrefs.emotion_style === 'catalog' ? 'catalog' : 'free'} aria-label="Etiketleme biçimi"
+            onchange={(e) => { app.ttsPrefs.emotion_style = e.currentTarget.value; saveTtsPrefs(); }}>
+            <option value="free">Serbest yönerge</option>
+            <option value="catalog">Yalnızca katalog</option>
+          </select>
+        </div>
+      {/if}
       {#if catalog && app.ttsPrefs.emotion_tags !== 'off'}
         <div class="fr sub tags-head">
           <div class="l">Kullanılacak etiketler · {allowedTags.length} / {catalog.tags.length}<small>Drama 3'te sabit bir etiket
-            listesi yok; bunlar Fish Audio belgelerinde ve örneklerinde geçenler. Durum sizin dinleme setinize göre. [köşeli]
-            etiketler konuşmanın başına eklenir, &lt;çift&gt; etiketler konuşmayı sarar. Yeni seçtiğiniz etiket için kitabı
+            listesi yok; bunlar Fish Audio belgelerinde ve örneklerinde geçenler. Durum sizin dinleme setinize göre. Kelime
+            listesi ve "Yalnızca katalog" kipi bunları kullanır: [köşeli] etiketler konuşmanın başına eklenir, &lt;çift&gt;
+            etiketler konuşmayı sarar; serbest yönergede modele örnek olarak gider. Yeni seçtiğiniz etiket için kitabı
             kitaplıktan yeniden etiketleyin; kaldırdığınız etiket hemen uygulanmaz.</small></div>
           <button class="btn sm" onclick={defaultTags} disabled={!app.ttsPrefs.emotion_allowed}><Icon name="refresh" size={14} />Varsayılana dön</button>
           <button class="btn sm" aria-expanded={shown('tags:' + engine.id, false)} onclick={() => toggleOpen('tags:' + engine.id, false)}>

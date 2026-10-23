@@ -18,6 +18,11 @@ Okuyucu Drama 3 ile okurken etiketli surumu (Ayarlar'da ya da okuyucuda kapatilm
 F171: kullanilabilecek etiketler drama3_tags katalogundan Ayarlar'da secilir (ui.json tts.emotion_allowed; yoksa
 calistigi bilinen bes etiket). Kelime listesi ve model istemi yalnizca secilenleri kullanir; okurken secimden
 cikarilan etiket de uygulanmaz (yeni secilen etiket icin kitap yeniden etiketlenmeli).
+
+F187: ui.json tts.emotion_style 'free' (varsayilan) ise model katalogla sinirli kalmaz: cumlenin yonergeli halini
+yazar (on ek, cumle ortasinda ses/duraklama, resmi yedi cift etiket); sozler degismemeli (drama3_tags.valid), yoksa
+kelime listesinin etiketi kalir. Etiketli cumle kayitta etiketin yerine durur; budanmis Drama 3'e
+drama3_tags.legacy_tag ile tek etiket olarak gider. 'catalog' bugunku davranis. Kelime listesi her iki kipte ayni.
 """
 from __future__ import annotations
 
@@ -125,9 +130,35 @@ LLM_PROMPT = (
     'anahtar cümle numarası, değer etiket. Örnek: {example}. Hiçbiri yoksa {{}}.\n\n')
 
 
-def llm_prompt(allowed=None):
-    """Model istemi: yalnizca secilen etiketler (katalogdaki aciklamalariyla)."""
+# F187: serbest yonerge (Drama 3 TR): model cumlenin yonergeli halini yazar; sozler degismemeli (drama3_tags.valid).
+LLM_FREE_BATCH = 30   # yanitlar butun cumleyi icerdigi icin daha kucuk parca
+LLM_FREE_PROMPT = (
+    'Aşağıda bir romandan numaralı cümleler var (boş satır paragraf sonudur). Kitabı Fish Audio Drama 3 sesli '
+    'okuyacak; sen yönetmensin. Konuşma cümlelerinden (tırnaklı ya da çizgiyle başlayan) anlatıcının ya da bağlamın '
+    'açıkça belli ettiği bir duygu, ses ya da davranışla söylenenlere yönerge ekle:\n'
+    '- Ön ek: sözlerin önüne köşeli parantez içinde kısa Türkçe tarif, oyuncuya not verir gibi; tırnaklı konuşmada '
+    'tırnağın önüne: [titrek bir sesle, ağlamamak için kendini zorlayarak], [öfkeyle, dişlerini sıkarak].\n'
+    '- Ses ya da duraklama: tam olduğu yere köşeli parantezle, cümle ortasına da olabilir: [derin bir nefes alır], '
+    '[duraksar], [iç çeker], [güler], [gasps].\n'
+    '- Çift etiket: yalnızca birkaç kelimenin söylenişi değişiyorsa o kelimeleri sar; yalnızca şunlar: <whisper>, '
+    '<emphasis>, <soft>, <fast>, <slow>, <stress>, <forceful> (ör. <whisper>kimseye söyleme</whisper>).\n'
+    'Kurallar: cümlenin kelimelerini ve noktalamasını hiç değiştirme, yalnızca yönerge ekle. Bir cümlede en fazla '
+    '{most} yönerge, her biri en fazla {words} kelime; köşeli parantez iç içe olmaz. Nötr, emin olmadığın ya da '
+    'anlatıcı cümlelerine dokunma. Bir konuşma birden çok cümleyse her cümleye aynı ön eki yaz.{tags}\n'
+    'Yalnızca JSON nesnesi döndür; anahtar cümle numarası, değer cümlenin yönergeli hali. Örnek: {example}. '
+    'Hiçbiri yoksa {{}}.\n\n')
+LLM_FREE_EXAMPLE = {'12': '[öfkeyle, dişlerini sıkarak] "Burada ne işin var?" dedi.',
+                    '15': '— Peki [derin bir nefes alır] tamam, sen kazandın.'}
+
+
+def llm_prompt(allowed=None, style='catalog'):
+    """Model istemi: yalnizca secilen etiketler (katalogdaki aciklamalariyla). F187: 'free' serbest yonerge istemi;
+    secilen etiketler yalnizca ornek olarak verilir."""
     allowed = drama3_tags.allowed(allowed)
+    if style == 'free':
+        tags = f' Hazır etiketlerden de seçebilirsin: {", ".join(allowed)}.' if allowed else ''
+        return LLM_FREE_PROMPT.format(most=drama3_tags.MAX_DIRECTIONS, words=drama3_tags.MAX_WORDS, tags=tags,
+                                      example=json.dumps(LLM_FREE_EXAMPLE, ensure_ascii=False))
     described = {entry['tag']: entry['llm'] for entry in drama3_tags.CATALOG}
     tags = ', '.join(f'{tag} ({described[tag]})' for tag in allowed)
     example = json.dumps(dict(zip(('12', '15'), allowed[:2])), ensure_ascii=False)
@@ -144,8 +175,22 @@ def llm_lines(sentences, breaks, start, stop):
     return '\n'.join(lines).strip()
 
 
-def parse_llm(raw, sentences, start, stop, allowed=None):
-    """Model yanitindan {numara: etiket}: yalnizca araliktaki konusma cumleleri ve secilen etiketler."""
+def free_markup(value, sentence, allowed=None):
+    """F187: modelin yanit degeri -> etiketli cumle ('' gecersiz). Yalnizca yonerge yazilmissa ('[öfkeyle]') on ek
+    olarak cumleye konur (tirnaktan once, drama3.tagged gibi)."""
+    value = ' '.join(str(value or '').split())
+    if value and not drama3_tags.plain(value) and re.fullmatch(r'(?:\[[^\[\]]+\]\s*)+', value):
+        quote = re.search(r'[“«"]', sentence)
+        position = quote.start() if quote and re.search(r'[^\W\d_]', sentence[:quote.start()]) else 0
+        if _DASH.match(sentence) and not position:
+            position = _DASH.match(sentence).end()
+        value = (sentence[:position] + value + ' ' + sentence[position:]).strip()
+    return drama3_tags.valid(value, sentence, allowed, free=True)
+
+
+def parse_llm(raw, sentences, start, stop, allowed=None, style='catalog'):
+    """Model yanitindan {numara: etiket}: yalnizca araliktaki konusma cumleleri ve secilen etiketler. F187: 'free'
+    kipinde deger cumlenin etiketli hali (drama3_tags.valid)."""
     allowed = drama3_tags.allowed(allowed)
     match = re.search(r'\{.*\}', str(raw or ''), re.S)
     if not match:
@@ -160,28 +205,36 @@ def parse_llm(raw, sentences, start, stop, allowed=None):
             index = int(str(key).strip())
         except ValueError:
             continue
+        if not (start <= index < stop and is_speech(sentences[index])):
+            continue
+        if style == 'free':
+            markup = free_markup(value, sentences[index], allowed)
+            if markup:
+                result[index] = markup
+            continue
         tag = str(value or '').strip()
         tag = tag if tag[:1] in '[<' else f'[{tag}]'
-        if start <= index < stop and tag in allowed and is_speech(sentences[index]):
+        if tag in allowed:
             result[index] = tag
     return result
 
 
-def tag_with_llm(sentences, breaks, ask, cancel=None, progress=None, allowed=None):
+def tag_with_llm(sentences, breaks, ask, cancel=None, progress=None, allowed=None, style='catalog'):
     """Model sunucusuyla etiketleme: `ask(istem) -> yanit metni`. Donen: her cumle icin etiket ('' yok). Konusmalarin
     yarisindan fazlasini etiketleyen yanit (kucuk model istemi anlamamis: her seye [laughs]) yok sayilir.
     `progress(islenen_cumle)` her parcadan sonra cagrilir."""
     sentences = [str(s) for s in sentences]
     tags = [''] * len(sentences)
-    prompt = llm_prompt(allowed)
-    for start in range(0, len(sentences), LLM_BATCH):
+    prompt = llm_prompt(allowed, style)
+    batch = LLM_FREE_BATCH if style == 'free' else LLM_BATCH
+    for start in range(0, len(sentences), batch):
         if cancel is not None and cancel.is_set():
             break
-        stop = min(len(sentences), start + LLM_BATCH)
+        stop = min(len(sentences), start + batch)
         speech = sum(is_speech(sentences[i]) for i in range(start, stop))
         if speech:
             found = parse_llm(ask(prompt + llm_lines(sentences, breaks, start, stop)), sentences, start, stop,
-                              allowed)
+                              allowed, style)
             if len(found) <= max(LLM_MAX_TAGGED, speech // 2):
                 for index, tag in found.items():
                     tags[index] = tag
@@ -194,11 +247,11 @@ class Cancelled(RuntimeError):
     """Kullanici etiketlemeyi durdurdu."""
 
 
-def tag_book(sections, ask=None, cancel=None, progress=None, allowed=None):
+def tag_book(sections, ask=None, cancel=None, progress=None, allowed=None, style='catalog'):
     """Butun kitabi etiketler (F170). `sections`: [{'sentences', 'breaks'}] okuyucunun bolmesiyle. `ask` verilirse
     model sunucusu da sorulur; modelin etiket vermedigi konusmada kelime listesininki kalir (anlaticidaki acik
     ipucu modelden daha guvenilir). Donen: bolum basina etiket listeleri. `progress(islenen, toplam)`;
-    durdurulursa Cancelled."""
+    durdurulursa Cancelled. F187: `style` 'free' ise modelin etiketleri etiketli cumlelerdir."""
     total = sum(len(section['sentences']) for section in sections)
     result, done = [], 0
     for section in sections:
@@ -208,7 +261,7 @@ def tag_book(sections, ask=None, cancel=None, progress=None, allowed=None):
         tags = tag_sentences(sentences, breaks, allowed)
         if ask is not None:
             step = (lambda count, base=done: progress(base + count, total)) if progress else None
-            found = tag_with_llm(sentences, breaks, ask, cancel, step, allowed)
+            found = tag_with_llm(sentences, breaks, ask, cancel, step, allowed, style)
             tags = [llm or words for llm, words in zip(found, tags)]
         result.append(tags)
         done += len(sentences)
@@ -268,8 +321,9 @@ class Store:
                 self._cache[book] = data
             return self._cache[book]
 
-    def save(self, book, method, sections, tags, allowed=None):
-        """Butun kitabin etiketlerini yazar (oncekinin yerine). Donen: info()."""
+    def save(self, book, method, sections, tags, allowed=None, style='catalog'):
+        """Butun kitabin etiketlerini yazar (oncekinin yerine). Donen: info(). F187: degerler katalog etiketi ya da
+        etiketli cumle ('style': 'free')."""
         table = {}
         for section, section_tags in zip(sections, tags):
             for text, tag in zip(section['sentences'], section_tags):
@@ -278,7 +332,7 @@ class Store:
         data = {'version': VERSION, 'method': method if method in METHODS else 'words',
                 'created': datetime.now().isoformat(timespec='seconds'),
                 'sentences': sum(len(section['sentences']) for section in sections), 'tagged': len(table),
-                'allowed': list(drama3_tags.allowed(allowed)), 'tags': table}
+                'allowed': list(drama3_tags.allowed(allowed)), 'style': drama3_tags.style(style), 'tags': table}
         with self._lock:
             path = self._path(book)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -295,7 +349,7 @@ class Store:
         data = self.load(book)
         if not data:
             return None
-        return {key: data.get(key) for key in ('method', 'created', 'sentences', 'tagged', 'allowed')} | {
+        return {key: data.get(key) for key in ('method', 'created', 'sentences', 'tagged', 'allowed', 'style')} | {
             'text': str(self._path(book).with_suffix('.txt'))}
 
     def books(self):
@@ -303,11 +357,14 @@ class Store:
         return sorted(path.stem for path in self.directory.glob('*.json') if self.load(path.stem))
 
     def tag(self, book, text, allowed=None):
-        """Bir cumlenin etiketi ('' yok); Ayarlar'da secimden cikarilmis etiket uygulanmaz."""
+        """Bir cumlenin etiketi ('' yok); Ayarlar'da secimden cikarilmis etiket uygulanmaz. F187: etiketli cumle
+        (serbest yonerge) katalog secimine bagli degildir, sozleri cumleyle ayniysa oldugu gibi doner."""
         if not re.fullmatch(r'[0-9a-f]{8,40}', str(book or '')):
             return ''
         data = self.load(book)
-        found = data['tags'].get(_key(text), '') if data else ''
+        found = str(data['tags'].get(_key(text), '') if data else '')
+        if drama3_tags.is_markup(found):
+            return found if drama3_tags.same_text(found, _key(text)) else ''
         return found if found in drama3_tags.allowed(allowed) else ''
 
     def clear(self, book=None):

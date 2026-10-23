@@ -56,6 +56,10 @@ class TtsMixin:
         """F171: Ayarlar'da secilen etiketler (ui.json tts.emotion_allowed; yoksa calistigi bilinenler)."""
         return drama3_tags.allowed(self.ui_prefs().get('tts', {}).get('emotion_allowed'))
 
+    def _emotion_style(self):
+        """F187: ui.json tts.emotion_style: 'free' serbest yonerge (varsayilan), 'catalog' yalnizca secilen etiketler."""
+        return drama3_tags.style(self.ui_prefs().get('tts', {}).get('emotion_style'))
+
     def _emotion_tag(self, book, text):
         """tts.Engines'in sordugu cumle etiketi: kitabin etiketli surumunden; kapaliysa ya da surum yoksa ''."""
         if not self._emotion_enabled():
@@ -67,7 +71,7 @@ class TtsMixin:
 
     def tts_emotion_catalog(self):
         """F171: Drama 3 etiket katalogu ve secili olanlar (Ayarlar)."""
-        return {'tags': drama3_tags.public(), 'allowed': list(self._emotion_allowed())}
+        return {'tags': drama3_tags.public(), 'allowed': list(self._emotion_allowed()), 'style': self._emotion_style()}
 
     def tts_emotions_books(self):
         """F170: etiketli surumu olan kitaplar (kitaplikta isaret icin)."""
@@ -99,7 +103,8 @@ class TtsMixin:
             self._emotion_lock = threading.Lock()
         method = method if method in emotion_tags.METHODS else 'llm'
         allowed = self._emotion_allowed()
-        if not allowed:
+        style = self._emotion_style() if method == 'llm' else 'catalog'
+        if not allowed and style == 'catalog':
             return _error("Ayarlar → Ses'te Drama 3 için en az bir duygu etiketi seçin.")
         try:
             self._emotion_store()._path(book)
@@ -137,10 +142,10 @@ class TtsMixin:
                         client = Client(load_config(), log=self._log)
                         loaded = keep_loaded(client, [client.cfg.get('model')], self._log)
                         ask = lambda prompt: client.chat([{'role': 'user', 'content': prompt}], temperature=0,
-                                                         max_tokens=1500)
+                                                         max_tokens=3000 if style == 'free' else 1500)
                     progress(0, total)
-                    tags = emotion_tags.tag_book(sections, ask, cancel, progress, allowed)
-                    info = self._emotion_store().save(book, method, sections, tags, allowed)
+                    tags = emotion_tags.tag_book(sections, ask, cancel, progress, allowed, style)
+                    info = self._emotion_store().save(book, method, sections, tags, allowed, style)
                     self._log(f'Duygu etiketleri: {info["tagged"]} konuşma etiketlendi ({title or book}).')
                     self._emit('tts_emotions', {'book': book, 'title': title, 'finished': True, 'info': info})
                 except emotion_tags.Cancelled:

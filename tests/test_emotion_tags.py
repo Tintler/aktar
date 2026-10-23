@@ -216,12 +216,23 @@ class BridgeTests(unittest.TestCase):
         with patch('app_core.Client', FakeClient), patch('app_core.load_config', return_value={}), \
                 patch('app_core.keep_loaded', return_value=['sohbet:1']) as keep, \
                 patch('app_core.unload_models') as unload:
+            self.bridge.prefs['emotion_style'] = 'catalog'
             self.bridge.tts_emotions_create(BOOK, BookTaggingTests.SECTIONS, 'llm')
             done = self.finish()
+            self.assertEqual(done['info']['style'], 'catalog')
+            self.assertEqual(self.bridge._emotion_tag(BOOK, '— Peki.'), '[sighs]')
+            # F187: varsayilan serbest yonerge: yanit cumlenin etiketli hali, katalog secimine bagli degil
+            FakeClient.chat = lambda _self, messages, temperature=None, max_tokens=None: (
+                '{"1": "— Peki [derin bir nefes alır] tamam."}' if 'Peki' in messages[0]['content'] else '{}')
+            del self.bridge.prefs['emotion_style']
+            self.bridge.prefs['emotion_allowed'] = []
+            self.bridge.tts_emotions_create(BOOK, [{'sentences': ['Durdu.', '— Peki tamam.'], 'breaks': [1]}], 'llm')
+            done = self.finish()
+        self.assertEqual(done['info']['style'], 'free')
         self.assertEqual(done['info']['method'], 'llm')
         self.assertEqual(keep.call_args[0][1], ['sohbet'])
         self.assertEqual(unload.call_args[0][1], ['sohbet:1'])
-        self.assertEqual(self.bridge._emotion_tag(BOOK, '— Peki.'), '[sighs]')
+        self.assertEqual(self.bridge._emotion_tag(BOOK, '— Peki tamam.'), '— Peki [derin bir nefes alır] tamam.')
 
     def test_model_error_is_reported(self):
         with patch('app_core.Client', side_effect=RuntimeError('Model sunucusuna bağlanılamadı')), \
@@ -408,6 +419,92 @@ class EngineTests(unittest.TestCase):
         with patch.object(self.engines, '_manifests', return_value={'drama3': manifest}):
             self.assertEqual(self.engines.emotion_tag(BOOK, '— Gel buraya.'), '')
 
+
+
+class FreeDirectionTests(unittest.TestCase):
+    """F187: serbest yonerge (Drama 3 TR): dil modeli cumlenin yonergeli halini yazar."""
+
+    def test_valid_markup(self):
+        import drama3_tags
+        valid = drama3_tags.valid
+        for markup, text in (('— Peki [derin bir nefes alır] tamam, sen kazandın.', '— Peki tamam, sen kazandın.'),
+                             ('[titrek bir sesle, ağlamamak için kendini zorlayarak] "Gitme, lütfen." dedi.',
+                              '"Gitme, lütfen." dedi.'),
+                             ('— Sana söz veriyorum, <whisper>kimseye söylemeyeceğim</whisper>.',
+                              '— Sana söz veriyorum, kimseye söylemeyeceğim.'),
+                             ('— Bu <emphasis>çok</emphasis> önemli [pause] anladın mı?', '— Bu çok önemli anladın mı?')):
+            self.assertEqual(valid(markup, text, []), markup)
+        self.assertEqual(valid('— Peki [iç çeker] tamam, kazandın.', '— Peki tamam, sen kazandın.'), '')   # soz degisti
+        self.assertEqual(valid('— Peki [iç [çeker]] tamam.', '— Peki tamam.'), '')
+        self.assertEqual(valid('— <yell>Peki</yell> tamam.', '— Peki tamam.'), '')                        # resmi degil
+        self.assertEqual(valid('— <whisper>Peki tamam.', '— Peki tamam.'), '')                           # kapanmadi
+        self.assertEqual(valid('— <soft><fast>Peki</fast></soft> tamam.', '— Peki tamam.'), '')          # ic ice
+        self.assertEqual(valid('— [a] Peki [b] tamam [c] işte [d].', '— Peki tamam işte.'), '')           # cok yonerge
+        self.assertEqual(valid('— [bir iki üç dört beş altı yedi sekiz dokuz] Peki.', '— Peki.'), '')
+        self.assertEqual(valid('— Peki.', '— Peki.'), '')                                                # yonerge yok
+        self.assertEqual(valid('<|speaker:1|> [öfkeyle] Peki.', 'Peki.'), '')
+        self.assertEqual(valid('— [öfkeyle] Peki.', '— Peki.', ['[angry]'], free=False), '')
+        self.assertEqual(valid('— [angry] Peki.', '— Peki.', ['[angry]'], free=False), '— [angry] Peki.')
+
+    def test_bare_direction_becomes_a_prefix(self):
+        self.assertEqual(emotion_tags.free_markup('[öfkeyle]', 'Ali döndü: "Ne işin var?"'),
+                         'Ali döndü: [öfkeyle] "Ne işin var?"')
+        self.assertEqual(emotion_tags.free_markup('[öfkeyle]', '— Ne işin var?'), '— [öfkeyle] Ne işin var?')
+        answer = json.dumps({'0': '— Bir [güler] iki.', '1': '— Üç dört beş.', '2': 'Anlatıcı [güler] konuştu.',
+                             '3': '[fısıldayarak][korkuyla] "Duydun mu? Biri aşağıda."'}, ensure_ascii=False)
+        sentences = ['— Bir iki.', '— Üç dört.', 'Anlatıcı konuştu.', '"Duydun mu? Biri aşağıda."']
+        self.assertEqual(emotion_tags.parse_llm(answer, sentences, 0, 4, [], 'free'),
+                         {0: '— Bir [güler] iki.', 3: '[fısıldayarak][korkuyla] "Duydun mu? Biri aşağıda."'})
+        prompt = emotion_tags.llm_prompt(['[sad]'], 'free')
+        self.assertIn('[sad]', prompt)
+        self.assertIn('<forceful>', prompt)
+        self.assertIn('derin bir nefes alır] tamam', prompt)
+
+    def test_old_engine_gets_one_catalog_tag(self):
+        import drama3_tags
+        everything = drama3_tags.ALL_TAGS
+        self.assertEqual(drama3_tags.legacy_tag('[öfkeyle, dişlerini sıkarak] — Defol!', everything), '[angry]')
+        self.assertEqual(drama3_tags.legacy_tag('— Sana <whisper>söylemem</whisper>.', everything), '<whisper>')
+        self.assertEqual(drama3_tags.legacy_tag('— Peki [duraksar] tamam.', ['[laughs]']), '')
+
+    def test_engine_text(self):
+        markup = '— Peki [gasps] tamam. [sighs] Sen kazandın.'
+        self.assertEqual(drama3.tagged('— Peki tamam. Sen kazandın.', markup), markup)
+        self.assertEqual(drama3.tagged('— Başka bir cümle.', markup), '— Başka bir cümle.')
+        self.assertEqual([piece for piece, _gap in drama3.split_text(markup, 200, split_tags=False)], [markup])
+        self.assertEqual(len(drama3.split_text(markup, 200)), 2)       # budanmis: etiketten once bolunur
+        long = '[çok yorgun. bitkin, soluk soluğa] ' + 'kelime ' * 30 + 'son.'
+        self.assertTrue(all(piece.count('[') == piece.count(']') for piece, _gap in drama3.split_text(long, 60, False)))
+        self.assertEqual(drama3.untag('<|speaker:0|>— Peki [derin bir nefes alır] tamam.'), '<|speaker:0|>— Peki tamam.')
+
+    def test_store_keeps_the_tagged_sentence(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = emotion_tags.Store(folder)
+            store.save(BOOK, 'llm', [{'sentences': ['— Peki tamam.', '— Sus.']}],
+                       [['— Peki [duraksar] tamam.', '[laughs]']], [], 'free')
+            self.assertEqual(store.tag(BOOK, '— Peki tamam.', []), '— Peki [duraksar] tamam.')
+            self.assertEqual(store.tag(BOOK, '— Sus.', []), '')
+            self.assertIn('— Peki [duraksar] tamam.', Path(store.info(BOOK)['text']).read_text(encoding='utf-8'))
+
+    def test_group_resets_a_style_prefix(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        table = {'— Ne işin var?': '— [öfkeyle] Ne işin var?', '— Defol!': '[angry]'}
+        engines = Engines(Path(folder.name), REPO / 'engines', prefs=lambda: {'voices': {'tr': 'drama3/clone'}},
+                          emotion=lambda book, text: table.get(text, ''))
+        self.addCleanup(engines.shutdown)
+        manifest = json.loads((REPO / 'engines' / 'drama3' / 'motor.json').read_text(encoding='utf-8'))
+        sentences = ['Girdi.', '— Ne işin var?', 'Bir mektup vardı.', 'Saat geçti.', '— Gel.', '— Defol!']
+        with patch.object(engines, '_manifests', return_value={'drama3': manifest}):
+            text, _tag = engines._request_text(sentences, BOOK)
+            self.assertEqual(text, 'Girdi. [angry] — Ne işin var? Bir mektup vardı. Saat geçti. — Gel. [angry] — Defol!')
+        manifest['emotion_tags'] = 'rich'
+        with patch.object(engines, '_manifests', return_value={'drama3': manifest}):
+            text, _tag = engines._request_text(sentences, BOOK)
+            self.assertEqual(text, 'Girdi. — [öfkeyle] Ne işin var? [sakin anlatıcı sesi] Bir mektup vardı. Saat geçti. '
+                                   '— Gel. [angry] — Defol!')
+            text, _tag = engines._request_text(sentences[1:2] + sentences[4:5], BOOK)
+            self.assertEqual(text, '— [öfkeyle] Ne işin var? [doğal ses] — Gel.')
 
 
 class AudiobookKeyTests(unittest.TestCase):
