@@ -21,6 +21,7 @@ let breaks = new Set();   // indices of sentences that end a paragraph
 let pauses = { ...PAUSE_DEFAULTS };
 let scope = { book: null, language: 'tr' };   // where rendered sentences are cached
 let groupChars = 0;       // F177: 0 = one sentence per request
+let prepared = [];        // F185: sentences already in the cache on their own (tts_cached_flags)
 let context = null;
 let source = null;
 let follow = null;        // interval moving the highlight through a group
@@ -38,6 +39,7 @@ export function setSentences(list, where = {}) {
   breaks = where.breaks ?? new Set();
   scope = { book: where.book ?? null, language: where.language || 'tr' };
   player.total = list.length;
+  prepared = [];
   cache.clear();
 }
 
@@ -47,11 +49,13 @@ export function setPauses(next) {
 }
 
 // Last sentence read together with `index`: following sentences of the same paragraph while they fit.
+// F185: a sentence prepared ("Hazırla" renders one at a time) is read alone from the cache, never in a group.
 function groupEnd(index) {
   let end = index;
-  if (groupChars <= 0) return end;
+  if (groupChars <= 0 || prepared[index]) return end;
   let chars = sentences[index].length;
-  while (end + 1 < sentences.length && !breaks.has(end) && chars + 1 + sentences[end + 1].length <= groupChars) {
+  while (end + 1 < sentences.length && !breaks.has(end) && !prepared[end + 1]
+         && chars + 1 + sentences[end + 1].length <= groupChars) {
     end++;
     chars += 1 + sentences[end].length;
   }
@@ -172,7 +176,12 @@ export async function play(index = player.index) {
   if (context.state === 'suspended') await context.resume();
   const chars = await call('tts_group_chars', scope.language);
   const next = typeof chars === 'number' ? chars : 0;
-  if (next !== groupChars) { groupChars = next; cache.clear(); }
+  const flags = next > 0 && scope.book
+    ? await call('tts_cached_flags', scope.book, sentences, player.speed, scope.language).catch(() => null) : null;
+  const ready = Array.isArray(flags) ? flags : [];
+  if (next !== groupChars || ready.some((flag, i) => flag !== Boolean(prepared[i]))) cache.clear();
+  groupChars = next;
+  prepared = ready;
   player.active = true;
   player.playing = true;
   await playIndex(index < 0 ? 0 : index);

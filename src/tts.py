@@ -495,14 +495,19 @@ class Engines:
         except (TypeError, ValueError):
             return int(default or 0)
 
-    def cached(self, book, sentences, speed, language='tr', override=None):
-        """How many of the sentences are already rendered for this book and voice."""
-        count = 0
+    def cached_flags(self, book, sentences, speed, language='tr', override=None):
+        """For each sentence: is it already rendered on its own for this book and voice ("Hazirla" renders sentence
+        by sentence; the reader reads these alone instead of in a group, F185)."""
+        flags = []
         for sentence in sentences:
             text = ' '.join(str(sentence).split())
             path = self._cache_path(book, text, speed, language, override) if text else None
-            count += bool(path is not None and path.exists())
-        return count
+            flags.append(bool(path is not None and path.exists()))
+        return flags
+
+    def cached(self, book, sentences, speed, language='tr', override=None):
+        """How many of the sentences are already rendered for this book and voice."""
+        return sum(self.cached_flags(book, sentences, speed, language, override))
 
     def prepare(self, book, sentences, speed, language='tr', progress=None, cancel=None):
         """Renders sentences into the book's cache (blocking); already rendered ones are skipped."""

@@ -411,6 +411,13 @@ class TtsMixin:
         """Bu cumlelerden kacinin sesi hazir (motor yuklenmeden okunabilir)."""
         return self._engines().cached(book, sentences, speed, language or 'tr')
 
+    def tts_cached_flags(self, book, sentences, speed=1.0, language='tr'):
+        """F185: cumle basina hazir mi (okuyucu hazir cumleyi gruplamadan, onbellekten tek basina okur)."""
+        try:
+            return self._engines().cached_flags(book, sentences, speed, language or 'tr')
+        except Exception as error:
+            return _error(error)
+
     def tts_prepare(self, book, sentences, speed=1.0, language='tr'):
         """Cumleleri arka planda kitabin onbellegine uretir (ayni anda tek is)."""
         job = getattr(self, '_prepare_job', None)

@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.18.1 — 2026-10-23
+
+### Düzeltme
+- **Hazırlanan sesler okurken kullanılmıyordu (F185):** Drama 3 TR gibi ardışık cümleleri tek istekte okuyan motorlarda okuyucu cümleleri grupluyor, "Hazırla" ise cümle cümle kaydediyordu; anahtarlar uyuşmadığı için hazırlanan sesler bulunmuyor, her şey yeniden üretiliyordu. Artık hazırlanmış cümle gruba alınmaz, önbellekten tek başına okunur; yalnızca hazırlanmamış cümleler gruplanır. Daha önce hazırladığınız sesler silinmedi, bu sürümle doğrudan kullanılır.
+
 ## 2.18.0 — 2026-10-22
 
 ### Yeni

@@ -191,6 +191,8 @@ class EnginesTests(unittest.TestCase):
 
         self.assertEqual(self.engines.prepare(book, ['Bir cümle.', 'İki.', 'Üç.', 'Dört.'], 1.0, progress=step, cancel=cancel), 2)
         self.assertEqual(self.engines.cached(book, ['Bir cümle.', 'İki.', 'Üç.'], 1.0), 2)
+        self.assertEqual(self.engines.cached_flags(book, ['Bir cümle.', ' ', 'Üç.', 'İki.'], 1.0),
+                         [True, False, False, True])   # F185: the reader reads these alone, not in a group
         self.engines.shutdown()                                                   # no engine running now
         replay = self.engines.say('İki.', 1.0, book)
         self.assertTrue(replay['cached'])
