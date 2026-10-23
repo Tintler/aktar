@@ -308,44 +308,122 @@ def valid(markup, text, chosen=None, free=True):
         if tag.startswith('['):
             if not words or len(words.split()) > MAX_WORDS or (not free and tag not in chosen):
                 return ''
-    return re.sub(r'\s+([,.;:!?…])', r'\1', markup) if not re.search(r'\s[,.;:!?…]', text) else markup
+    return markup
 
 
-_QUOTED = re.compile(r'[“«"][^”»"]*(?:[”»"]|$)')
-_STARTS_QUOTE = re.compile(r'(?:\s*\[[^\[\]]*\])*\s*(?:<[A-Za-z]+>\s*)?[“«"]')
+# Tirnakli soz: “..”, «..», ".." ve F187 tek tirnak ‘..’ (Turkce ceviride ic diyalog, Delikanli); arkasindan harf
+# gelen ’ kesme isaretidir (Olya’ya), tirnagi kapatmaz.
+QUOTED = r'[“«"][^”»"]*(?:[”»"]|$)|‘(?:[^’]|’(?=[^\W\d_]))*(?:’|$)'
+OPEN_QUOTES = '“«"‘'
+_QUOTED = re.compile(QUOTED)
+_STARTS_QUOTE = re.compile(r'(?:\s*\[[^\[\]]*\])*\s*(?:<[A-Za-z]+>\s*)?[“«"‘]')
 
 
-def narrator_safe(markup):
+# Konusmayi bildiren anlatici fiili (cizgili diyalogda '— Gel, dedi adam.' ve araya giren '–dedi Zosimov,–')
+SPEECH_VERB = (r'(?:diye|diyerek|diyince|de(?:di\w*|r|miş\w*|yip|yince|yerek)|diyor\w*|sor(?:du\w*|arak|muş\w*)|yanıtla\w*'
+               r'|cevap ver\w*|bağır\w*|haykır\w*|fısılda\w*|mırılda\w*|söylen\w*|homurdan\w*|ekle(?:di\w*|yerek)'
+               r'|seslen\w*|kükre\w*|inle\w*|gülümse\w*|gül(?:dü\w*|erek))(?!\w)')
+_CLOSER = re.compile(r'[”»]|’(?![^\W\d_])|(?<=\S)"')
+_INTERJECTION = re.compile(r'(?<=[^\s—–-])\s*[–—]\s*(?=[^\W\d_])[^–—"“”]*?[–—]')
+_ATTRIBUTION = re.compile(r'(?<=[,.!?…])\s+(?=' + SPEECH_VERB + ')')
+# '— Yahu, dedi, altı aydır gelir gideriz…' (Bay Duduk): kisa anlatici arasindan sonra konusma surer
+_SHORT_ATTRIBUTION = re.compile(r'(?<=[,.!?…])\s+' + SPEECH_VERB + r'(?:\s+[^\s,.!?…—–]+){0,2},\s+(?=[^\W\d_])')
+_LEADING = re.compile(r'(?:\s*\[[^\[\]]*\])*\s*[—–-]')
+
+
+def _quote_spans(markup, continued=False):
+    """Tirnak araliklari; `continued` (onceki cumlede acilip kapanmamis tirnak) ise ilk kapanis tirnagina kadari da
+    sozdur ('Onu görenler, size benzediğini söylüyorlar," dedi.')."""
+    spans, start = [], 0
+    if continued:
+        closer = _CLOSER.search(markup)
+        if closer:
+            spans.append((0, closer.end()))
+            start = closer.end()
+    spans += [(m.start(), m.end()) for m in _QUOTED.finditer(markup, start)]
+    return spans
+
+
+def _without(markup, keep):
+    """`keep(match)` False olan [..] yonergeleri atar."""
+    kept, last = [], 0
+    for match in _DIRECTION.finditer(markup):
+        if not keep(match):
+            piece = markup[last:match.start()]
+            following = markup[match.end():].lstrip()
+            punctuated = following[:1] in tuple(',.;:!?…')
+            kept.append(piece.rstrip() if punctuated else piece)
+            last = len(markup) - len(following) if punctuated else match.end()
+    return ' '.join((''.join(kept) + markup[last:]).split())
+
+
+def _dash_safe(markup):
+    """Cizgili diyalog: anlaticinin araya giren ('–dedi Zosimov,–') ve sondaki ('…, dedi adam.') sozleri yonergesiz;
+    onlardan once RESET_NARRATION, araya girenden sonra konusmanin on eki yeniden."""
+    leading = _LEADING.match(markup)
+    if not leading or not (_DIRECTION.search(markup) or _SCOPED.search(markup)):
+        return markup
+    style = next((m.group(0) for m in _DIRECTION.finditer(markup)
+                  if not re.search(r'[^\W\d_]', _DIRECTION.sub('', markup[leading.end():m.start()]))), '')
+    narrator = [(m.start(), m.end(), True) for m in _INTERJECTION.finditer(markup, leading.end())]
+    narrator += [(m.start(), m.end(), True) for m in _SHORT_ATTRIBUTION.finditer(markup, leading.end())
+                 if not any(a <= m.start() < b for a, b, _ in narrator)]
+    narrator.sort()
+    tail = None
+    for match in _ATTRIBUTION.finditer(markup, leading.end()):
+        if not any(a <= match.start() < b for a, b, _ in narrator):
+            tail = match
+    if tail:
+        narrator = [span for span in narrator if span[0] < tail.start()] + [(tail.start(), len(markup), False)]
+    if not narrator:
+        return markup
+    result, last = [], 0
+    for start, end, inner in narrator:
+        result.append(markup[last:start])
+        piece = _without(markup[start:end], lambda _match: False)
+        result.append(f' {RESET_NARRATION} {piece} ')
+        if inner and style and re.search(r'[^\W\d_]', markup[end:]):
+            result.append(f'{style} ')
+        last = end
+    result.append(markup[last:])
+    return ' '.join(''.join(result).split())
+
+
+def narrator_safe(markup, continued=False):
     """F187: tirnakli cumlede anlaticinin sozlerine konan [..] yonergeleri atilir ('[kendi kendine fısıldayarak] Ve
     araba ... [panikle] “Hırsız!” diye tekrarladım.' -> yalnizca [panikle] kalir); tirnagin hemen onundekiler ve
     icindekiler kalir. Yonergeli sozden sonra anlatici devam ediyorsa tirnak kapaninca RESET_NARRATION eklenir
     (kullanicinin dinlemesi: on ek tirnaktan sonraki 'diye haykırıyorlardı...' kismina da tasabiliyor).
-    Tirnaksiz (cizgili) cumle degismez."""
+    Cizgili diyalogda anlaticinin sozleri _dash_safe ile. `continued`: cumle onceki cumlede acilan tirnagin icinde
+    baslar (tirnaksizsa butunu soz)."""
     markup = str(markup or '')
-    spans = [(m.start(), m.end()) for m in _QUOTED.finditer(markup)]
+    spans = _quote_spans(markup, continued)
     if not spans:
-        return markup
+        return markup if continued else _dash_safe(markup)
     inside = lambda position: any(start <= position < end for start, end in spans)
-    kept, last = [], 0
-    for match in _DIRECTION.finditer(markup):
-        if not inside(match.start()) and not _STARTS_QUOTE.match(markup, match.end()):
-            kept.append(markup[last:match.start()])
-            last = match.end()
-    markup = ' '.join((''.join(kept) + markup[last:]).split())
-    result, last, styled = [], 0, False
-    for match in _QUOTED.finditer(markup):
-        styled = styled or bool(_DIRECTION.search(markup, last, match.end()) or _SCOPED.search(markup, last, match.end()))
-        end = match.end()
+    markup = _without(markup, lambda match: inside(match.start()) or _STARTS_QUOTE.match(markup, match.end())
+                      or (continued and match.start() < spans[0][1]))
+    result, last, styled, style, reset = [], 0, False, '', False
+    for start, end in _quote_spans(markup, continued):
+        own = _DIRECTION.search(markup, last, start + 1) or _DIRECTION.match(markup, start + 1)
+        if own:
+            style = own.group(0)
+        elif reset and style:
+            # '"Her neyse," [sakin anlatıcı sesi] dedi Didactylos, "yapılması…"': ayni konusmacinin sozu surer
+            result.append(markup[last:start] + f' {style} ')
+            last = start
+        styled = styled or bool(_DIRECTION.search(markup, last, end) or _SCOPED.search(markup, last, end))
+        reset = False
         closing = re.match(r'\s*</[A-Za-z]+>', markup[end:])
         if closing:
             end += closing.end()
-        punctuation = re.match(r'[,.;:!?…]*', markup[end:]).end()   # '“Teddy!”, diye' -> sifirlama virgulden sonra
-        end += punctuation
+        end += re.match(r'[,.;:!?…]*', markup[end:]).end()   # '“Teddy!”, diye' -> sifirlama virgulden sonra
         result.append(markup[last:end])
         last = end
         following = markup[end:]
         if styled and re.match(r'[\s—–-]*[^\W\d_]', following) and not _STARTS_QUOTE.match(following):
             result.append(' ' + RESET_NARRATION)
+            reset = True
         styled = False
     return ' '.join((''.join(result) + markup[last:]).split())
 

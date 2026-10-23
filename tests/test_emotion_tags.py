@@ -474,7 +474,42 @@ class FreeDirectionTests(unittest.TestCase):
                          '[alaycı] “Hah, bekçi var,” [sakin anlatıcı sesi] dedi biri, [tehditkar] “içeri tıkarlar.”')
         self.assertEqual(emotion_tags.free_markup('[bağırarak] “Teddy!”, diye haykırdı.', '“Teddy!”, diye haykırdı.'),
                          '[bağırarak] “Teddy!”, [sakin anlatıcı sesi] diye haykırdı.')
-        self.assertEqual(emotion_tags.free_markup('— [öfkeyle] Defol, dedi.', '— Defol, dedi.'), '— [öfkeyle] Defol, dedi.')
+        self.assertEqual(emotion_tags.free_markup('— [öfkeyle] Defol, dedi.', '— Defol, dedi.'),
+                         '— [öfkeyle] Defol, [sakin anlatıcı sesi] dedi.')
+        self.assertEqual(emotion_tags.free_markup('— [öfkeyle] Defol buradan!', '— Defol buradan!'),
+                         '— [öfkeyle] Defol buradan!')
+        # Suc ve Ceza: araya giren anlatici; sonrasinda konusmanin on eki yeniden
+        self.assertEqual(emotion_tags.free_markup('[sitemkar] — Söylesene, –dedi Zosimov [gülerek],– ne işiniz var?',
+                                                  '— Söylesene, –dedi Zosimov,– ne işiniz var?'),
+                         '[sitemkar] — Söylesene, [sakin anlatıcı sesi] –dedi Zosimov,– [sitemkar] ne işiniz var?')
+        # Bay Duduk: kisa anlatici arasindan sonra konusma surer; Delikanli: 'diyerek'
+        self.assertEqual(emotion_tags.free_markup('— [kızgın] Yahu, dedi, altı aydır gelir gideriz.',
+                                                  '— Yahu, dedi, altı aydır gelir gideriz.'),
+                         '— [kızgın] Yahu, [sakin anlatıcı sesi] dedi, [kızgın] altı aydır gelir gideriz.')
+        self.assertEqual(emotion_tags.free_markup('[sinirle] – Yeter, diyerek odadan çıktım.', '– Yeter, diyerek odadan çıktım.'),
+                         '[sinirle] – Yeter, [sakin anlatıcı sesi] diyerek odadan çıktım.')
+        # Kucuk Tanrilar: anlaticidan sonraki ikinci tirnak ayni konusmacinin; on ek yeniden
+        self.assertEqual(emotion_tags.free_markup('[umursamazca] "Her neyse," dedi Didactylos, "ben yaptım."',
+                                                  '"Her neyse," dedi Didactylos, "ben yaptım."'),
+                         '[umursamazca] "Her neyse," [sakin anlatıcı sesi] dedi Didactylos, [umursamazca] "ben yaptım."')
+        # Yerdeniz: onceki cumlede acilan tirnagin devami, duz tirnakla kapanir
+        self.assertEqual(emotion_tags.free_markup('[uyarıcı] Size benziyor," dedi.', 'Size benziyor," dedi.', None, True),
+                         '[uyarıcı] Size benziyor," [sakin anlatıcı sesi] dedi.')
+
+    def test_quote_context(self):
+        # Delikanli: tek tirnakli ic diyalog; ’ arkasindan harf gelirse kesme isareti
+        self.assertTrue(emotion_tags.is_speech('‘Anne, uyumuyor musunuz?’ dedi.'))
+        self.assertFalse(emotion_tags.is_speech('Olya’ya geldim, karşı karşıya oturduk.'))
+        self.assertFalse(emotion_tags.is_speech('–diye mırıldandı.'))   # Suc ve Ceza: cizgili anlatici
+        sentences = ['“Dinle beni.', 'Bunu bir kez söyleyeceğim.', 'Sonra gideceğim,” dedi.', 'Kapı kapandı.']
+        mask, continued = emotion_tags.quote_context(sentences, [3])
+        self.assertEqual(mask, [True, True, True, False])
+        self.assertEqual(continued, [False, True, True, False])
+        # basim hatasi '“Biliyor musunuz?..’' ’ ile kapanir; hic kapanmayan tirnak en fazla QUOTE_CARRY cumle tasinir
+        self.assertEqual(emotion_tags.speech_mask(['“Biliyor musunuz?..’ dedi.', 'Anlatıcı devam etti.'], [1]),
+                         [True, False])
+        long = ['“Biliyor musunuz?.. dedi.'] + ['Anlatıcı devam etti.'] * 10
+        self.assertEqual(sum(emotion_tags.speech_mask(long, [10])), 1 + emotion_tags.QUOTE_CARRY)
         self.assertEqual(emotion_tags.free_markup('<soft>“Gel.”</soft> dedi.', '“Gel.” dedi.'),
                          '<soft>“Gel.”</soft> [sakin anlatıcı sesi] dedi.')
 

@@ -2,6 +2,21 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.20.0 — 2026-10-23
+
+### Yeni
+- **Tablolar sütun sütun okunur:** Okuyucu veri tablolarını (en az iki sütun, kısa hücreler) her sütunu tek cümle olarak okur: "VENÜS: Ortalama Güneş Günü 22, Öğlen + 09." Eskiden hücreler satır satır ayrı ayrı okunuyor, değerler başlıklarından kopuyordu ve her hücre ayrı istek olduğu için küçük bir tablo bile bir dakikadan uzun sürüyordu. Okurken sütunun bütün hücreleri birlikte vurgulanır; boş hücreler sütun düzenini bozmaz. Uzun hücreli düzen tabloları (şiir, iki sütunlu metin) eskisi gibi okunur.
+
+### Düzeltme
+- **Yalnızca rakamdan oluşan parçalar okunmuyordu:** "M.S. 2301"de yıl, tablolardaki sayılar ve "1" gibi bölüm numaraları atlanıyordu; artık okunur. M.S., M.Ö., İ.S., İ.Ö. kısaltma olarak tanınır (cümle sonu sayılmaz).
+- **Duygu etiketlerinde uç durumlar (F187; 11 Türkçe kitapla Gemma 4 26B, 4 kitapla Haiku denemesi):**
+  - Tek tırnaklı iç diyalog (`‘Anne, uyumuyor musunuz?’ dedi.`) konuşma sayılır; arkasından harf gelen ’ (Olya’ya) kesme işaretidir.
+  - Basım hatası `“Biliyor musunuz?..’` artık ’ ile kapanır; hiç kapanmayan tırnak en fazla altı cümle konuşma sayılır (bütün paragraf konuşma sanılıyordu).
+  - Çizgili diyalogda anlatıcının sözleri yönergesiz: "— Olur, gidelim, dedi." "dedi"den önce `[sakin anlatıcı sesi]` alır; araya giren "–dedi Zosimov,–" ya da kısa "…, dedi, …" sonrasında konuşmanın ön eki yeniden konur.
+  - Anlatıcıdan sonra gelen ikinci tırnak ("Her neyse," dedi Didactylos, "ben yaptım.") aynı konuşmacının ön ekini yeniden alır.
+  - Önceki cümlede açılan alıntının düz tırnakla kapanan devamında kapanış tırnağı doğru tanınır; "–diye mırıldandı." gibi çizgiyle başlayan anlatıcı cümlesi konuşma sayılmaz; "diyerek" anlatıcı fiili olarak tanınır.
+- Not: Tablolu bölümlerde hazırlanan sesler yeniden üretilir; yeni kurallar için kitapları yeniden etiketleyin.
+
 ## 2.19.4 — 2026-10-23
 
 ### Düzeltme

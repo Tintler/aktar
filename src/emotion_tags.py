@@ -45,7 +45,7 @@ VERSION = 2
 CUES = tuple((entry['tag'], entry['cue']) for entry in drama3_tags.CATALOG if entry['cue'])
 _CUES = tuple((tag, re.compile(r'(?<!\w)(?:' + pattern + r')(?!n(?:ız)?\b)', re.U)) for tag, pattern in CUES)
 _OPEN_QUOTE = '“«"'
-_QUOTED = re.compile(r'[“«"][^”»"]*(?:[”»"]|$)')
+_QUOTED = re.compile(drama3_tags.QUOTED)
 _DASH = re.compile(r'^[—–-]\s*')
 _UNMARKED = re.compile(r'[?!,…]\s+(?:diye|dedi|der|sordu)(?!\w)')    # isaretsiz konusma: 'Gelir misin? diye sordu'
 _CONTINUES = re.compile(r'^(?:diye|dedi|deyip|diyerek|demişti)(?!\w)')  # onceki konusmanin devami: 'Diye guldu.'
@@ -59,29 +59,41 @@ def is_speech(sentence):
     """Konusma cumlesi mi: cizgiyle baslar, tirnak icinde soz var (tek-iki kelimelik 'lutr' gibi alinti degil) ya da
     isaretsiz konusma ('Begenemiyor musun? diye guldu')."""
     sentence = str(sentence).lstrip()
-    if _DASH.match(sentence) or _UNMARKED.search(tr_lower(sentence)):
+    dash = _DASH.match(sentence)
+    if dash and _CONTINUES.match(tr_lower(sentence[dash.end():])):
+        return False   # F187: '–diye mırıldandı.' cizgiyle baslayan anlatici cumlesi
+    if dash or _UNMARKED.search(tr_lower(sentence)):
         return True
     return any(len(quoted.split()) >= 3 or re.search(r'[.!?,…]', quoted) for quoted in _QUOTED.findall(sentence))
 
 
-_OPENS = re.compile(r'[“«]')
-_CLOSES = re.compile(r'[”»]')
+_OPENS = re.compile(r'[“«‘]')
+_CLOSES = re.compile(r'[”»]|’(?![^\W\d_])')   # ’ arkasindan harf geliyorsa kesme isareti
+QUOTE_CARRY = 6   # acik kalan tirnak en fazla bu kadar sonraki cumleyi konusma sayar (basim hatasi: “..’ kapanmaz)
 
 
-def speech_mask(sentences, breaks=()):
-    """F187: her cumle konusma mi: is_speech ya da ayni paragrafta onceki cumlelerde acilip kapanmamis bir tirnagin
-    ici (okuyucu uzun alintiyi boler: '“Esper, yani...' sonrasi 'Telepatikler, Akil Okuyuculari.' tirnaksiz kalir)."""
+def quote_context(sentences, breaks=()):
+    """F187: ([konusma mi], [onceki tirnagin icinde mi baslar]): konusma = is_speech ya da ayni paragrafta onceki
+    cumlelerde acilip kapanmamis bir tirnagin ici (okuyucu uzun alintiyi boler: '“Esper, yani...' sonrasi
+    'Telepatikler, Akil Okuyuculari.' tirnaksiz kalir)."""
     sentences = [str(s) for s in sentences]
     ends = {int(b) for b in breaks or ()}
-    mask, depth = [], 0
+    mask, continued, depth, carried = [], [], 0, 0
     for i, sentence in enumerate(sentences):
-        mask.append(depth > 0 or is_speech(sentence))
+        carried = carried + 1 if depth > 0 else 0
+        continued.append(depth > 0 and carried <= QUOTE_CARRY)
+        mask.append(continued[-1] or is_speech(sentence))
         depth = max(0, depth + len(_OPENS.findall(sentence)) - len(_CLOSES.findall(sentence)))
         if sentence.count('"') % 2:
             depth = 0 if depth else 1
         if i in ends:
             depth = 0
-    return mask
+    return mask, continued
+
+
+def speech_mask(sentences, breaks=()):
+    """Her cumle konusma mi (quote_context)."""
+    return quote_context(sentences, breaks)[0]
 
 
 def narration(sentence):
@@ -198,23 +210,23 @@ def llm_lines(sentences, breaks, start, stop):
     return '\n'.join(lines).strip()
 
 
-def free_markup(value, sentence, allowed=None):
+def free_markup(value, sentence, allowed=None, continued=False):
     """F187: modelin yanit degeri -> etiketli cumle ('' gecersiz). Yalnizca yonerge yazilmissa ('[öfkeyle]') on ek
     olarak cumleye konur (tirnaktan once, drama3.tagged gibi)."""
     value = ' '.join(str(value or '').split())
     value = drama3_tags.reproject(value, sentence) or value   # modelin tirnak/kesme isaretleri kitabinkiyle
     if value and not drama3_tags.plain(value) and re.fullmatch(r'(?:\[[^\[\]]+\]\s*)+', value):
-        quote = re.search(r'[“«"]', sentence)
+        quote = re.search('[' + drama3_tags.OPEN_QUOTES + ']', sentence)
         position = quote.start() if quote and re.search(r'[^\W\d_]', sentence[:quote.start()]) else 0
         if _DASH.match(sentence) and not position:
             position = _DASH.match(sentence).end()
         value = (sentence[:position] + value + ' ' + sentence[position:]).strip()
-    markup = drama3_tags.narrator_safe(drama3_tags.valid(value, sentence, allowed, free=True))
+    markup = drama3_tags.narrator_safe(drama3_tags.valid(value, sentence, allowed, free=True), continued)
     useful = [tag for tag, _words in drama3_tags.directions(markup) if tag != drama3_tags.RESET_NARRATION]
     return markup if useful else ''
 
 
-def parse_llm(raw, sentences, start, stop, allowed=None, style='catalog', speech=None):
+def parse_llm(raw, sentences, start, stop, allowed=None, style='catalog', speech=None, continued=None):
     """Model yanitindan {numara: etiket}: yalnizca araliktaki konusma cumleleri ve secilen etiketler. F187: 'free'
     kipinde deger cumlenin etiketli hali (drama3_tags.valid); `speech` speech_mask (yoksa is_speech)."""
     allowed = drama3_tags.allowed(allowed)
@@ -234,7 +246,7 @@ def parse_llm(raw, sentences, start, stop, allowed=None, style='catalog', speech
         if not (start <= index < stop and (speech[index] if speech else is_speech(sentences[index]))):
             continue
         if style == 'free':
-            markup = free_markup(value, sentences[index], allowed)
+            markup = free_markup(value, sentences[index], allowed, bool(continued and continued[index]))
             if markup:
                 result[index] = markup
             continue
@@ -251,7 +263,7 @@ def tag_with_llm(sentences, breaks, ask, cancel=None, progress=None, allowed=Non
     serbest kipte yalnizca bu etiketlerin yarisindan fazlasi ayni yonergeyse (gemma neredeyse her konusmaya ayri,
     yerinde bir yonerge yaziyordu). `progress(islenen_cumle)` her parcadan sonra cagrilir."""
     sentences = [str(s) for s in sentences]
-    mask = speech_mask(sentences, breaks)
+    mask, continued = quote_context(sentences, breaks)
     tags = [''] * len(sentences)
     prompt = llm_prompt(allowed, style)
     batch = LLM_FREE_BATCH if style == 'free' else LLM_BATCH
@@ -262,7 +274,7 @@ def tag_with_llm(sentences, breaks, ask, cancel=None, progress=None, allowed=Non
         speech = sum(mask[start:stop])
         if speech:
             found = parse_llm(ask(prompt + llm_lines(sentences, breaks, start, stop)), sentences, start, stop,
-                              allowed, style, mask)
+                              allowed, style, mask, continued)
             if len(found) <= max(LLM_MAX_TAGGED, speech // 2) or (style == 'free' and not repetitive(found)):
                 for index, tag in found.items():
                     tags[index] = tag

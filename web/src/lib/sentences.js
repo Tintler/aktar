@@ -8,10 +8,11 @@ const BLOCK = 'p,h1,h2,h3,h4,h5,h6,li,td,th,figcaption,dt,dd,blockquote,pre,div,
 const ABBREVIATIONS = new Set([
   'dr', 'prof', 'doç', 'yrd', 'av', 'op', 'sn', 'st', 'mr', 'mrs', 'ms', 'jr', 'sr', 'vb', 'vs', 'örn', 'bkz', 'no',
   'nr', 'alb', 'bnb', 'yzb', 'tğm', 'org', 'gen', 'mah', 'cad', 'sok', 'apt', 'ltd', 'şti', 'inc', 'vd', 'yy', 'bl',
-  'mrs', 'dept', 'etc', 'e.g', 'i.e', 'vol', 'ch', 'fig', 'a.ş', 's',
+  'mrs', 'dept', 'etc', 'e.g', 'i.e', 'vol', 'ch', 'fig', 'a.ş', 's', 'm.s', 'm.ö', 'i.s', 'i.ö',
 ]);
 const END = /[.!?…]+["'”’»)\]]*(?=\s|$)/g;
 const LETTER = /\p{L}/u;
+const SPOKEN = /[\p{L}\p{N}]/u;   // a piece with a letter or a digit is read ('*** ' is not)
 const OPENS_AFTER = /[\s([{—–-]/;
 export const QUOTE_DEFAULTS = { quotes: true, maxQuoted: 4 };
 
@@ -64,7 +65,7 @@ function sentenceRanges(text, options) {
       while (b > a && /\s/.test(text[b - 1])) b--;
       return [a, b];
     })
-    .filter(([a, b]) => b > a && LETTER.test(text.slice(a, b)));
+    .filter(([a, b]) => b > a && SPOKEN.test(text.slice(a, b)));   // F187: '2301' alone is read too
 }
 
 // Plain text (Metinden ses, F178): every non-empty line is a block, split like a rendered chapter.
@@ -78,13 +79,53 @@ export function splitText(text, options = QUOTE_DEFAULTS) {
   return { sentences, breaks };
 }
 
+// F187: a data table (at least two columns, every cell short) is read column by column, each column one sentence:
+// "VENÜS: Ortalama Güneş Günü 22, Öğlen + 09." Read row by row, cell by cell, the values lost their headers and every
+// cell was a request of its own. Layout tables (long cells: poems, two-column text) are read as before.
+const TABLE_CELL_MAX = 120;
+const cellText = (cell) => cell.textContent.replace(/\s+/g, ' ').trim();
+
+function dataTables(root) {
+  const tables = new Set();
+  for (const table of root.querySelectorAll('table')) {
+    const rows = [...table.rows].map((row) => [...row.cells]);
+    const cells = rows.flat();
+    if (!cells.length || Math.max(...rows.map((row) => row.length)) < 2) continue;
+    if (cells.some((cell) => cell.querySelector('table') || cellText(cell).length > TABLE_CELL_MAX)) continue;
+    tables.add(table);
+  }
+  return tables;
+}
+
+// Column sentences of one data table: [{ text, cells }] (cells: the cells the sentence is read from).
+function tableSentences(table) {
+  const spoken = (cell) => cell && SPOKEN.test(cellText(cell));
+  const rows = [...table.rows].map((row) => [...row.cells]).filter((row) => row.some(spoken));
+  // empty cells are dropped only after the columns are built: '(tutulma)' stays under its own header
+  const columns = rows.length === 1 ? [rows[0]] : Array.from({ length: Math.max(...rows.map((row) => row.length)) },
+    (_, c) => rows.map((row) => row[c]));
+  return columns.map((cells) => cells.filter(spoken)).filter((cells) => cells.length).map((cells) => {
+    const [head, ...rest] = cells.map(cellText);
+    let text = rows.length === 1 ? [head, ...rest].join(', ') : rest.length ? `${head.replace(/:$/, '')}: ${rest.join(', ')}` : head;
+    if (!/[.!?…]$/.test(text)) text += '.';
+    return { text, cells };
+  });
+}
+
 export function segment(root, options = QUOTE_DEFAULTS) {
   const groups = [];
+  const tables = dataTables(root);
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: (node) => (node.parentElement?.closest('.no-tts, button') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
   });
   let current = null;
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const table = node.parentElement.closest('table');
+    if (table && tables.has(table)) {
+      if (!current || current.table !== table) groups.push((current = { table, nodes: [] }));
+      current.nodes.push(node);
+      continue;
+    }
     const block = node.parentElement.closest(BLOCK) ?? root;
     if (!current || current.block !== block) groups.push((current = { block, nodes: [] }));
     current.nodes.push(node);
@@ -94,6 +135,17 @@ export function segment(root, options = QUOTE_DEFAULTS) {
   const breaks = new Set();
   const pieces = [];   // [node, start, end, index], wrapped afterwards
   for (const group of groups) {
+    if (group.table) {
+      for (const { text, cells } of tableSentences(group.table)) {
+        const index = sentences.length;
+        sentences.push(text);
+        for (const node of group.nodes) {
+          if (node.data.trim() && cells.some((cell) => cell.contains(node))) pieces.push([node, 0, node.data.length, index]);
+        }
+      }
+      if (sentences.length) breaks.add(sentences.length - 1);   // the whole table is one paragraph
+      continue;
+    }
     let offset = 0;
     const spans = group.nodes.map((node) => {
       const span = [offset, offset + node.data.length, node];
