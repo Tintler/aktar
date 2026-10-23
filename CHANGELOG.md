@@ -2,6 +2,14 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.22.0 — 2026-10-23
+
+### Yeni
+- **Tam ekran sesli okuma (F189):** Okuyucunun üst çubuğundaki yeni düğme (yer imi ile görünüm düğmesinin arasında) ekranı kaplar ve yalnızca o anda okunan parçayı büyük yazıyla gösterir. Parça bitince eskisi yukarı kayıp kaybolur, yenisi aşağıdan gelir; birkaç cümlelik grupta okunan cümle parlak, diğerleri soluk görünür. Fare 2,5 saniye durunca üst satır ve düğmeler gizlenir. Boşluk oynatır/duraklatır, Esc çıkar; çıkınca sayfa okunan yere kayar. Okuyucunun sayfa rengi ve yazı tipi kullanılır.
+
+### Düzeltme
+- **Sesli okurken ekran kararıyordu:** Okuyucu sesi Web Audio ile çaldığı için Windows bunu etkinlik saymıyor, ekran kararma süresi dolunca ekran (ve ekrana bağlı hoparlör) kapanıyordu. Artık okuma sürdükçe ekran kararmaz ve bilgisayar uykuya girmez; duraklatınca, okuma bitince ya da pencere kapanınca istek bırakılır. Linux'ta aynı iş `systemd-inhibit` ile yapılır.
+
 ## 2.21.0 — 2026-10-23
 
 ### Yeni

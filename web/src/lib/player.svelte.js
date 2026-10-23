@@ -14,8 +14,17 @@ export const player = $state({
   playing: false,
   waiting: false,    // the current sentence is still being synthesised
   index: -1,
+  from: -1,          // F189: group being played (first and last sentence), for the full-screen view
+  to: -1,
   total: 0,
   speed: 1,
+});
+
+// F189: Web Audio, Windows'a etkinlik sayilmaz; okuma surdukce ekran kararmasin, bilgisayar uyumasin.
+$effect.root(() => {
+  $effect(() => {
+    call('tts_keep_awake', player.playing).catch(() => {});
+  });
 });
 
 let sentences = [];
@@ -40,7 +49,8 @@ export function setSentences(list, where = {}) {
   breaks = where.breaks ?? new Set();
   scope = { book: where.book ?? null, language: where.language || 'tr' };
   player.total = list.length;
-  plan = { start: [], end: [], ready: [] };
+  player.from = player.to = -1;
+  plan ={ start: [], end: [], ready: [] };
   cache.clear();
 }
 
@@ -151,6 +161,8 @@ async function playIndex(index) {
   hooks.onsentence(index);
   const end = groupEnd(index);
   currentEnd = end;
+  player.from = index;
+  player.to = end;
   let buffer;
   try {
     buffer = await fetchSentence(index);
@@ -199,7 +211,7 @@ export function stop() {
   stopSource();
   context?.suspend();
   player.active = player.playing = player.waiting = false;
-  player.index = -1;
+  player.index = player.from = player.to = -1;
   cache.clear();
 }
 

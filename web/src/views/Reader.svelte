@@ -10,6 +10,7 @@
   import { resolvePauses, pauseAfter } from '../lib/pauses.js';
   import VoicePicker from '../components/VoicePicker.svelte';
   import BookChat from '../components/BookChat.svelte';
+  import FocusReader from '../components/FocusReader.svelte';
   import { findRanges, highlight as markMatches, clearHighlight } from '../lib/booksearch.js';
 
   let { onclose } = $props();
@@ -65,6 +66,7 @@
     if (target) target.scrollIntoView({ block: 'start' });
     else pageWrap.scrollTop = offset * Math.max(0, pageWrap.scrollHeight - pageWrap.clientHeight);
     ({ sentences, breaks } = segment(article, splitOptions()));
+    focusStart = 0;
     showMatches();
     setSentences(sentences, { book: book.id, language: book.language || 'tr', breaks });
     refreshCached();
@@ -176,7 +178,20 @@
     if (!sentences.length) { toast('Bu bölümde okunacak metin yok.'); return; }
     if (!(await ensureEngine())) return;
     setSpeed(app.ttsPrefs.speed);
-    play(firstVisibleSentence());
+    play(focus ? focusStart : firstVisibleSentence());
+  }
+
+  // F189: tam ekran okuma; okuma yokken ekranin ustundeki cumleden baslar.
+  let focus = $state(false);
+  let focusStart = $state(0);
+  function openFocus() {
+    showAa = false;
+    focusStart = player.active ? Math.max(0, player.index) : html ? firstVisibleSentence() : 0;
+    focus = true;
+  }
+  function closeFocus() {
+    focus = false;
+    if (player.index >= 0) tick().then(() => highlight(player.index));   // sayfa okunan yere kaysin
   }
 
   // F137: okuyan ses degisti. Okuyorsa motor yeni sesle hazirlanir ve ayni cumleden surer.
@@ -453,8 +468,8 @@
   function keydown(event) {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); openSearch(); return; }
     if (event.target.closest('input, textarea, select')) return;
-    if (event.key === 'Escape') { showAa = false; }
-    if (event.code === 'Space' && player.active && !event.target.closest('button')) { event.preventDefault(); togglePlay(); }
+    if (event.key === 'Escape') { showAa = false; if (focus) closeFocus(); }
+    if (event.code === 'Space' && (player.active || focus) && (focus || !event.target.closest('button'))) { event.preventDefault(); togglePlay(); }
     if (event.altKey && event.key === 'ArrowRight') load(section + 1);
     if (event.altKey && event.key === 'ArrowLeft') load(section - 1);
   }
@@ -477,6 +492,7 @@
       <div class="ttl"><b>{book.title}</b><small>{sectionTitle}</small></div>
       <button class="icon-btn" class:on={bookmarkHere} title={bookmarkHere ? 'Yer imini kaldır' : 'Yer imi ekle'} onclick={toggleBookmark}>
         <Icon name={bookmarkHere ? 'bookmarkOn' : 'bookmark'} /></button>
+      <button class="icon-btn" title="Tam ekran okuma: yalnızca okunan parça" disabled={!sentences.length} onclick={openFocus}><Icon name="expand" /></button>
       <button class="icon-btn aa-btn" class:on={showAa} title="Görünüm" onclick={() => (showAa = !showAa)}><Icon name="type" /></button>
       <button class="icon-btn" class:on={chatOpen} title="Kitaba sor" onclick={() => (chatOpen = !chatOpen)}><Icon name="message" /></button>
     </div>
@@ -659,6 +675,10 @@
         <button class="icon-btn" title="Sonraki bölüm (Alt+→)" disabled={section >= sectionCount - 1} onclick={() => load(section + 1)}><Icon name="forward" /></button>
       </div>
     </div>
+    {#if focus}
+      <FocusReader {sentences} start={focusStart} title={book.title} subtitle={sectionTitle} {paper} font={fonts[app.reader.font]}
+        ontoggle={togglePlay} onclose={closeFocus} />
+    {/if}
   </section>
 {/if}
 

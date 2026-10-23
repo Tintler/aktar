@@ -18,6 +18,7 @@ import audio_trim
 import audiobook
 import drama3_tags
 import emotion_tags
+import keep_awake
 import text_speech
 import voice_presets
 from app_core import APP_DIR, ROOT
@@ -234,6 +235,12 @@ class TtsMixin:
         Yalnizca bellekteki durumu okur, motora istek atmaz."""
         engines = getattr(self, '_engines_cache', None)
         return {'engine': engines.runtime() if engines is not None else None}
+
+    def tts_keep_awake(self, on):
+        """F189: okuma surerken ekran kararmaz, bilgisayar uyumaz; duraklatinca birakilir."""
+        if getattr(self, '_keep_awake', None) is None:
+            self._keep_awake = keep_awake.KeepAwake()
+        return {'active': self._keep_awake.set(on)}
 
     def tts_unload(self):
         """F183: isinmis ses motorunu durdurur (bellek bosalir); motoru kullanan is surerken reddedilir."""
@@ -746,6 +753,8 @@ class TtsMixin:
         self.tts_prepare_cancel()
         self.tts_audiobook_cancel()
         self.tts_speech_cancel()
+        if getattr(self, '_keep_awake', None) is not None:
+            self._keep_awake.set(False)
         cancel = getattr(self, '_emotion_cancel', None)
         if cancel is not None:
             cancel.set()   # F168: model sunucusuyla etiketleme
