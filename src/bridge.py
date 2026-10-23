@@ -121,7 +121,17 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
     def ui_prefs(self):
         path = APP_DIR / UI_FILE
         try:
-            value = json.loads(read(path)) if path.exists() else {}
+            stat = path.stat()
+        except OSError:
+            return {}
+        # F188: dosya degismediyse metin yeniden okunmaz (okuyucunun bolum plani tercihleri binlerce kez sorar);
+        # her cagiran yine kendi kopyasini alir
+        key = (str(path), stat.st_mtime_ns, stat.st_size)
+        cached = getattr(self, '_ui_text', None)
+        try:
+            text = cached[1] if cached and cached[0] == key else read(path)
+            self._ui_text = (key, text)
+            value = json.loads(text)
         except (OSError, ValueError):
             return {}
         return value if isinstance(value, dict) else {}

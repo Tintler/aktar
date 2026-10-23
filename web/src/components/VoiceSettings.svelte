@@ -301,7 +301,7 @@
     {#if engine.cloud}
       <div class="fr sub">
         <div class="l">Çalışma yeri<small>Kayıtlı sesleriniz iki yerde de aynen çalışır. OpenRouter'da bulutta orijinal Fish Audio
-          Drama 3 çalışır (yerel klasördeki 32 uzmanlı Türkçe konuşmacı değil); ücret okunan karakter başınadır (~2 $ / 1 milyon karakter).
+          Drama 3 çalışır (yerel klasördeki 32 uzmanlı Türkçe konuşmacı değil); ücret karakter başınadır ve klon kaydının metni de her istekte gider (denemede kitabın iki sayfası ~0,02 $).
           Okunan metin ve klon kaydı her istekte OpenRouter'a ve Fish Audio'ya gider.</small></div>
         <select class="field w" value={cloudOn(engine) ? engine.cloud : 'local'} aria-label="Çalışma yeri"
           onchange={(e) => setBackend(e.currentTarget.value)}>

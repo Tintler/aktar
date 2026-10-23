@@ -28,6 +28,7 @@ import zipfile
 
 ENGINES_DIR = 'ses-motorlari'
 PROTOCOL = 1
+SNAPSHOT_SECONDS = 2.0        # F188: how long the motor.json files read are reused (Engines._manifests)
 AUDIO_RATE = 48000     # requested from engines (those that cannot choose return their own rate)
 CACHE_DIR = 'ses-onbellegi'   # rendered sentences per book: ses-onbellegi/<book id>/<key>.wav
 SENTENCE_GAP = 0.35    # seconds of silence between sentences in an exported file
@@ -236,6 +237,7 @@ class Engines:
         self.current = {'engine': None, 'voice': None, 'device': None, 'language': None}
         self._exporting = False
         self._busy = {}               # engine id -> installation progress text
+        self._snapshot = None         # (time, manifests, engines list): see _manifests
 
     # ------------------------------------------------------------- discovery
     @property
@@ -243,7 +245,20 @@ class Engines:
         return self.app_dir / ENGINES_DIR
 
     def _manifests(self):
-        """Known engines: bundled descriptions (engines/*/motor.json) merged with installed packages."""
+        """Known engines: bundled descriptions (engines/*/motor.json) merged with installed packages.
+        F188: kept for SNAPSHOT_SECONDS (read-only for callers). A chapter's plan asks for every sentence group and
+        rereading the motor.json files each time took minutes for an 800-sentence chapter ("Hazirla" at 0)."""
+        snapshot = self._snapshot
+        if snapshot and time.monotonic() - snapshot[0] < SNAPSHOT_SECONDS:
+            return snapshot[1]
+        known = self._read_manifests()
+        self._snapshot = (time.monotonic(), known, None)
+        return known
+
+    def _forget_manifests(self):
+        self._snapshot = None
+
+    def _read_manifests(self):
         known = {}
         for path in sorted(self.source_dir.glob('*/motor.json')):
             try:
@@ -277,8 +292,18 @@ class Engines:
         return self.install_root / engine_id / 'data'
 
     def engines(self):
+        manifests = self._manifests()
+        snapshot = self._snapshot
+        if snapshot and snapshot[1] is manifests and snapshot[2] is not None:
+            return [dict(item, busy=self._busy.get(item['id'])) for item in snapshot[2]]
+        result = self._list_engines(manifests)
+        if snapshot and snapshot[1] is manifests:
+            self._snapshot = (snapshot[0], manifests, result)
+        return [dict(item) for item in result]
+
+    def _list_engines(self, manifests):
         result = []
-        for engine_id, manifest in self._manifests().items():
+        for engine_id, manifest in manifests.items():
             data = self._data_dir(engine_id)
             voices = [dict(voice, downloaded=all((data / name).exists() for name in voice.get('files', [])))
                       for voice in manifest.get('voices', [])]
@@ -713,6 +738,7 @@ class Engines:
             self._busy[engine_id] = message
         else:
             self._busy.pop(engine_id, None)
+            self._forget_manifests()      # installed or removed: read the packages again
         self._emit('tts_engines', {'engines': self.engines()})
 
     def install_zip(self, path):

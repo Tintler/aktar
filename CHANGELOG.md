@@ -7,6 +7,8 @@ Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: ye
 ### Yeni
 - **Drama 3 TR OpenRouter üzerinden de çalışır (F188):** Ayarlar → Ses → Drama 3 TR'de "Çalışma yeri" seçilebilir: yerel klasör (GPU) ya da OpenRouter (bulut, ücretli). Kayıtlı sesler (klon kaydı ve metni) iki yerde de aynen kullanılır; kayıt her istekle gider (MP3, 64 kbit/sn). Bulutta orijinal Fish Audio Drama 3 (`fish-audio/drama-3`) çalışır, yerel klasördeki 32 uzmanlı Türkçe konuşmacı değil. API anahtarı işletim sisteminin şifre deposunda durur; "Anahtarı dene" ses üretmeden anahtarı, harcamayı ve kalan sınırı gösterir. Hız sınırında (429) ve sağlayıcı hatasında istek bekleyip yeniden denenir. "Yönerge gücü" yalnızca yerel kipte vardır. Bulutta üretilen sesler yerel seslerden ayrı önbelleğe alınır; yerel önbellek geçerli kalır.
 - **OpenRouter istekleri Konsol'da görünür:** Her istek (karakter sayısı, süre), hız sınırı, hata ve yanıtsız kalan istek Konsol'a yazılır; 90 saniyede yanıt gelmezse istek yeniden denenir (eskiden hazırlama sessizce bekliyordu).
+- **Hazırla uzun bölümde dakikalarca 0'da kalıyordu:** Okuyucunun bölüm planı (F186) her cümle grubu için motor dosyalarını ve ui.json'u diskten yeniden okuyordu; 853 cümlelik bölümde tek plan 22,8 sn sürüyordu, okuyucu da aynı anda birkaç kez soruyordu. Artık motor listesi 2 saniye, ui.json değişene kadar bellekte tutulur: aynı plan 0,6 sn. Yerel kipte de geçerli.
+- Not: OpenRouter ücreti klon kaydının metnini de sayar gibi görünüyor; denemede kitabın iki sayfası ~0,02 $ tuttu.
 
 ## 2.20.0 — 2026-10-23
 
