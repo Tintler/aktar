@@ -32,6 +32,8 @@ import drama3
 
 ENGINE_ID = 'drama3-tr'
 PREF_DIR = 'drama3_tr_dir'
+PREF_BACKEND = 'drama3_tr_backend'   # F188: 'local' (klasordeki model) | 'openrouter' (bulut, openrouter_tts)
+BACKENDS = ('local', 'openrouter')
 SERVER_SCRIPT = 'server.py'          # engines/drama3-tr/server.py, veri klasorune kopyalanip calistirilir
 REQUIRED = ('engine.py', 'checkpoint.py', 'prepare_data.py', 'disk.py', 'fish-speech/fish_speech',
             'models/drama-3/codec.pth', 'speaker.safetensors')
@@ -278,6 +280,12 @@ def speech(url, text, reference, settings, timeout=REQUEST_TIMEOUT, retries=1):
     raise ServerError('Drama 3 TR sunucusu ses üretemedi.')   # pragma: no cover
 
 
+def backend(prefs):
+    """F188: secili calisma yeri ('local' varsayilan)."""
+    value = str((prefs or {}).get(PREF_BACKEND) or 'local')
+    return value if value in BACKENDS else 'local'
+
+
 # ---------------------------------------------------------------- motor (tts.InlineWorker)
 class Engine:
     """tts.InlineWorker'in cagirdigi motor: load() sunucuyu baslatir ve kaydi hazirlar, say() WAV dondurur."""
@@ -292,6 +300,7 @@ class Engine:
         self._lock = threading.Lock()
         self.server = None
         self.reference = None
+        self.cloud = False       # F188: son yukleme OpenRouter kipinde
         self._warm = None        # (sunucu, kayit anahtari): isitma istegi yapildi
 
     def _server_script(self):
@@ -334,6 +343,9 @@ class Engine:
         if not path.is_file():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
+        if backend(self._prefs()) == 'openrouter':
+            return self._load_cloud(key, data, prepared)
+        self.cloud = False
         server = self._ensure_server()
         self.reference = {'key': key, 'path': str(path), 'text': prepared['text']}
         if self._warm != (server, key):
@@ -341,6 +353,25 @@ class Engine:
             speech(server.url, WARMUP_TEXT, self.reference, self.settings())
             self._warm = (server, key)
         return {'device': 'sunucu', 'reference_text': prepared['text'], 'reference_seconds': prepared['seconds']}
+
+    def _load_cloud(self, key, data, prepared):
+        """F188: OpenRouter kipi: yerel sunucu durur (GPU bosalir), kayit istege konacak bicimde (MP3) saklanir.
+        Isitma istegi yapilmaz (ucretli ve gereksiz)."""
+        import openrouter_tts
+        if not openrouter_tts.api_key():
+            raise ValueError('OpenRouter API anahtarı kaydedilmedi (Ayarlar → Ses → Drama 3 TR).')
+        self.stop()
+        self._stage('Klon kaydı OpenRouter için hazırlanıyor…')
+        audio, audio_format = openrouter_tts.reference_audio(data)
+        self.reference = {'key': key, 'text': prepared['text'], 'audio': audio, 'format': audio_format}
+        self.cloud = True
+        return {'device': 'bulut', 'reference_text': prepared['text'], 'reference_seconds': prepared['seconds']}
+
+    def _speech(self, text, settings):
+        if self.cloud:
+            import openrouter_tts
+            return openrouter_tts.speech(text, self.reference, {'temperature': settings['temperature'], 'top_p': TOP_P})
+        return speech(self.server.url, text, self.reference, settings)
 
     def settings(self):
         given = (self._prefs().get('engine_settings') or {}).get(ENGINE_ID) or {}
@@ -363,7 +394,7 @@ class Engine:
         attempts = 1 + RETRIES
         for attempt in range(attempts):
             text = untagged if untagged and attempt == attempts - 1 else piece
-            samples, rate = drama3.read_pcm(speech(self.server.url, drama3.model_text(text), self.reference, settings))
+            samples, rate = drama3.read_pcm(self._speech(drama3.model_text(text), settings))
             if not drama3.fell_silent(text, samples, rate):
                 return [(samples, rate)]
             self._log(f'Drama 3 TR: model cümlenin bir kısmını atladı, yeniden deneniyor ({attempt + 1}): {piece[:60]}')
@@ -375,7 +406,7 @@ class Engine:
 
     def say(self, text, speed=1.0, tag=''):
         text = drama3.tagged(text, tag) if tag else text
-        if self.reference is None or not (self.server and self.server.alive):
+        if self.reference is None or not (self.cloud or (self.server and self.server.alive)):
             raise RuntimeError('Ses motoru hazır değil.')
         clips, rate = [], None
         settings = self.settings()

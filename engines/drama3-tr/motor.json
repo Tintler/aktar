@@ -1,7 +1,7 @@
 {
   "id": "drama3-tr",
   "name": "Drama 3 TR (16 GB GPU)",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "cache_tag": "f176-single-whisper",
   "protocol": 1,
   "builtin": "drama3_tr",
@@ -9,9 +9,11 @@
   "folder": true,
   "emotion_tags": "rich",
   "group_sentences": true,
+  "cloud": "openrouter",
+  "cache_prefs": {"drama3_tr_backend": "local"},
   "attribution": "Built with Fish Audio",
   "notice": "Rızası olmadan tanınabilir kişilerin sesini klonlamak yasaktır (Fish Audio Community License). Yalnızca hakkına sahip olduğunuz kayıtları kullanın.",
-  "description": "Fish Audio Drama 3'ün tam okuyucusu ile 32 uzmanlı Türkçe konuşmacı (kasparovabi/drama-3-tr): duygulu, kayıttan klonlanan ses, tek 16 GB GPU'da, WSL gerekmez. Model Aktar klasöründe değil, seçtiğiniz klasörde durur (~45 GB, hızlı bir SSD önerilir): drama-3-tr reposu, içinde fish-speech, models/drama-3 (orijinal fishaudio/drama-3), speaker.safetensors ve .venv Python ortamı. Aktar sunucuyu bu klasörün Python'uyla kendisi başlatır ve kapanınca durdurur; ilk yükleme birkaç dakika sürebilir. Klon kaydı her istekle gider: dublajda konuşmacılara farklı sesler atanabilir.",
+  "description": "Fish Audio Drama 3'ün tam okuyucusu ile 32 uzmanlı Türkçe konuşmacı (kasparovabi/drama-3-tr): duygulu, kayıttan klonlanan ses, tek 16 GB GPU'da, WSL gerekmez. Model Aktar klasöründe değil, seçtiğiniz klasörde durur (~45 GB, hızlı bir SSD önerilir): drama-3-tr reposu, içinde fish-speech, models/drama-3 (orijinal fishaudio/drama-3), speaker.safetensors ve .venv Python ortamı. Aktar sunucuyu bu klasörün Python'uyla kendisi başlatır ve kapanınca durdurur; ilk yükleme birkaç dakika sürebilir. Klon kaydı her istekle gider: dublajda konuşmacılara farklı sesler atanabilir. GPU yoksa aynı ses kayıtlarıyla OpenRouter üzerinden de çalışır (bulutta orijinal Fish Audio Drama 3, ücretli API anahtarı gerekir).",
   "license": "Fish Audio Community License",
   "homepage": "https://huggingface.co/kasparovabi/drama-3-tr-speaker",
   "speed": true,
@@ -19,7 +21,7 @@
   "settings": [
     {"key": "max_chars", "label": "Parça uzunluğu", "unit": "karakter", "min": 60, "max": 400, "step": 10, "default": 200,
      "hint": "Okuyucu ardışık cümleleri (paragraf sınırını aşmadan) bu uzunluğa kadar tek istekte okutur; her istek ~4 sn sabit süre eklediği için uzun parça daha hızlıdır, ama okuma başlarken ilk ses daha geç gelir. Bu uzunluğu aşan tek cümle bölünür."},
-    {"key": "cfg", "label": "Yönerge gücü", "min": 0, "max": 6, "step": 0.5, "default": 4,
+    {"key": "cfg", "label": "Yönerge gücü", "local_only": true, "min": 0, "max": 6, "step": 0.5, "default": 4,
      "hint": "Köşeli parantezli yönergelerin ([fısıldar], [heyecanla] …) etkisi. 0 kapalı; 3-4 fısıltıyı belirgin biçimde artırır."},
     {"key": "temperature", "label": "Temperature", "min": 0.5, "max": 1.3, "step": 0.05, "default": 1.0,
      "hint": "Model kartının önerisi 1,0. Düşük: daha tekdüze ton; yüksek: daha canlı ama değişken."}

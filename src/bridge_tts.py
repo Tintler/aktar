@@ -205,6 +205,20 @@ class TtsMixin:
         return drama3_tr.check_folder(folder if folder is not None else
                                       self.ui_prefs().get('tts', {}).get(drama3_tr.PREF_DIR))
 
+    def tts_cloud_check(self):
+        """F188: OpenRouter anahtarinin durumu (Ayarlar'daki "Anahtarı dene"; ucretsiz istek, ses uretmez)."""
+        import openrouter_tts
+        return dict(openrouter_tts.key_info(), key_set=bool(openrouter_tts.api_key()))
+
+    def tts_cloud_set_key(self, value):
+        """F188: OpenRouter API anahtarini isletim sistemi deposuna yazar; bos deger siler."""
+        import openrouter_tts
+        try:
+            openrouter_tts.set_api_key(value)
+        except Exception as error:  # depo yok (Linux'ta secret-tool) ya da yazilamadi
+            return {'error': 'API anahtarı kaydedilemedi: ' + str(error)}
+        return self.tts_cloud_check() if value else {'ok': False, 'key_set': False, 'message': 'API anahtarı silindi.'}
+
     def tts_status(self):
         return self._engines().status()
 

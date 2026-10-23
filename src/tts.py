@@ -292,6 +292,7 @@ class Engines:
                 'busy': self._busy.get(engine_id),
                 'attribution': manifest.get('attribution', ''), 'notice': manifest.get('notice', ''),
                 'server': bool(manifest.get('server')), 'folder': bool(manifest.get('folder')),
+                'cloud': manifest.get('cloud', ''),     # F188: motor.json cloud backend ('openrouter')
                 'settings': manifest.get('settings', []),
                 'emotion_tags': bool(manifest.get('emotion_tags')),
                 'emotion_rich': manifest.get('emotion_tags') == 'rich',
@@ -352,7 +353,8 @@ class Engines:
                 return self.status()
             same = (self._worker and self._worker.alive and self.state == 'ready'
                     and (self.current['engine'], self.current['voice']) == (engine_id, voice_id)
-                    and self._requested_device == target['device'] and self._options == options)
+                    and self._requested_device == target['device'] and self._options == options
+                    and self._pref_state == self._pref_tags(engine_id))
             if same:
                 self.current['language'] = key
                 return self.status()
@@ -360,12 +362,21 @@ class Engines:
             self._requested_device = target['device']
             self._set('loading', 'Ses motoru başlatılıyor…')
             self._options = options
+            self._pref_state = self._pref_tags(engine_id)
             self._loading = threading.Thread(target=self._load, args=(target, options), name='tts-load', daemon=True)
             self._loading.start()
         return self.status()
 
     _requested_device = None
     _options = None
+    _pref_state = None
+
+    def _pref_tags(self, engine_id):
+        """F188: motor.json "cache_prefs" {pref: default}: prefs that differ from their default (Drama 3 TR's
+        backend). They join the sentence cache key (old keys stay valid at the default) and reload the engine."""
+        defaults = self._manifests().get(engine_id, {}).get('cache_prefs') or {}
+        prefs = self._prefs()
+        return {key: prefs[key] for key, default in defaults.items() if prefs.get(key, default) != default}
 
     def _load(self, target, options=None):
         try:
@@ -444,6 +455,9 @@ class Engines:
         settings = (self._prefs().get('engine_settings') or {}).get(engine_id)   # motor.json "settings" (Drama 3)
         if settings:
             parts.append(settings)
+        pref_tags = self._pref_tags(engine_id)
+        if pref_tags:
+            parts.append({'prefs': pref_tags})
         if emotion:   # motor.json "emotion_cache_tags": bump to re-render only sentences with that tag (F169)
             renew = (self._manifests().get(engine_id, {}).get('emotion_cache_tags') or {}).get(emotion)
             parts.append({'emotion': emotion, 'tag': renew} if renew else {'emotion': emotion})
@@ -666,7 +680,8 @@ class Engines:
         voice = next((v for v in manifest.get('voices', []) if v.get('id') == voice_id), {})
         process = getattr(worker, 'process', None)
         server = getattr(getattr(getattr(worker, 'impl', None), 'server', None), 'process', None)
-        kind = 'process' if process else 'server' if server or manifest.get('folder') else 'remote'
+        cloud = getattr(getattr(worker, 'impl', None), 'cloud', False)    # F188: Drama 3 TR on OpenRouter
+        kind = 'process' if process else 'server' if server or (manifest.get('folder') and not cloud) else 'remote'
         pid = (process or server).pid if (process or server) else None
         return {'engine': engine_id, 'name': manifest.get('name', engine_id), 'voice': voice.get('name') or voice_id,
                 'device': self.current.get('device'), 'state': state, 'message': self.message if state != 'ready' else '',

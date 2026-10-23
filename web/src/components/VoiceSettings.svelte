@@ -188,6 +188,35 @@
     if (typeof folder === 'string' && folder) await setModelFolder(folder);
   }
 
+  // F188: Drama 3 TR'yi yerel klasor yerine OpenRouter'dan calistirma; anahtar isletim sistemi deposunda
+  const cloudOn = (engine) => engine.cloud && app.ttsPrefs.drama3_tr_backend === engine.cloud;
+  let cloudKey = $state('');
+  let cloudCheck = $state(null);     // {ok, key_set, message} | {error}
+  let cloudBusy = $state(false);
+
+  function setBackend(value) {
+    app.ttsPrefs.drama3_tr_backend = value;
+    saveTtsPrefs();
+    if (value !== 'local' && cloudCheck === null) testCloud();
+  }
+
+  async function saveCloudKey(value) {
+    cloudBusy = true;
+    const result = await act('tts_cloud_set_key', value);
+    cloudBusy = false;
+    if (result) { cloudCheck = result; cloudKey = ''; toast(value ? 'API anahtarı kaydedildi.' : 'API anahtarı silindi.', 'ok'); }
+  }
+
+  async function testCloud() {
+    cloudBusy = true;
+    cloudCheck = (await call('tts_cloud_check')) ?? false;
+    cloudBusy = false;
+  }
+
+  $effect(() => {
+    if (cloudCheck === null && !cloudBusy && app.engines.some(cloudOn)) testCloud();
+  });
+
   // F161: motorun kendi ayarlari (motor.json "settings"; Drama 3: parca uzunlugu, temperature, top_p)
   const engineValue = (engine, s) => app.ttsPrefs.engine_settings?.[engine.id]?.[s.key] ?? s.default;
 
@@ -208,6 +237,7 @@
   const settingText = (s, value) => `${Number(value).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}${s.unit ? ' ' + s.unit : ''}`;
 
   const modeBadge = (engine) => engine.busy ? [engine.busy, 'active']
+    : engine.mode === 'builtin' && cloudOn(engine) ? ['OpenRouter üzerinden', 'done']
     : engine.mode === 'builtin' && engine.folder ? ['Klasörden çalışır', 'done']
     : engine.mode === 'builtin' ? ['Sunucuya bağlanır', 'done']
     : engine.mode === 'package' ? [`Kurulu · ${engine.installed_version ?? engine.version}`, 'done']
@@ -216,7 +246,7 @@
   const stateText = $derived({
     idle: 'Henüz yüklenmedi; okumaya başladığınızda yüklenir.',
     loading: app.tts.message,
-    ready: `Hazır · ${app.engines.find((e) => e.id === app.tts.engine)?.name ?? app.tts.engine} · ${app.tts.device === 'sunucu' ? 'Sunucu' : String(app.tts.device ?? '').startsWith('cuda') ? 'GPU' : 'CPU'}`,
+    ready: `Hazır · ${app.engines.find((e) => e.id === app.tts.engine)?.name ?? app.tts.engine} · ${app.tts.device === 'sunucu' ? 'Sunucu' : app.tts.device === 'bulut' ? 'Bulut (OpenRouter)' : String(app.tts.device ?? '').startsWith('cuda') ? 'GPU' : 'CPU'}`,
     error: app.tts.message,
     missing: app.tts.message,
   }[app.tts.state] ?? '');
@@ -268,7 +298,33 @@
     {#if open}
     <!-- F179: motor kapali: alt satirlar gizli; acikken motorun icinde girintili kutuda -->
     <div class="engine-body">
-    {#if engine.folder}
+    {#if engine.cloud}
+      <div class="fr sub">
+        <div class="l">Çalışma yeri<small>Kayıtlı sesleriniz iki yerde de aynen çalışır. OpenRouter'da bulutta orijinal Fish Audio
+          Drama 3 çalışır (yerel klasördeki 32 uzmanlı Türkçe konuşmacı değil); ücret okunan karakter başınadır (~2 $ / 1 milyon karakter).
+          Okunan metin ve klon kaydı her istekte OpenRouter'a ve Fish Audio'ya gider.</small></div>
+        <select class="field w" value={cloudOn(engine) ? engine.cloud : 'local'} aria-label="Çalışma yeri"
+          onchange={(e) => setBackend(e.currentTarget.value)}>
+          <option value="local">Yerel klasör (GPU)</option>
+          <option value={engine.cloud}>OpenRouter (bulut, ücretli)</option>
+        </select>
+      </div>
+    {/if}
+    {#if cloudOn(engine)}
+      <div class="fr sub">
+        <div class="l">OpenRouter API anahtarı{#if cloudCheck?.key_set}<small class="okc">Kayıtlı</small>{/if}<small>openrouter.ai → Keys.
+          Anahtara düşük bir harcama sınırı koymanız önerilir. Anahtar ui.json'a yazılmaz, işletim sisteminin şifre deposunda durur.</small></div>
+        <input class="field" type="password" bind:value={cloudKey} placeholder={cloudCheck?.key_set ? '••••••••••••' : 'sk-or-…'} autocomplete="off" />
+        <button class="btn sm" disabled={!cloudKey.trim() || cloudBusy} onclick={() => saveCloudKey(cloudKey.trim())}>Kaydet</button>
+        <button class="btn sm" disabled={cloudBusy} onclick={testCloud}><Icon name="refresh" size={14} />{cloudBusy ? 'Deneniyor…' : 'Anahtarı dene'}</button>
+        {#if cloudCheck?.key_set}<button class="btn sm ghost" disabled={cloudBusy} onclick={() => saveCloudKey('')} title="Anahtarı sil">Sil</button>{/if}
+      </div>
+      {#if cloudCheck}
+        <div class={cloudCheck.ok ? 'info' : 'warn'}>
+          <Icon name={cloudCheck.ok ? 'check' : 'alert'} size={16} /><span class="selectable">{cloudCheck.error ?? cloudCheck.message}</span>
+        </div>
+      {/if}
+    {:else if engine.folder}
       <div class="fr sub">
         <div class="l">Model klasörü<small>Model Aktar klasörüne kopyalanmaz; seçtiğiniz klasörden (hızlı bir SSD önerilir) çalışır.
           Aktar sunucuyu bu klasördeki .venv Python'uyla kendisi başlatır ve kapanınca durdurur.</small></div>
@@ -295,7 +351,7 @@
         </div>
       {/if}
     {/if}
-    {#each open ? engine.settings ?? [] : [] as s (engine.id + s.key)}
+    {#each open ? (engine.settings ?? []).filter((s) => !(s.local_only && cloudOn(engine))) : [] as s (engine.id + s.key)}
       <div class="fr sub">
         <div class="l">{s.label}{#if s.hint}<small>{s.hint}</small>{/if}</div>
         <input class="range" type="range" min={s.min} max={s.max} step={s.step} value={engineValue(engine, s)} aria-label={s.label}
@@ -514,6 +570,7 @@
   .l small { display: block; color: var(--dim); font-size: 12px; font-weight: 400; margin-top: 2px; }
   .l small.dim { color: var(--dim); }
   .info code { font-family: var(--mono); }
+  small.okc { color: var(--ok); }
   .dim-text { font-size: 12px; color: var(--secondary); white-space: nowrap; }
   .sub { padding-left: 16px; border-bottom-style: dashed; }
   .path { max-width: 260px; font-size: 12px; color: var(--secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; }
