@@ -31,6 +31,14 @@ PCM_RATE = 44100               # response_format 'pcm': 16 bit, isaretli, little
 REQUEST_TIMEOUT = 90         # 200 karakterlik parca ~3-5 sn; takilan istek yeniden denenir
 CHECK_TIMEOUT = 15
 RETRY_WAITS = (2, 5, 12)       # 429 (hiz siniri) ve 5xx icin bekleyip yeniden deneme (sn)
+READ_CHUNK = 64 * 1024
+MAX_AUDIO_BASE = 10.0          # max_seconds: 10 sn + metin / 5 karakter/sn (olagan okuma 12-17 karakter/sn)
+MIN_CHARS_PER_SECOND = 5.0
+SLOW_NOTE = 30                 # bundan uzun suren istek Konsol'a yazilir
+# Fish arada bir sesi gercek zamandan cok yavas akitir (olcumde 68 karakter 62 sn; normali 1-2 sn): STALL_AFTER sn'den
+# sonra gelen ses gecen surenin STALL_RATE katindan azsa istek kesilip yeniden gonderilir
+STALL_AFTER = 15
+STALL_RATE = 0.5
 REFERENCE_BITRATE = '64k'      # klon kaydi her istekte gider: MP3 (20 sn ~160 KB) WAV'dan ~10 kat kucuk
 TITLE = 'Aktar'
 
@@ -150,6 +158,34 @@ def request_body(text, audio, audio_format, reference_text, settings=None):
     return body
 
 
+def max_seconds(text):
+    """Bir parcanin en fazla ses suresi: Drama 3 bazen metni bitirince susmaz, sessizlik uretmeyi surdurur."""
+    return MAX_AUDIO_BASE + len(text) / MIN_CHARS_PER_SECOND
+
+
+def _read(response, text, started, timeout, log, clock=time.monotonic):
+    """Yaniti parca parca okur: toplam `timeout` ya da max_seconds(text)'ten uzun ses gelirse keser (CloudError).
+    Ses akarak geldigi icin soketin zaman asimi bu durumda hic dolmuyordu (F188: Hazirla dakikalarca bekledi)."""
+    limit = int(max_seconds(text) * PCM_RATE * 2)
+    parts, total, noted = [], 0, started
+    while True:
+        chunk = response.read(READ_CHUNK)
+        if not chunk:
+            return b''.join(parts)
+        parts.append(chunk)
+        total += len(chunk)
+        now = clock()
+        if total > limit:
+            raise CloudError(f'model {max_seconds(text):.0f} sn\'den uzun ses üretti (metin {len(text)} karakter)')
+        if now - started > timeout:
+            raise CloudError(f'yanıt {timeout} sn\'de bitmedi ({total / (PCM_RATE * 2):.0f} sn ses geldi)')
+        if now - started > STALL_AFTER and total / (PCM_RATE * 2) < (now - started) * STALL_RATE:
+            raise CloudError(f'ses çok yavaş geliyor ({now - started:.0f} sn\'de {total / (PCM_RATE * 2):.1f} sn ses)')
+        if now - noted > SLOW_NOTE:
+            noted = now
+            log(f'OpenRouter: {now - started:.0f} sn\'dir sürüyor, {total / (PCM_RATE * 2):.0f} sn ses geldi')
+
+
 def speech(text, reference, settings=None, key=None, timeout=REQUEST_TIMEOUT, waits=RETRY_WAITS, sleep=time.sleep,
            log=None):
     """Bir parcayi WAV bayt olarak uretir. reference: {'audio', 'format', 'text'}. 429, 5xx ve zaman asiminda
@@ -166,7 +202,7 @@ def speech(text, reference, settings=None, key=None, timeout=REQUEST_TIMEOUT, wa
         try:
             with _open(request, timeout) as response:
                 kind = response.headers.get('Content-Type', '')
-                raw = response.read()
+                raw = _read(response, text, started, timeout, log)
             log(f'OpenRouter: {len(text)} karakter, {time.monotonic() - started:.1f} sn'
                 + (f' ({attempt + 1}. deneme)' if attempt else ''))
             break
@@ -179,12 +215,12 @@ def speech(text, reference, settings=None, key=None, timeout=REQUEST_TIMEOUT, wa
             message = _message(error)
             log('OpenRouter hatası: ' + message)
             raise CloudError(message) from error
-        except (CloudError, TimeoutError) as error:     # baglanti koptu ya da yanit `timeout` icinde gelmedi
+        except (CloudError, TimeoutError) as error:     # baglanti koptu, yanit gelmedi ya da _read kesti
             if attempt < len(waits):
-                log(f'OpenRouter yanıt vermedi ({time.monotonic() - started:.0f} sn): {error} — yeniden denenecek')
+                log(f'OpenRouter isteği yarım kaldı ({time.monotonic() - started:.0f} sn): {error} — yeniden denenecek')
                 sleep(waits[attempt])
                 continue
-            raise CloudError(f'OpenRouter {len(waits) + 1} denemede yanıt vermedi: {error}') from error
+            raise CloudError(f'OpenRouter {len(waits) + 1} denemede ses üretemedi: {error}') from error
     if 'json' in kind:
         try:
             detail = (json.loads(raw.decode('utf-8')).get('error') or {}).get('message')

@@ -8,8 +8,10 @@ calismaz). Secimler ui.json 'tts' altindadir.
 from __future__ import annotations
 
 import re
+import sys
 import threading
 import time
+import traceback
 from pathlib import Path
 
 import audio_trim
@@ -24,6 +26,8 @@ from tts import Engines
 
 PREVIEW_TEXT = 'Merhaba, dublajda sesim böyle duyulacak.'   # F149 ses onizlemesi
 PREVIEW_RECORDING = 12.0   # kayitli sesin klon kaydindan calinan en uzun sure (sn)
+PREPARE_STUCK = 120        # F188: Hazirla bu kadar sn ilerlemezse nerede bekledigi Konsol'a yazilir
+PREPARE_POLL = 5
 
 
 def _error(error):
@@ -445,18 +449,32 @@ class TtsMixin:
         cancel = threading.Event()
         self._prepare_cancel = cancel
         engines = self._engines()
+        moved = [time.monotonic()]
+
+        def progress(done, total):
+            moved[0] = time.monotonic()
+            self._emit('tts_prepare', {'book': book, 'done': done, 'total': total})
+
+        def watch(job):
+            """F188: is PREPARE_STUCK sn ilerlemezse nerede bekledigi Konsol'a yazilir (is bitince durur)."""
+            noted = None         # ayni duraklama bir kez yazilir
+            while job.is_alive() and not cancel.wait(PREPARE_POLL):
+                if time.monotonic() - moved[0] > PREPARE_STUCK and moved[0] != noted:
+                    noted = moved[0]
+                    frame = sys._current_frames().get(job.ident)
+                    where = ''.join(traceback.format_stack(frame)[-8:]) if frame else '(yığın yok)'
+                    self._log(f'UYARI: Hazırla {PREPARE_STUCK} sn\'dir ilerlemiyor; şu an burada bekliyor:\n{where}')
 
         def work():
             try:
-                done = engines.prepare(book, sentences, speed, language or 'tr',
-                                       lambda d, t: self._emit('tts_prepare', {'book': book, 'done': d, 'total': t}),
-                                       cancel, breaks)
+                done = engines.prepare(book, sentences, speed, language or 'tr', progress, cancel, breaks)
                 self._emit('tts_prepare', {'book': book, 'finished': True, 'cancelled': cancel.is_set(), 'done': done})
             except Exception as error:
                 self._emit('tts_prepare', {'book': book, 'finished': True, 'error': str(error)})
 
         self._prepare_job = threading.Thread(target=work, name='aktar-tts-prepare', daemon=True)
         self._prepare_job.start()
+        threading.Thread(target=watch, args=(self._prepare_job,), name='aktar-tts-prepare-watch', daemon=True).start()
         return {'started': True, 'total': len([s for s in sentences if str(s).strip()])}
 
     def tts_prepare_cancel(self):

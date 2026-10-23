@@ -31,10 +31,10 @@ def pcm(seconds, rate=openrouter_tts.PCM_RATE):
 
 class Response:
     def __init__(self, body, kind='audio/pcm'):
-        self.body, self.headers = body, {'Content-Type': kind}
+        self.stream, self.headers = io.BytesIO(body), {'Content-Type': kind}
 
-    def read(self):
-        return self.body
+    def read(self, amount=-1):
+        return self.stream.read(amount)
 
     def __enter__(self):
         return self
@@ -100,12 +100,50 @@ class SpeechTests(unittest.TestCase):
         with patch('urllib.request.urlopen', fake):
             openrouter_tts.speech('Bir.', REFERENCE, key=KEY, sleep=lambda _s: None, log=lines.append)
         self.assertEqual(calls, [openrouter_tts.REQUEST_TIMEOUT] * 2)
-        self.assertIn('yanıt vermedi', lines[0])
+        self.assertIn('yarım kaldı', lines[0])
         self.assertIn('4 karakter', lines[1])
         with patch('urllib.request.urlopen', side_effect=TimeoutError('zaman asimi')):
             with self.assertRaises(openrouter_tts.CloudError) as caught:
                 openrouter_tts.speech('Bir.', REFERENCE, key=KEY, sleep=lambda _s: None)
-        self.assertIn('denemede yanıt vermedi', str(caught.exception))
+        self.assertIn('denemede ses üretemedi', str(caught.exception))
+
+    def test_endless_audio_is_cut_and_retried(self):
+        # Drama 3 metni bitirince susmayabilir: ses akarak geldigi icin soket zaman asimi dolmaz
+        calls, lines = [], []
+        long = pcm(openrouter_tts.max_seconds('Bir.') + 5)
+
+        def fake(request, timeout):
+            calls.append(1)
+            return Response(long if len(calls) == 1 else pcm(0.5))
+
+        with patch('urllib.request.urlopen', fake):
+            data = openrouter_tts.speech('Bir.', REFERENCE, key=KEY, sleep=lambda _s: None, log=lines.append)
+        self.assertEqual(len(calls), 2)
+        self.assertIn('uzun ses üretti', lines[0])
+        self.assertLess(drama3.read_pcm(data)[0].__len__(), openrouter_tts.PCM_RATE)
+
+    def test_slow_stream_is_cut(self):
+        # 20. saniyede 1 sn ses: Fish'in yavas akisi, yeniden istemek beklemekten hizli
+        second = openrouter_tts.PCM_RATE * 2
+        chunks = iter([b'a' * second, b'b' * 10])
+        response = Response(b'')
+        response.read = lambda amount=-1: next(chunks, b'')
+        ticks = iter([2, 20])
+        with self.assertRaises(openrouter_tts.CloudError) as caught:
+            openrouter_tts._read(response, 'Bir cümle.', 0, 90, lambda _m: None, clock=lambda: next(ticks))
+        self.assertIn('yavaş geliyor', str(caught.exception))
+
+    def test_slow_note_and_total_limit(self):
+        ticks = iter([0, 5, 40, 95])
+        lines = []
+        response = Response(b'')
+        size = openrouter_tts.PCM_RATE * 2 * 30         # akis gercek zamandan hizli: yavaslik kesmesi devreye girmez
+        response.read = lambda amount=-1, chunks=iter([b'a' * size] * 4): next(chunks, b'')
+        with self.assertRaises(openrouter_tts.CloudError) as caught:
+            openrouter_tts._read(response, 'Bir ' * 200, 0, 90, lines.append, clock=lambda: next(ticks))
+        self.assertIn('90 sn', str(caught.exception))
+        self.assertEqual(len(lines), 1)
+        self.assertIn('sürüyor', lines[0])
 
     def test_errors_are_explained(self):
         for code, words in ((401, 'anahtarı geçersiz'), (402, 'bakiyesi'), (400, 'HTTP 400')):
@@ -215,6 +253,47 @@ class CloudEngineTests(unittest.TestCase):
         engine = next(e for e in self.engines.engines() if e['id'] == 'drama3-tr')
         self.assertEqual(engine['cloud'], 'openrouter')
         self.assertEqual([s['key'] for s in engine['settings'] if s.get('local_only')], ['cfg'])
+
+
+class PrepareWatchTests(unittest.TestCase):
+    """F188: Hazirla uzun sure ilerlemezse beklenen yer Konsol'a yazilir."""
+
+    def test_stuck_prepare_is_logged_once(self):
+        import threading
+        import bridge_tts
+        release = threading.Event()
+
+        class FakeEngines:
+            def prepare(self, book, sentences, speed, language, progress, cancel, breaks):
+                progress(1, 2)
+                release.wait(10)
+                return 1
+
+        class Host(bridge_tts.TtsMixin):
+            def __init__(self):
+                self.lines, self.events = [], []
+
+            def _engines(self):
+                return FakeEngines()
+
+            def _log(self, message):
+                self.lines.append(message)
+
+            def _emit(self, name, data):
+                self.events.append((name, data))
+
+        host = Host()
+        with patch.object(bridge_tts, 'PREPARE_STUCK', 0.2), patch.object(bridge_tts, 'PREPARE_POLL', 0.05):
+            host.tts_prepare('0123456789abcdef', ['Bir.', 'Iki.'])
+            end = time.time() + 5
+            while not host.lines and time.time() < end:
+                time.sleep(0.05)
+            time.sleep(0.4)
+            release.set()
+            host._prepare_job.join(5)
+        self.assertEqual(len(host.lines), 1)
+        self.assertIn('ilerlemiyor', host.lines[0])
+        self.assertIn('prepare', host.lines[0])
 
 
 @unittest.skipUnless(os.environ.get('AKTAR_OPENROUTER_API_KEY'), 'gercek OpenRouter denemesi: anahtar yok')
