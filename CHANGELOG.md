@@ -6,6 +6,7 @@ Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: ye
 
 ### Yeni
 - **Drama 3 TR OpenRouter üzerinden de çalışır (F188):** Ayarlar → Ses → Drama 3 TR'de "Çalışma yeri" seçilebilir: yerel klasör (GPU) ya da OpenRouter (bulut, ücretli). Kayıtlı sesler (klon kaydı ve metni) iki yerde de aynen kullanılır; kayıt her istekle gider (MP3, 64 kbit/sn). Bulutta orijinal Fish Audio Drama 3 (`fish-audio/drama-3`) çalışır, yerel klasördeki 32 uzmanlı Türkçe konuşmacı değil. API anahtarı işletim sisteminin şifre deposunda durur; "Anahtarı dene" ses üretmeden anahtarı, harcamayı ve kalan sınırı gösterir. Hız sınırında (429) ve sağlayıcı hatasında istek bekleyip yeniden denenir. "Yönerge gücü" yalnızca yerel kipte vardır. Bulutta üretilen sesler yerel seslerden ayrı önbelleğe alınır; yerel önbellek geçerli kalır.
+- **OpenRouter istekleri Konsol'da görünür:** Her istek (karakter sayısı, süre), hız sınırı, hata ve yanıtsız kalan istek Konsol'a yazılır; 90 saniyede yanıt gelmezse istek yeniden denenir (eskiden hazırlama sessizce bekliyordu).
 
 ## 2.20.0 — 2026-10-23
 

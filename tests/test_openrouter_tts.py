@@ -88,6 +88,25 @@ class SpeechTests(unittest.TestCase):
             openrouter_tts.speech('Bir.', REFERENCE, key=KEY, sleep=waits.append)
         self.assertEqual((len(calls), waits), (3, list(openrouter_tts.RETRY_WAITS[:2])))
 
+    def test_timeout_is_retried_and_logged(self):
+        calls, lines = [], []
+
+        def fake(request, timeout):
+            calls.append(timeout)
+            if len(calls) == 1:
+                raise TimeoutError('The read operation timed out')
+            return Response(pcm(0.5))
+
+        with patch('urllib.request.urlopen', fake):
+            openrouter_tts.speech('Bir.', REFERENCE, key=KEY, sleep=lambda _s: None, log=lines.append)
+        self.assertEqual(calls, [openrouter_tts.REQUEST_TIMEOUT] * 2)
+        self.assertIn('yanıt vermedi', lines[0])
+        self.assertIn('4 karakter', lines[1])
+        with patch('urllib.request.urlopen', side_effect=TimeoutError('zaman asimi')):
+            with self.assertRaises(openrouter_tts.CloudError) as caught:
+                openrouter_tts.speech('Bir.', REFERENCE, key=KEY, sleep=lambda _s: None)
+        self.assertIn('denemede yanıt vermedi', str(caught.exception))
+
     def test_errors_are_explained(self):
         for code, words in ((401, 'anahtarı geçersiz'), (402, 'bakiyesi'), (400, 'HTTP 400')):
             with patch('urllib.request.urlopen', side_effect=http_error(code, 'ayrinti')):

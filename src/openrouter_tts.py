@@ -28,7 +28,7 @@ PROVIDER = 'fish-audio'        # provider.options anahtari: yalnizca bu saglayic
 SECRET_KEY = 'openrouter-api-key'
 ENV_KEYS = ('AKTAR_OPENROUTER_API_KEY', 'OPENROUTER_API_KEY')
 PCM_RATE = 44100               # response_format 'pcm': 16 bit, isaretli, little-endian, mono
-REQUEST_TIMEOUT = 180
+REQUEST_TIMEOUT = 90         # 200 karakterlik parca ~3-5 sn; takilan istek yeniden denenir
 CHECK_TIMEOUT = 15
 RETRY_WAITS = (2, 5, 12)       # 429 (hiz siniri) ve 5xx icin bekleyip yeniden deneme (sn)
 REFERENCE_BITRATE = '64k'      # klon kaydi her istekte gider: MP3 (20 sn ~160 KB) WAV'dan ~10 kat kucuk
@@ -150,9 +150,11 @@ def request_body(text, audio, audio_format, reference_text, settings=None):
     return body
 
 
-def speech(text, reference, settings=None, key=None, timeout=REQUEST_TIMEOUT, waits=RETRY_WAITS, sleep=time.sleep):
-    """Bir parcayi WAV bayt olarak uretir. reference: {'audio', 'format', 'text'}. 429 ve 5xx'te `waits`
-    surelerince bekleyip yeniden dener; basarisiz uretim OpenRouter'da ucretlendirilmez."""
+def speech(text, reference, settings=None, key=None, timeout=REQUEST_TIMEOUT, waits=RETRY_WAITS, sleep=time.sleep,
+           log=None):
+    """Bir parcayi WAV bayt olarak uretir. reference: {'audio', 'format', 'text'}. 429, 5xx ve zaman asiminda
+    `waits` surelerince bekleyip yeniden dener; basarisiz uretim OpenRouter'da ucretlendirilmez. `log`: Konsol."""
+    log = log or (lambda _message: None)
     key = key if key is not None else api_key()
     if not key:
         raise CloudError('OpenRouter API anahtarı kaydedilmedi (Ayarlar → Ses → Drama 3 TR).')
@@ -160,17 +162,29 @@ def speech(text, reference, settings=None, key=None, timeout=REQUEST_TIMEOUT, wa
                       ensure_ascii=False).encode('utf-8')
     for attempt in range(len(waits) + 1):
         request = urllib.request.Request(API_URL + '/audio/speech', data=body, method='POST', headers=_headers(key))
+        started = time.monotonic()
         try:
             with _open(request, timeout) as response:
                 kind = response.headers.get('Content-Type', '')
                 raw = response.read()
+            log(f'OpenRouter: {len(text)} karakter, {time.monotonic() - started:.1f} sn'
+                + (f' ({attempt + 1}. deneme)' if attempt else ''))
             break
         except urllib.error.HTTPError as error:
             if (error.code == 429 or error.code >= 500) and attempt < len(waits):
+                log(f'OpenRouter HTTP {error.code}: {drama3._detail(error)} — {waits[attempt]} sn sonra yeniden denenecek')
                 error.close()
                 sleep(waits[attempt])
                 continue
-            raise CloudError(_message(error)) from error
+            message = _message(error)
+            log('OpenRouter hatası: ' + message)
+            raise CloudError(message) from error
+        except (CloudError, TimeoutError) as error:     # baglanti koptu ya da yanit `timeout` icinde gelmedi
+            if attempt < len(waits):
+                log(f'OpenRouter yanıt vermedi ({time.monotonic() - started:.0f} sn): {error} — yeniden denenecek')
+                sleep(waits[attempt])
+                continue
+            raise CloudError(f'OpenRouter {len(waits) + 1} denemede yanıt vermedi: {error}') from error
     if 'json' in kind:
         try:
             detail = (json.loads(raw.decode('utf-8')).get('error') or {}).get('message')

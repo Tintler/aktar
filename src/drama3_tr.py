@@ -365,12 +365,15 @@ class Engine:
         audio, audio_format = openrouter_tts.reference_audio(data)
         self.reference = {'key': key, 'text': prepared['text'], 'audio': audio, 'format': audio_format}
         self.cloud = True
+        self._log(f'Drama 3 TR OpenRouter kipinde: klon kaydı {prepared["seconds"]} sn, '
+                  f'{len(audio) // 1024} KB {audio_format.upper()} her istekle gidecek')
         return {'device': 'bulut', 'reference_text': prepared['text'], 'reference_seconds': prepared['seconds']}
 
     def _speech(self, text, settings):
         if self.cloud:
             import openrouter_tts
-            return openrouter_tts.speech(text, self.reference, {'temperature': settings['temperature'], 'top_p': TOP_P})
+            return openrouter_tts.speech(text, self.reference, {'temperature': settings['temperature'], 'top_p': TOP_P},
+                                         log=self._log)
         return speech(self.server.url, text, self.reference, settings)
 
     def settings(self):
