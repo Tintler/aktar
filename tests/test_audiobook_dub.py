@@ -67,7 +67,7 @@ class FakeEngines:
         return {'audio': base64.b64encode(data).decode('ascii'), 'duration': len(text) * 0.05 / speed}
 
     def export(self, sentences, speed, path, progress=None, book=None, language='tr', gaps=None,
-               override=None, cancel=None):
+               override=None, cancel=None, breaks=None):
         with wave.open(str(path), 'wb') as out:
             out.setnchannels(1)
             out.setsampwidth(2)
@@ -91,7 +91,7 @@ def probe(path):
 class AudiobookPureTests(unittest.TestCase):
     def test_chapter_list_drops_empty_and_names_untitled(self):
         chapters = audiobook.chapter_list([
-            {'title': '', 'sentences': ['Bir.', '  ', 'İki.'], 'gaps': [0.5, 0.1, 0.9]},
+            {'title': '', 'sentences': ['Bir.', '  ', 'İki.'], 'gaps': [0.5, 0.1, 0.9], 'breaks': [2]},
             {'title': 'Boş', 'sentences': ['   ']},
             {'title': '  Son   bölüm ', 'sentences': ['Üç.']},
         ])
@@ -99,6 +99,7 @@ class AudiobookPureTests(unittest.TestCase):
         self.assertEqual(chapters[0]['sentences'], ['Bir.', 'İki.'])
         self.assertEqual(chapters[0]['gaps'], [0.5, 0.9])
         self.assertEqual(chapters[1]['gaps'], [None])
+        self.assertEqual((chapters[0]['breaks'], chapters[1]['breaks']), ([1], None))   # F186: bos cumle cikinca kayar
 
     def test_ffmetadata_chapters_are_contiguous_and_escaped(self):
         text = audiobook.ffmetadata('Kitap=1; #2', 'Yazar', [('A', 1.5), ('B\\C', 2.25)])

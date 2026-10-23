@@ -407,18 +407,18 @@ class TtsMixin:
             cancel.set()
         return True
 
-    def tts_cached(self, book, sentences, speed=1.0, language='tr'):
-        """Bu cumlelerden kacinin sesi hazir (motor yuklenmeden okunabilir)."""
-        return self._engines().cached(book, sentences, speed, language or 'tr')
+    def tts_cached(self, book, sentences, speed=1.0, language='tr', breaks=None):
+        """Bu cumlelerden kacinin sesi hazir (motor yuklenmeden okunabilir). `breaks`: paragraf sonu cumleleri."""
+        return self._engines().cached(book, sentences, speed, language or 'tr', breaks=breaks)
 
-    def tts_cached_flags(self, book, sentences, speed=1.0, language='tr'):
-        """F185: cumle basina hazir mi (okuyucu hazir cumleyi gruplamadan, onbellekten tek basina okur)."""
+    def tts_plan(self, book, sentences, speed=1.0, language='tr', breaks=None):
+        """F186: okuyucunun cumleleri hangi gruplarla isteyecegi (Hazirla ile ayni): {'groups': [[bas, son, hazir]]}."""
         try:
-            return self._engines().cached_flags(book, sentences, speed, language or 'tr')
+            return {'groups': self._engines().plan(book, sentences, speed, language or 'tr', breaks)}
         except Exception as error:
             return _error(error)
 
-    def tts_prepare(self, book, sentences, speed=1.0, language='tr'):
+    def tts_prepare(self, book, sentences, speed=1.0, language='tr', breaks=None):
         """Cumleleri arka planda kitabin onbellegine uretir (ayni anda tek is)."""
         job = getattr(self, '_prepare_job', None)
         if job and job.is_alive():
@@ -431,7 +431,7 @@ class TtsMixin:
             try:
                 done = engines.prepare(book, sentences, speed, language or 'tr',
                                        lambda d, t: self._emit('tts_prepare', {'book': book, 'done': d, 'total': t}),
-                                       cancel)
+                                       cancel, breaks)
                 self._emit('tts_prepare', {'book': book, 'finished': True, 'cancelled': cancel.is_set(), 'done': done})
             except Exception as error:
                 self._emit('tts_prepare', {'book': book, 'finished': True, 'error': str(error)})
@@ -506,12 +506,13 @@ class TtsMixin:
         except (ValueError, OSError) as error:
             return _error(error)
 
-    def tts_export(self, title, sentences, speed=1.0, book=None, language='tr', gaps=None):
+    def tts_export(self, title, sentences, speed=1.0, book=None, language='tr', gaps=None, breaks=None):
         """Kayit yerini sorar, bolumu tek WAV olarak arka planda yazar (hazir cumleler onbellekten gelir,
-        gerisi icin motor gerekir). `gaps`: her cumleden sonraki sessizlik (okuyucudaki gibi)."""
+        gerisi icin motor gerekir). `gaps`: her cumleden sonraki sessizlik (okuyucudaki gibi); `breaks`:
+        paragraf sonlari (F186: okuyucunun gruplariyla okunur, hazirlanan ses kullanilir)."""
         engines = self._engines()
         texts = [text for text in sentences if str(text).strip()]
-        if engines.state != 'ready' and engines.cached(book, texts, speed, language or 'tr') < len(texts):
+        if engines.state != 'ready' and engines.cached(book, sentences, speed, language or 'tr', breaks=breaks) < len(texts):
             return {'error': 'Ses motoru hazır değil ve bölümün sesi önceden hazırlanmamış.'}
         if engines.status()['exporting']:
             return {'error': 'Bir kayıt zaten sürüyor.'}
@@ -526,7 +527,7 @@ class TtsMixin:
             try:
                 count = engines.export(sentences, speed, path,
                                        lambda done, total: self._emit('tts_export', {'done': done, 'total': total}),
-                                       book, language or 'tr', gaps)
+                                       book, language or 'tr', gaps, breaks=breaks)
                 self._emit('tts_export', {'finished': True, 'path': str(path), 'count': count})
             except Exception as error:
                 self._emit('tts_export', {'finished': True, 'error': str(error)})

@@ -137,7 +137,7 @@
 
   async function refreshCached() {
     const list = sentences;
-    const count = list.length ? await call('tts_cached', book.id, list, app.ttsPrefs.speed, book.language || 'tr') : 0;
+    const count = list.length ? await call('tts_cached', book.id, list, app.ttsPrefs.speed, book.language || 'tr', [...breaks]) : 0;
     if (list === sentences) cachedCount = typeof count === 'number' ? count : 0;
   }
 
@@ -203,7 +203,9 @@
   async function prepare(toEnd) {
     showPrepare = false;
     if (app.ttsPrepare) return;
+    // F186: paragraph ends (and chapter ends) go along so the sentences are grouped as the reader will ask for them.
     let list = sentences;
+    const ends = [...breaks];
     if (toEnd) {
       list = [...sentences];
       for (let number = section + 1; number < sectionCount; number++) {
@@ -212,12 +214,14 @@
         const holder = document.createElement('div');
         holder.innerHTML = result.html;
         const cut = segment(holder, splitOptions());
+        if (list.length) ends.push(list.length - 1);
+        ends.push(...[...cut.breaks].map((i) => i + list.length));
         list.push(...cut.sentences);
       }
     }
     if (!list.length) { toast('Hazırlanacak metin yok.'); return; }
     if (!(await ensureEngine({ needEngine: true }))) return;
-    const result = await act('tts_prepare', book.id, list, app.ttsPrefs.speed, book.language || 'tr');
+    const result = await act('tts_prepare', book.id, list, app.ttsPrefs.speed, book.language || 'tr', ends);
     if (result?.started) app.ttsPrepare = { book: book.id, done: 0, total: result.total };
   }
 
@@ -249,7 +253,8 @@
     const chapters = [];
     app.ttsAudiobook = { book: book.id, title: book.title, done: 0, total: 0, chapter: 0, chapters: 0, reading: true };
     for (const part of bookChapters()) {
-      const chapter = { title: part.title, sentences: [], gaps: [] };
+      // F186: breaks (paragraph and section ends) let the back end read the reader's groups, so prepared audio is used.
+      const chapter = { title: part.title, sentences: [], gaps: [], breaks: [] };
       for (let number = part.from; number < part.to; number++) {
         const result = await call('reader_section', book.id, number);
         if (!result || result.error) continue;
@@ -257,7 +262,9 @@
         holder.innerHTML = result.html;
         const cut = segment(holder, splitOptions());
         await tagEmotions(cut.sentences, cut.breaks);
+        if (chapter.sentences.length) chapter.breaks.push(chapter.sentences.length - 1);
         cut.sentences.forEach((text, i) => {
+          if (cut.breaks.has(i)) chapter.breaks.push(chapter.sentences.length);
           chapter.sentences.push(text);
           chapter.gaps.push(pauseAfter(text, cut.breaks.has(i), pauses, app.ttsPrefs.speed));
         });
@@ -281,7 +288,7 @@
     const pauses = resolvePauses(app.ttsPrefs.pauses);
     const gaps = sentences.map((text, i) => pauseAfter(text, breaks.has(i), pauses, app.ttsPrefs.speed));
     const result = await act('tts_export', `${book.title} - ${sectionTitle}`, sentences, app.ttsPrefs.speed, book.id,
-      book.language || 'tr', gaps);
+      book.language || 'tr', gaps, [...breaks]);
     if (result?.started) app.ttsExport = { done: 0, total: sentences.length };
   }
 

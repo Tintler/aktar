@@ -43,16 +43,23 @@ def safe_name(text, fallback='kitap', limit=100):
 
 
 def chapter_list(chapters):
-    """Gelen bolumleri temizler: [{'title', 'sentences', 'gaps'}]; metni olmayanlar atlanir."""
+    """Gelen bolumleri temizler: [{'title', 'sentences', 'gaps', 'breaks'}]; metni olmayanlar atlanir.
+    F186 'breaks': paragraf sonu cumleler (okuyucunun gruplari); verilmediyse None (cumle cumle)."""
     result = []
     for number, chapter in enumerate(chapters or [], 1):
         sentences = [' '.join(str(s).split()) for s in (chapter or {}).get('sentences') or []]
         gaps = list((chapter or {}).get('gaps') or [])
-        pairs = [(text, gaps[i] if i < len(gaps) else None) for i, text in enumerate(sentences) if text]
+        raw_breaks = (chapter or {}).get('breaks')
+        pairs = [(text, gaps[i] if i < len(gaps) else None, i) for i, text in enumerate(sentences) if text]
         if not pairs:
             continue
         title = ' '.join(str((chapter or {}).get('title') or '').split()) or f'Bölüm {number}'
-        result.append({'title': title[:200], 'sentences': [p[0] for p in pairs], 'gaps': [p[1] for p in pairs]})
+        breaks = None
+        if raw_breaks is not None:
+            ends = {int(b) for b in raw_breaks}
+            breaks = [n for n, pair in enumerate(pairs) if pair[2] in ends]
+        result.append({'title': title[:200], 'sentences': [p[0] for p in pairs], 'gaps': [p[1] for p in pairs],
+                       'breaks': breaks})
     return result
 
 
@@ -144,6 +151,9 @@ def chapter_key(engines, chapter, speed, language, override=None, book=None):
     tags = [engines.emotion_tag(book, text, language, override) for text in chapter['sentences']] if book else []
     if any(tags):    # F168: Drama 3 duygu etiketleri
         parts.append(tags)
+    if chapter.get('breaks') is not None and engines.group_chars(language, override):   # F186: cumle gruplari
+        parts.append({'groups': [g[:2] for g in engines.plan(None, chapter['sentences'], speed, language,
+                                                              chapter['breaks'], override)]})
     raw = json.dumps(parts, sort_keys=True, ensure_ascii=False)
     return hashlib.sha1(raw.encode('utf-8')).hexdigest()[:16]
 
@@ -194,7 +204,8 @@ def build(engines, chapters, target, fmt='m4b', title='', author='', cover=None,
                     progress(base + done, total, no, len(chapters))
 
             try:
-                engines.export(chapter['sentences'], speed, wav, step, book, language, chapter['gaps'], cancel=cancel)
+                engines.export(chapter['sentences'], speed, wav, step, book, language, chapter['gaps'], cancel=cancel,
+                               breaks=chapter.get('breaks'))
             except Cancelled as error:
                 raise Stopped(str(error)) from error
             check()

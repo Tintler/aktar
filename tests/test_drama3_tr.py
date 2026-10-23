@@ -267,6 +267,35 @@ class BuiltinEngineTests(unittest.TestCase):
         again = self.engines.say(['Bir.', 'İki.'], 1.0, book)
         self.assertTrue(again['cached'])
 
+    def test_prepare_renders_the_reader_groups(self):
+        # F186: Hazirla, okuyucu, sayac ve kayit ayni gruplari kullanir; hazirlanan ses yeniden uretilmez
+        book = '0123456789abcdef'
+        self.prefs['engine_settings'] = {'drama3-tr': {'max_chars': 40}}
+        sentences = ['Bir iki üç.', 'Dört beş.', 'Altı yedi sekiz dokuz on.', 'On bir.']
+        self.engines.load('tr')
+        self.assertEqual(self.wait()['state'], 'ready')
+        self.assertEqual(self.engines.plan(book, sentences, 1.0, 'tr', [1]),
+                         [[0, 1, False], [2, 3, False]])                    # paragraf sinirini asmaz
+        progress = []
+        self.assertEqual(self.engines.prepare(book, sentences, 1.0, 'tr', lambda d, t: progress.append((d, t)),
+                                              breaks=[1]), 4)
+        self.assertEqual(progress, [(2, 4), (4, 4)])
+        # iki grup, dort cumle degil (sahte ses kisa: fell_silent ayni grubu yeniden isteyebilir)
+        self.assertEqual(list(dict.fromkeys(r['text'] for r in self.requests()))[1:],
+                         ['Bir iki üç. Dört beş.', 'Altı yedi sekiz dokuz on. On bir.'])
+        self.assertEqual(self.engines.plan(book, sentences, 1.0, 'tr', [1]), [[0, 1, True], [2, 3, True]])
+        self.assertEqual(self.engines.cached(book, sentences, 1.0, 'tr', breaks=[1]), 4)
+        self.assertTrue(self.engines.say(sentences[2:4], 1.0, book)['cached'])  # okuyucunun istedigi grup
+        path = Path(self.temp.name) / 'bolum.wav'
+        before = len(self.requests())
+        self.assertEqual(self.engines.export(sentences, 1.0, path, book=book, breaks=[1]), 4)
+        self.assertEqual(len(self.requests()), before)                       # kayit da hazir gruplari kullanir
+        # eski hazirlik (cumle cumle) tek basina okunur, gruba katilmaz
+        other = ['Beş.', 'Altı.', 'Yedi.']
+        self.engines.say('Altı.', 1.0, book)
+        self.assertEqual(self.engines.plan(book, other, 1.0, 'tr', []), [[0, 0, False], [1, 1, True], [2, 2, False]])
+        self.assertEqual(self.engines.plan(book, other, 1.0, 'tr'), [[0, 0, False], [1, 1, True], [2, 2, False]])
+
     def test_missing_folder_gives_clear_error(self):
         self.prefs[drama3_tr.PREF_DIR] = ''
         self.engines.load('tr')

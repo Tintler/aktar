@@ -2,6 +2,13 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.18.2 — 2026-10-23
+
+### Düzeltme
+- **"Hazırla" parça uzunluğuna göre gruplar (F186):** Drama 3 TR'de "Hazırla" her cümleyi ayrı istekle üretiyordu; her istek ~4 sn sabit süre eklediği için hazırlama çok uzuyordu. Artık okuyucuyla aynı grupları (paragraf sınırını aşmadan "Parça uzunluğu" kadar ardışık cümle) tek istekte üretir; deneme bölümünde 100 cümle 38 istekle hazırlandı. Okuyucu, "Hazır x/y" sayacı, bölüm kaydı ve sesli kitap aynı grupları kullanır, böylece hazırlanan ses hiçbir yerde yeniden üretilmez. Daha önce cümle cümle hazırlanmış sesler de bulunur ve tek başına okunur.
+- **Grup okunurken sarı vurgu kayıyordu (F186):** Vurgu, grup içinde yalnızca karakter oranıyla ilerliyordu; uzun gruplarda konuşma hızı değiştikçe saniyelerce kayıyordu. Artık her cümle sınırı, sesin içindeki en yakın duraklamaya oturtulur.
+- Not: "Parça uzunluğu" ses ayarlarından biri olduğundan değiştirildiğinde hazırlanan sesler yeniden üretilir.
+
 ## 2.18.1 — 2026-10-23
 
 ### Düzeltme

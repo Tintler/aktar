@@ -436,17 +436,9 @@ class Engines:
         key = json.dumps(parts, sort_keys=True, ensure_ascii=False)
         return self.app_dir / CACHE_DIR / book / (hashlib.sha1(key.encode('utf-8')).hexdigest() + '.wav')
 
-    @staticmethod
-    def _clip(data):
-        with wave.open(io.BytesIO(data)) as clip:
-            duration = clip.getnframes() / clip.getframerate()
-        return {'audio': base64.b64encode(data).decode('ascii'), 'duration': duration}
-
-    def say(self, text, speed=1.0, book=None, language='tr', override=None, tag=None):
-        """One sentence as base64 WAV: from the book's cache when it was rendered before, else from the engine.
-        `tag`: emotion tag chosen by the caller (F172); None reads the book's own (F168).
-        F177: `text` may be a list of consecutive sentences (group_chars) read in one request; each sentence keeps
-        its own book emotion tag inside the joined text."""
+    def _request_text(self, text, book, language='tr', override=None, tag=None):
+        """(text, tag) sent to the engine for one sentence or a list of consecutive sentences (F177): in a list
+        each sentence carries its own book emotion tag inside the joined text."""
         if isinstance(text, (list, tuple)):
             parts = [' '.join(str(part).split()) for part in text]
             parts = [part for part in parts if part]
@@ -460,7 +452,20 @@ class Engines:
                     tagged.append(part)
                 parts, tag = tagged, ''
             text = ' '.join(parts)
-        text = ' '.join(str(text).split())
+        return ' '.join(str(text).split()), tag
+
+    @staticmethod
+    def _clip(data):
+        with wave.open(io.BytesIO(data)) as clip:
+            duration = clip.getnframes() / clip.getframerate()
+        return {'audio': base64.b64encode(data).decode('ascii'), 'duration': duration}
+
+    def say(self, text, speed=1.0, book=None, language='tr', override=None, tag=None):
+        """One sentence as base64 WAV: from the book's cache when it was rendered before, else from the engine.
+        `tag`: emotion tag chosen by the caller (F172); None reads the book's own (F168).
+        F177: `text` may be a list of consecutive sentences (group_chars) read in one request; each sentence keeps
+        its own book emotion tag inside the joined text."""
+        text, tag = self._request_text(text, book, language, override, tag)
         if not text:
             return {'audio': '', 'duration': 0.0}
         path = self._cache_path(book, text, speed, language, override, tag)
@@ -495,30 +500,77 @@ class Engines:
         except (TypeError, ValueError):
             return int(default or 0)
 
-    def cached_flags(self, book, sentences, speed, language='tr', override=None):
-        """For each sentence: is it already rendered on its own for this book and voice ("Hazirla" renders sentence
-        by sentence; the reader reads these alone instead of in a group, F185)."""
-        flags = []
-        for sentence in sentences:
-            text = ' '.join(str(sentence).split())
-            path = self._cache_path(book, text, speed, language, override) if text else None
-            flags.append(bool(path is not None and path.exists()))
-        return flags
+    def plan(self, book, sentences, speed, language='tr', breaks=None, override=None):
+        """F186: how a chapter is read, shared by "Hazirla" and the reader so both use the same cache entries:
+        [[start, end, cached], ...] covering every sentence. A group already in the cache is kept (longest first,
+        also a single sentence of an older sentence-by-sentence preparation); the rest
+        are joined greedily up to group_chars without crossing a paragraph end (`breaks`: indices of sentences
+        that end one; None: unknown, every sentence alone) or swallowing a sentence a cached group starts with."""
+        texts = [' '.join(str(s).split()) for s in sentences]
+        limit = self.group_chars(language, override) if breaks is not None else 0
+        ends_paragraph = {int(b) for b in breaks or ()}
+        known = {}
 
-    def cached(self, book, sentences, speed, language='tr', override=None):
-        """How many of the sentences are already rendered for this book and voice."""
-        return sum(self.cached_flags(book, sentences, speed, language, override))
+        def reach(start, chars):
+            """Sentences that may follow `start` in one group of at most `chars` characters."""
+            end, total = start, len(texts[start])
+            while (chars > 0 and end + 1 < len(texts) and end not in ends_paragraph and texts[end + 1]
+                   and total + 1 + len(texts[end + 1]) <= chars):
+                end += 1
+                total += 1 + len(texts[end])
+            return end
 
-    def prepare(self, book, sentences, speed, language='tr', progress=None, cancel=None):
-        """Renders sentences into the book's cache (blocking); already rendered ones are skipped."""
-        texts = [' '.join(str(s).split()) for s in sentences if str(s).strip()]
-        for index, text in enumerate(texts):
+        def cached_end(start):
+            """Last sentence of the longest cached group starting at `start` (None: none)."""
+            if start not in known:
+                known[start] = None
+                if texts[start]:
+                    for end in range(reach(start, limit), start - 1, -1):
+                        text, tag = self._request_text(texts[start] if end == start else texts[start:end + 1],
+                                                       book, language, override)
+                        path = self._cache_path(book, text, speed, language, override, tag)
+                        if path is not None and path.exists():
+                            known[start] = end
+                            break
+            return known[start]
+
+        groups, start = [], 0
+        while start < len(texts):
+            end = cached_end(start)
+            if end is not None:
+                groups.append([start, end, True])
+            else:
+                end = start
+                for following in range(start + 1, reach(start, limit) + 1):
+                    if cached_end(following) is not None:
+                        break
+                    end = following
+                groups.append([start, end, False])
+            start = end + 1
+        return groups
+
+    def cached(self, book, sentences, speed, language='tr', override=None, breaks=None):
+        """How many of the sentences are already rendered for this book and voice (alone or in a group)."""
+        return sum(sum(1 for text in sentences[start:end + 1] if str(text).strip())
+                   for start, end, ready in self.plan(book, sentences, speed, language, breaks, override) if ready)
+
+    def prepare(self, book, sentences, speed, language='tr', progress=None, cancel=None, breaks=None):
+        """Renders sentences into the book's cache (blocking) in the groups the reader will ask for (plan);
+        already rendered ones are skipped. Progress and the result count sentences."""
+        sentences = list(sentences)
+        total = sum(1 for s in sentences if str(s).strip())
+        done = 0
+        for start, end, ready in self.plan(book, sentences, speed, language, breaks):
             if cancel is not None and cancel.is_set():
-                return index
-            self.say(text, speed, book, language)
-            if progress:
-                progress(index + 1, len(texts))
-        return len(texts)
+                return done
+            if not ready:
+                self.say(sentences[start] if end == start else sentences[start:end + 1], speed, book, language)
+            count = sum(1 for s in sentences[start:end + 1] if str(s).strip())
+            if count:
+                done += count
+                if progress:
+                    progress(done, total)
+        return done
 
     def cache_info(self):
         root = self.app_dir / CACHE_DIR
@@ -532,22 +584,27 @@ class Engines:
         return self.cache_info()
 
     def export(self, sentences, speed, path, progress=None, book=None, language='tr', gaps=None,
-               override=None, cancel=None):
+               override=None, cancel=None, breaks=None):
         """Writes all sentences into one WAV file, reusing (and filling) the book's cache; blocking.
         `gaps` gives the seconds of silence after each sentence (default SENTENCE_GAP).
+        F186: with `breaks` (paragraph ends) sentences are read in the reader's groups (plan), so prepared
+        audio is used; a group is followed by its last sentence's gap.
         A set `cancel` event stops it with Cancelled (the partial file is left to the caller)."""
         gaps = list(gaps or ())
-        pairs = [(' '.join(str(s).split()), _gap(gaps, i)) for i, s in enumerate(sentences) if str(s).strip()]
-        texts = [text for text, _ in pairs]
+        kept = [i for i, s in enumerate(sentences) if str(s).strip()]
+        texts = [' '.join(str(sentences[i]).split()) for i in kept]
         if not texts:
             raise ValueError('Kaydedilecek metin yok.')
+        ends = None if breaks is None else {int(b) for b in breaks}
+        ends = None if ends is None else [n for n, i in enumerate(kept) if i in ends]
         self._exporting = True
         stream = None
         try:
-            for index, (text, gap) in enumerate(pairs):
+            for start, end, _ready in self.plan(book, texts, speed, language, ends, override):
                 if cancel is not None and cancel.is_set():
                     raise Cancelled('Ses kaydı durduruldu.')
-                result = self.say(text, speed, book, language, override)
+                gap = _gap(gaps, kept[end])
+                result = self.say(texts[start] if end == start else texts[start:end + 1], speed, book, language, override)
                 with wave.open(io.BytesIO(base64.b64decode(result['audio']))) as clip:
                     if stream is None:
                         rate = clip.getframerate()
@@ -558,7 +615,7 @@ class Engines:
                     stream.writeframes(clip.readframes(clip.getnframes()))
                     stream.writeframes(b'\x00\x00' * int(rate * gap))
                 if progress:
-                    progress(index + 1, len(texts))
+                    progress(end + 1, len(texts))
         finally:
             if stream is not None:
                 stream.close()
