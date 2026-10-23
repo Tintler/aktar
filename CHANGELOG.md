@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.19.2 — 2026-10-23
+
+### Düzeltme
+- **"Duygu etiketleri oluştur" penceresi iki yöntemi karıştırıyordu (F187):** "Seçtiğiniz 73 etiket modele örnek olarak verilir" ile "Kelime listesi yalnızca bu etiketleri kullanır" aynı paragrafta geçtiği için serbest yönergenin listeyle sınırlı olduğu sanılıyordu. Artık her yöntemin açıklaması kendi seçeneğinin altında yazar: dil modeli konuşmaya kendi yönergesini yazar, listeyle sınırlı değildir; kelime listesi dil modeli kullanmaz, yalnızca seçili etiketleri koyar.
+
 ## 2.19.1 — 2026-10-23
 
 ### Düzeltme

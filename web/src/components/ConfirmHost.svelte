@@ -40,7 +40,7 @@
       <div class="options">
         {#each c.options as option}
           <button class="option" class:on={c.value === option.value} onclick={() => (c.value = option.value)}
-            ondblclick={() => { c.value = option.value; done(true); }}>{option.label}</button>
+            ondblclick={() => { c.value = option.value; done(true); }}>{option.label}{#if option.hint}<small>{option.hint}</small>{/if}</button>
         {/each}
       </div>
     {/if}
@@ -61,4 +61,5 @@
   .option { text-align: left; padding: 9px 12px; border-radius: 8px; color: var(--secondary); }
   .option:hover { background: var(--surface-hover); color: var(--text); }
   .option.on { background: var(--surface-active); color: var(--text); font-weight: 600; }
+  .option small { display: block; margin-top: 3px; font-size: 12px; font-weight: 400; line-height: 1.45; color: var(--dim); }
 </style>

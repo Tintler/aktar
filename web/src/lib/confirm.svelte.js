@@ -18,7 +18,8 @@ export function prompt({ title, message = '', value = '', ok = 'Tamam', placehol
   });
 }
 
-// Secenekler arasindan birini sectirir: options [{value, label}]; vazgecilirse null.
+// Secenekler arasindan birini sectirir: options [{value, label, hint?}] (hint: secenegin altinda aciklama);
+// vazgecilirse null.
 export function choose({ title, message = '', options, ok = 'Seç' }) {
   return new Promise((resolve) => {
     pending.current = { kind: 'choose', title, message, options, value: options[0]?.value, ok, cancel: 'Vazgeç', resolve };

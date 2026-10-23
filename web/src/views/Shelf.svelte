@@ -41,22 +41,23 @@
     // F187: serbest yonergede model katalogla sinirli degil; secili etiketler yalnizca kelime listesi icin
     const free = catalog.style !== 'catalog';
     if (!catalog.allowed.length && !free) { toast("Ayarlar → Ses'te Drama 3 için en az bir duygu etiketi seçin.", 'error'); return; }
-    const chosen = `Ayarlar → Ses'te seçtiğiniz ${catalog.allowed.length} etiket`;
+    const count = catalog.allowed.length;
+    const words = `Dil modeli kullanılmaz. Anlatıcıdaki "gülerek", "fısıldadı" gibi kalıplar Ayarlar → Ses'te seçtiğiniz ` +
+      `${count} etiketten karşılığına çevrilir ("gülerek" → [laughs]); yeni yönerge üretilmez. Hızlıdır.`;
     const method = await choose({
       title: tagged(book) ? 'Duygu etiketlerini yeniden oluştur' : 'Duygu etiketleri oluştur',
-      message: free
-        ? `"${book.title}" kitabının diyaloglarına Fish Audio Drama 3 ile okurken kullanılacak yönergeler eklenir. Model ` +
-          'kipinde (serbest yönerge) model konuşmaya kendi yönergesini yazar: Türkçe ön ek ([titrek bir sesle]), cümle ' +
-          `ortasında ses ya da duraklama ([derin bir nefes alır]), birkaç kelimeyi saran çift etiket (<whisper>…</whisper>); ` +
-          `${chosen} modele örnek olarak verilir. Kelime listesi yalnızca bu etiketleri kullanır. Model kipi Ayarlar → ` +
-          "Modeller'deki sohbet modelini kullanır; bu sırada ses motoru durdurulur, bitince model boşaltılır."
-        : `"${book.title}" kitabının diyaloglarına ${chosen} eklenir (Fish Audio Drama 3 ile okurken kullanılır): ` +
-          `${catalog.allowed.join(' ')}. Model kipi Ayarlar → Modeller'deki sohbet modelini kullanır; bu sırada ses motoru ` +
-          'durdurulur, bitince model boşaltılır.',
+      message: `"${book.title}" kitabının konuşmalarına Fish Audio Drama 3 ile okurken kullanılacak yönergeler eklenir. ` +
+        'Okuyucudaki metin değişmez. İki yöntem var:',
       options: [
-        { value: 'llm', label: free ? 'Model sunucusuyla (serbest yönerge; anlatıcı ipuçları da geçerli)'
-          : 'Model sunucusuyla (bağlamdan; anlatıcı ipuçları da geçerli)' },
-        { value: 'words', label: 'Yalnızca kelime listesiyle ("gülerek", "fısıldadı" gibi ipuçları; hızlı)' },
+        { value: 'llm', label: 'Dil modeliyle',
+          hint: (free
+            ? 'Model sahneye bakıp konuşmaya kendi yönergesini yazar, listeyle sınırlı değildir: Türkçe ön ek ([titrek bir ' +
+              'sesle]), cümle ortasında ses ya da duraklama ([derin bir nefes alır]), birkaç kelimeyi saran çift etiket ' +
+              '(<whisper>…</whisper>). Modelin dokunmadığı konuşmada anlatıcıda açık ipucu varsa kelime listesinin etiketi kalır.'
+            : `Model yalnızca seçtiğiniz ${count} etiketten birini konuşmanın başına koyar (Ayarlar → Ses → "Yalnızca ` +
+              'katalog"): ' + catalog.allowed.join(' ') + '.') +
+            " Ayarlar → Modeller'deki sohbet modeli kullanılır; bu sırada ses motoru durdurulur, bitince model boşaltılır." },
+        { value: 'words', label: 'Yalnızca kelime listesiyle', hint: words },
       ],
       ok: 'Oluştur',
     });
