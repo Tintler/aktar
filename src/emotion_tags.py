@@ -144,7 +144,7 @@ LLM_FREE_PROMPT = (
     '<emphasis>, <soft>, <fast>, <slow>, <stress>, <forceful> (ör. <whisper>kimseye söyleme</whisper>).\n'
     'Kurallar: cümlenin kelimelerini ve noktalamasını hiç değiştirme, yalnızca yönerge ekle. Bir cümlede en fazla '
     '{most} yönerge, her biri en fazla {words} kelime; köşeli parantez iç içe olmaz. Nötr, emin olmadığın ya da '
-    'anlatıcı cümlelerine dokunma. Bir konuşma birden çok cümleyse her cümleye aynı ön eki yaz.{tags}\n'
+    'anlatıcı cümlelerine dokunma. Bir konuşma birden çok cümleyse her cümleye aynı ön eki yaz.\n'
     'Yalnızca JSON nesnesi döndür; anahtar cümle numarası, değer cümlenin yönergeli hali. Örnek: {example}. '
     'Hiçbiri yoksa {{}}.\n\n')
 LLM_FREE_EXAMPLE = {'12': '[öfkeyle, dişlerini sıkarak] "Burada ne işin var?" dedi.',
@@ -153,11 +153,11 @@ LLM_FREE_EXAMPLE = {'12': '[öfkeyle, dişlerini sıkarak] "Burada ne işin var?
 
 def llm_prompt(allowed=None, style='catalog'):
     """Model istemi: yalnizca secilen etiketler (katalogdaki aciklamalariyla). F187: 'free' serbest yonerge istemi;
-    secilen etiketler yalnizca ornek olarak verilir."""
+    katalog verilmez (cogu denenmemis Ingilizce etiket modeli Turkce tariften uzaklastirir), yalnizca istemdeki
+    Turkce ornekler."""
     allowed = drama3_tags.allowed(allowed)
     if style == 'free':
-        tags = f' Hazır etiketlerden de seçebilirsin: {", ".join(allowed)}.' if allowed else ''
-        return LLM_FREE_PROMPT.format(most=drama3_tags.MAX_DIRECTIONS, words=drama3_tags.MAX_WORDS, tags=tags,
+        return LLM_FREE_PROMPT.format(most=drama3_tags.MAX_DIRECTIONS, words=drama3_tags.MAX_WORDS,
                                       example=json.dumps(LLM_FREE_EXAMPLE, ensure_ascii=False))
     described = {entry['tag']: entry['llm'] for entry in drama3_tags.CATALOG}
     tags = ', '.join(f'{tag} ({described[tag]})' for tag in allowed)

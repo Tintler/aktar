@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.19.3 — 2026-10-23
+
+### Düzeltme
+- **Serbest yönergede modele etiket listesi verilmez (F187):** Serbest kipte dil modeline Ayarlar'da seçili etiketlerin tamamı (çoğu denenmemiş İngilizce etiket) "hazır etiket" olarak gidiyordu; bu, modeli dinlemede iyi sonuç veren Türkçe tariften uzaklaştırabiliyordu. Artık istemde yalnızca Türkçe örnekler ve resmi yedi çift etiket var. Kelime listesi ve "Yalnızca katalog" kipi seçili etiketleri eskisi gibi kullanır.
+
 ## 2.19.2 — 2026-10-23
 
 ### Düzeltme

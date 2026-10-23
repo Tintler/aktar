@@ -456,7 +456,8 @@ class FreeDirectionTests(unittest.TestCase):
         self.assertEqual(emotion_tags.parse_llm(answer, sentences, 0, 4, [], 'free'),
                          {0: '— Bir [güler] iki.', 3: '[fısıldayarak][korkuyla] "Duydun mu? Biri aşağıda."'})
         prompt = emotion_tags.llm_prompt(['[sad]'], 'free')
-        self.assertIn('[sad]', prompt)
+        self.assertNotIn('[sad]', prompt)        # serbest kipte katalog verilmez, yalnizca Turkce ornekler
+        self.assertIn('[titrek bir sesle', prompt)
         self.assertIn('<forceful>', prompt)
         self.assertIn('derin bir nefes alır] tamam', prompt)
 
