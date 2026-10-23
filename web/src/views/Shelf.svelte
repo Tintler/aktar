@@ -38,14 +38,24 @@
     if (app.ttsPrepare || app.ttsAudiobook) { toast('Ses hazırlanırken ya da sesli kitap kaydedilirken duygu etiketi oluşturulamaz.'); return; }
     const catalog = await act('tts_emotion_catalog');
     if (!catalog) return;
-    if (!catalog.allowed.length) { toast("Ayarlar → Ses'te Drama 3 için en az bir duygu etiketi seçin.", 'error'); return; }
+    // F187: serbest yonergede model katalogla sinirli degil; secili etiketler yalnizca kelime listesi icin
+    const free = catalog.style !== 'catalog';
+    if (!catalog.allowed.length && !free) { toast("Ayarlar → Ses'te Drama 3 için en az bir duygu etiketi seçin.", 'error'); return; }
+    const chosen = `Ayarlar → Ses'te seçtiğiniz ${catalog.allowed.length} etiket`;
     const method = await choose({
       title: tagged(book) ? 'Duygu etiketlerini yeniden oluştur' : 'Duygu etiketleri oluştur',
-      message: `"${book.title}" kitabının diyaloglarına Ayarlar → Ses'te seçtiğiniz etiketler eklenir (Fish Audio Drama 3 ` +
-        `ile okurken kullanılır): ${catalog.allowed.join(' ')}. Model kipi Ayarlar → Modeller'deki sohbet modelini kullanır; ` +
-        'bu sırada ses motoru durdurulur, bitince model boşaltılır.',
+      message: free
+        ? `"${book.title}" kitabının diyaloglarına Fish Audio Drama 3 ile okurken kullanılacak yönergeler eklenir. Model ` +
+          'kipinde (serbest yönerge) model konuşmaya kendi yönergesini yazar: Türkçe ön ek ([titrek bir sesle]), cümle ' +
+          `ortasında ses ya da duraklama ([derin bir nefes alır]), birkaç kelimeyi saran çift etiket (<whisper>…</whisper>); ` +
+          `${chosen} modele örnek olarak verilir. Kelime listesi yalnızca bu etiketleri kullanır. Model kipi Ayarlar → ` +
+          "Modeller'deki sohbet modelini kullanır; bu sırada ses motoru durdurulur, bitince model boşaltılır."
+        : `"${book.title}" kitabının diyaloglarına ${chosen} eklenir (Fish Audio Drama 3 ile okurken kullanılır): ` +
+          `${catalog.allowed.join(' ')}. Model kipi Ayarlar → Modeller'deki sohbet modelini kullanır; bu sırada ses motoru ` +
+          'durdurulur, bitince model boşaltılır.',
       options: [
-        { value: 'llm', label: 'Model sunucusuyla (bağlamdan; anlatıcı ipuçları da geçerli)' },
+        { value: 'llm', label: free ? 'Model sunucusuyla (serbest yönerge; anlatıcı ipuçları da geçerli)'
+          : 'Model sunucusuyla (bağlamdan; anlatıcı ipuçları da geçerli)' },
         { value: 'words', label: 'Yalnızca kelime listesiyle ("gülerek", "fısıldadı" gibi ipuçları; hızlı)' },
       ],
       ok: 'Oluştur',

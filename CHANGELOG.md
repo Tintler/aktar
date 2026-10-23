@@ -2,6 +2,12 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.19.1 — 2026-10-23
+
+### Düzeltme
+- **"Duygu etiketleri oluştur" penceresi serbest yönergeyi anlatmıyordu (F187):** Ayarlarda "Serbest yönerge" seçiliyken de pencere seçili katalog etiketlerinin tamamını sıralayıp yalnızca bunların ekleneceğini söylüyordu. Artık serbest kipte modelin kendi yönergesini yazdığını ve seçili etiketlerin modele yalnızca örnek olarak verildiğini anlatır; serbest kipte hiç etiket seçili değilken model kipi de başlatılabilir.
+- **Açılan ses motorunun ayarları hangi motora ait belli değildi:** Ayarlar → Ses'te bir motorun ayrıntıları açılınca ayarlar motor başlığının altında, girintili ve sol çizgili bir kutuda gösterilir; sonraki motor çizgiyle ayrılır.
+
 ## 2.19.0 — 2026-10-23
 
 ### Yeni

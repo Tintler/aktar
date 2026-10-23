@@ -251,7 +251,7 @@
   {#each app.engines as engine (engine.id)}
     {@const badge = modeBadge(engine)}
     {@const open = shown('engine:' + engine.id)}
-    <div class="fr engine">
+    <div class="fr engine" class:open>
       <button class="icon-btn sm chev" class:open aria-expanded={open} title={open ? 'Ayrıntıları gizle' : 'Ayrıntıları göster'}
         onclick={() => toggleOpen('engine:' + engine.id)}><Icon name="forward" size={16} /></button>
       <div class="l">
@@ -265,9 +265,10 @@
         <button class="icon-btn" title="Kaldır" onclick={() => remove(engine)}><Icon name="trash" size={16} /></button>
       {/if}
     </div>
-    {#if !open}
-      <!-- F179: motor kapali: alt satirlar gizli -->
-    {:else if engine.folder}
+    {#if open}
+    <!-- F179: motor kapali: alt satirlar gizli; acikken motorun icinde girintili kutuda -->
+    <div class="engine-body">
+    {#if engine.folder}
       <div class="fr sub">
         <div class="l">Model klasörü<small>Model Aktar klasörüne kopyalanmaz; seçtiğiniz klasörden (hızlı bir SSD önerilir) çalışır.
           Aktar sunucuyu bu klasördeki .venv Python'uyla kendisi başlatır ve kapanınca durdurur.</small></div>
@@ -365,6 +366,8 @@
         <div class="l"><small>Değiştirilen ayarlarla hazırlanan cümleler yeniden üretilir.</small></div>
         <button class="btn sm" onclick={() => resetEngine(engine)}><Icon name="refresh" size={14} />Varsayılana dön</button>
       </div>
+    {/if}
+    </div>
     {/if}
   {/each}
 
@@ -497,6 +500,14 @@
   .chev { color: var(--secondary); transition: transform .15s; }
   .chev.open { transform: rotate(90deg); }
   .engine { gap: 12px; }
+  .engine.open { border-bottom: 0; padding-bottom: 8px; }
+  /* acik motorun ayarlari: basligin altinda girintili, sol cizgili kutu (hangi motora ait oldugu belli olsun) */
+  .engine-body { margin: 0 0 14px 40px; padding: 2px 16px; border-left: 2px solid color-mix(in srgb, var(--accent) 55%, var(--outline));
+    background: color-mix(in srgb, var(--surface) 60%, transparent); border-radius: 0 12px 12px 0; }
+  :global(.engine-body) + .engine { border-top: 1px solid var(--outline); }
+  .engine-body .sub { padding-left: 0; }
+  .engine-body .tags { padding-left: 0; }
+  .engine-body > .fr:last-child, .engine-body > .tags:last-child { border-bottom: 0; }
   .fr { display: flex; align-items: center; gap: 20px; padding: 12px 0; border-bottom: 1px solid var(--outline); }
   .fr:last-child { border-bottom: 0; }
   .l { flex: 1; min-width: 0; font-weight: 500; }
