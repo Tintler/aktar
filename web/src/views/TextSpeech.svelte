@@ -177,7 +177,7 @@
   .tabs { display: flex; gap: 4px; background: var(--surface); border-radius: 999px; padding: 3px; margin-left: 12px; }
   .tabs button { padding: 5px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--secondary); }
   .tabs button.on { background: var(--surface-active); color: var(--text); }
-  .list { display: flex; flex-direction: column; max-width: 760px; }
+  .list { display: flex; flex-direction: column; }
   .body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; }
   .text { display: flex; flex-direction: column; min-height: 0; }
   .text textarea { flex: 1; min-height: 240px; resize: none; padding: 16px 18px; border: 0; outline: none; background: transparent;

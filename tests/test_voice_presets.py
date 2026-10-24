@@ -182,6 +182,45 @@ class BridgePresetTests(unittest.TestCase):
         self.assertEqual([f['label'] for f in self.bridge.tts_cached_voices(book, sentences)], [])
         self.assertIn('error', self.bridge.tts_use_voice('yok'))
 
+    def test_sample_text_preview_is_read_kept_and_played(self):
+        # F191: ornek metin sesle okunup taslak olur, saklaninca sesin onizlemesi olur ve dublaj seciciler onu calar
+        import wave
+
+        def clip(_text, *_args):
+            buffer = io.BytesIO()
+            with wave.open(buffer, 'wb') as out:
+                out.setnchannels(1)
+                out.setsampwidth(2)
+                out.setframerate(16000)
+                out.writeframes(b'\x00\x10' * 8000)
+            return {'audio': base64.b64encode(buffer.getvalue()).decode('ascii'), 'duration': 0.5}
+
+        engines = mock.Mock(group_chars=mock.Mock(return_value=0), say=mock.Mock(side_effect=clip))
+        ident = self.bridge.tts_preset_save({'name': 'EMA', 'voice': 'ema-lightning/default'})['saved']['id']
+        self.assertEqual(self.bridge.tts_presets()['presets'][0]['preview'], '')
+        self.assertIn('error', self.bridge.tts_preset_preview_save(ident, 'X'))       # once okutulmali
+        with mock.patch.object(self.bridge, '_load_and_wait', return_value=None), \
+                mock.patch.object(self.bridge, '_engines', return_value=engines):
+            self.assertIn('error', self.bridge.tts_preset_preview_create(ident, ['  ']))
+            self.assertIn('error', self.bridge.tts_preset_preview_create(ident, ['x' * 1001]))
+            made = self.bridge.tts_preset_preview_create(ident, ['Merhaba.', 'Nasılsın?'], [0.3, 0.3])
+        self.assertAlmostEqual(made['duration'], 1.6, delta=0.01)   # iki parca + iki sessizlik
+        self.assertTrue(voice_presets.preview_path(self.root, ident, draft=True).is_file())
+        result = self.bridge.tts_preset_preview_save(ident, '  Merhaba.   Nasılsın? ')
+        self.assertEqual(result['saved']['preview_text'], 'Merhaba. Nasılsın?')
+        self.assertTrue(result['saved']['preview'])
+        self.assertFalse(voice_presets.preview_path(self.root, ident, draft=True).exists())
+        with mock.patch.object(self.bridge, '_engines', side_effect=AssertionError('motor yuklenmemeli')):
+            played = self.bridge.tts_preview('preset:' + ident)
+        self.assertTrue(played['recording'])
+        # Ad degisince onizleme kalir, motor degisince silinir.
+        kept = self.bridge.tts_preset_save({'id': ident, 'name': 'Ece', 'voice': 'ema-lightning/default'})['saved']
+        self.assertEqual(kept['preview_text'], 'Merhaba. Nasılsın?')
+        moved = self.bridge.tts_preset_save({'id': ident, 'name': 'Ece', 'voice': 'voxcpm/design',
+                                             'options': {'description': 'W'}})['saved']
+        self.assertEqual((moved['preview'], moved['preview_text']), ('', ''))
+        self.assertFalse(voice_presets.preview_path(self.root, ident).exists())
+
     def test_preset_of_missing_engine_cannot_be_applied(self):
         ident = self.bridge.tts_preset_save({'name': 'EMA', 'voice': 'ema-lightning/default'})['saved']['id']
         with mock.patch.object(self.bridge, '_voice_specs', return_value={}):

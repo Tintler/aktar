@@ -7,6 +7,7 @@ calismaz). Secimler ui.json 'tts' altindadir.
 """
 from __future__ import annotations
 
+import base64
 import json
 import re
 import sys
@@ -28,6 +29,7 @@ from tts import Engines
 
 PREVIEW_TEXT = 'Merhaba, dublajda sesim böyle duyulacak.'   # F149 ses onizlemesi
 PREVIEW_RECORDING = 12.0   # kayitli sesin klon kaydindan calinan en uzun sure (sn)
+_PREVIEW_LOCK = threading.Lock()   # F191: ayni anda tek ses onizlemesi okunur
 PREPARE_STUCK = 120        # F188: Hazirla bu kadar sn ilerlemezse nerede bekledigi Konsol'a yazilir
 PREPARE_POLL = 5
 
@@ -288,6 +290,12 @@ class TtsMixin:
         """F149: bir sesi dinletir (dublaj ses secicileri): motor o sese hazirlanir (bloklar), kisa bir
         metin okunur. `text` bossa ornek cumle. Kayitli ses klon kaydi tasiyorsa motor yuklenmez, o kaydin
         basi calinir. Donen: tts_say gibi {'audio', 'duration'} ya da {'error'}."""
+        stored = self._preset_preview(voice)
+        if stored is not None:   # F191: sesin saklanan onizlemesi
+            try:
+                return {'audio': base64.b64encode(stored.read_bytes()).decode('ascii'), 'recording': True}
+            except OSError as error:
+                return _error(error)
         recording = self._preset_recording(voice)
         if recording is not None:
             try:
@@ -325,6 +333,14 @@ class TtsMixin:
             if (engines.current.get('engine'), engines.current.get('voice')) == engines.choice(language, override):
                 return None
         return 'Ses motoru başka bir ses için kullanılıyor.'
+
+    def _preset_preview(self, ref):
+        """Kayitli sesin (preset:<kimlik>) saklanan onizleme dosyasi (F191); yoksa None."""
+        ref = str(ref or '')
+        if not ref.startswith('preset:') or voice_presets.get(APP_DIR, ref[7:]) is None:
+            return None
+        path = voice_presets.preview_path(APP_DIR, ref[7:])
+        return path if path.is_file() else None
 
     def _preset_recording(self, ref):
         """Kayitli sesin (preset:<kimlik>) klon kaydi dosyasi; yoksa None (tarifli ses ya da motor sesi)."""
@@ -676,10 +692,22 @@ class TtsMixin:
     def tts_presets(self):
         """{'presets', 'active'}: okuyucudaki ses secicinin listesi ve secili onayar."""
         try:
-            items = voice_presets.list_presets(APP_DIR)
+            items = [self._with_preview(item) for item in voice_presets.list_presets(APP_DIR)]
         except OSError as error:
             return _error(error)
         return {'presets': items, 'active': self.ui_prefs().get('tts', {}).get('active_preset', '')}
+
+    def _with_preview(self, item):
+        """F191: onizlemesi olan sese dinleme adresi ('preview'); dosya yenilenince adres de degisir."""
+        item = dict(item)
+        item['preview'] = self._audio_url(voice_presets.preview_path(APP_DIR, item['id'])) if item.pop('has_preview', False) else ''
+        return item
+
+    def _audio_url(self, path):
+        try:
+            return f'{self._media.file_url(path)}?v={int(path.stat().st_mtime * 1000)}'
+        except Exception:
+            return ''
 
     def tts_preset_save(self, values):
         try:
@@ -688,7 +716,70 @@ class TtsMixin:
             return _error(error)
         if self.ui_prefs().get('tts', {}).get('active_preset') == saved['id']:
             self._apply_preset(saved)       # duzenlenen secili ses hemen gecerli olur
-        return dict(self.tts_presets(), saved=saved)
+        return dict(self.tts_presets(), saved=self._with_preview(saved))
+
+    def tts_preset_preview_create(self, ident, sentences, gaps=None):
+        """F191: ornek metni kayitli sesle okutup taslak onizleme olarak yazar (bloklar; motor yuklenmesini bekler).
+        Donen: {'url', 'duration'}, {'cancelled': True} ya da {'error'}. Saklamak icin tts_preset_preview_save."""
+        ident = str(ident or '')
+        if voice_presets.get(APP_DIR, ident) is None:
+            return {'error': 'Ses kaydı bulunamadı.'}
+        running = getattr(self, '_tool_running', None)
+        if (self._speech_running() or self._audiobook_running()
+                or (running is not None and running() and self._tool['kind'] in ('dub', 'dubgen'))):
+            return {'error': 'Ses motoru şu an başka bir kayıt için kullanılıyor.'}
+        pairs = text_speech.clean(list(sentences or ()), gaps)
+        if not pairs:
+            return {'error': 'Okutulacak örnek metni yazın.'}
+        if sum(len(text) for text, _gap in pairs) > voice_presets.PREVIEW_LIMIT:
+            return {'error': f'Örnek metin çok uzun (en fazla {voice_presets.PREVIEW_LIMIT} karakter).'}
+        override = self._voice_override('preset:' + ident)
+        if override is None:
+            return {'error': 'Bu sesin motoru kurulu değil; Ayarlar → Sesli okuma bölümünden kurun.'}
+        if not _PREVIEW_LOCK.acquire(blocking=False):
+            return {'error': 'Bir önizleme zaten okunuyor.'}
+        cancel = self._preview_cancel = threading.Event()
+        try:
+            language = self._override_language(override, 'tr')
+            error = self._load_and_wait(language, override, cancel)
+            if cancel.is_set():
+                return {'cancelled': True}
+            if error:
+                return {'error': error}
+            engines = self._engines()
+            groups = text_speech.group(pairs, engines.group_chars(language, override))
+            target = voice_presets.preview_path(APP_DIR, ident, draft=True)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            seconds = text_speech.write(engines, groups, 1.0, target, language, override, None, cancel)
+            return {'url': self._audio_url(target), 'duration': seconds}
+        except text_speech.Cancelled:
+            return {'cancelled': True}
+        except Exception as error:
+            self._log(f'HATA: Ses önizlemesi okunamadı: {error}')
+            return _error(error)
+        finally:
+            _PREVIEW_LOCK.release()
+
+    def tts_preset_preview_cancel(self):
+        cancel = getattr(self, '_preview_cancel', None)
+        if cancel is not None:
+            cancel.set()
+        return True
+
+    def tts_preset_preview_save(self, ident, text):
+        """F191: son okutulan taslagi sesin onizlemesi olarak saklar (ornek metniyle)."""
+        try:
+            saved = voice_presets.keep_preview(APP_DIR, str(ident or ''), text)
+        except (ValueError, OSError) as error:
+            return _error(error)
+        return dict(self.tts_presets(), saved=self._with_preview(saved))
+
+    def tts_preset_preview_delete(self, ident):
+        try:
+            voice_presets.drop_preview(APP_DIR, str(ident or ''))
+        except (ValueError, OSError) as error:
+            return _error(error)
+        return self.tts_presets()
 
     def tts_preset_delete(self, ident):
         try:
@@ -836,6 +927,7 @@ class TtsMixin:
         self.tts_prepare_cancel()
         self.tts_audiobook_cancel()
         self.tts_speech_cancel()
+        self.tts_preset_preview_cancel()
         if getattr(self, '_keep_awake', None) is not None:
             self._keep_awake.set(False)
         cancel = getattr(self, '_emotion_cancel', None)

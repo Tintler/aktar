@@ -4,7 +4,9 @@ Bir onayar bir motor sesi ('<motor>/<ses>', orn. 'voxcpm/clone') ile o sesin sec
 (motor.json "options": ses tarifi, klonlanacak kayit ve metni) tasir. Kayitlar APP_DIR/ses-presetleri/
 altindadir: presets.json, resimler <kimlik>.png, klon kayitlari <kimlik>-kayit.<uzanti>. Klon kaydi
 kopyalanir; kullanicinin dosyasi tasinsa ya da silinse de onayar calisir. F173: kaydin bir araligi secildiyse
-('trim') yalnizca o parca kesilip <kimlik>-kayit.wav olarak yazilir (audio_trim).
+('trim') yalnizca o parca kesilip <kimlik>-kayit.wav olarak yazilir (audio_trim). F191: sesin ornek metinle
+okunmus onizlemesi <kimlik>-onizleme.wav, metni kayitta 'preview_text'; okutulup henuz saklanmayan taslak
+<kimlik>-onizleme-taslak.wav.
 
 Onayar secmek ui.json 'tts' tercihlerini (voices/options) gunceller; ses motoru (tts.Engines) ve
 onbellek anahtarlari degismeden ayni tercihleri okur.
@@ -14,6 +16,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import os
 import re
 import secrets
 import shutil
@@ -26,6 +29,7 @@ IMAGE_TYPES = ('*.png', '*.jpg', '*.jpeg', '*.webp', '*.gif', '*.bmp')
 AUDIO_TYPES = ('.wav', '.mp3', '.flac', '.ogg', '.m4a')
 NAME_LIMIT = 60
 TEXT_LIMIT = 2000
+PREVIEW_LIMIT = 1000   # F191: onizleme icin okutulan ornek metnin en uzun hali (karakter)
 
 
 def folder(app_dir):
@@ -96,6 +100,8 @@ def _public(app_dir, item):
     except OSError:
         result['image'] = ''
     result.pop('has_image', None)
+    result['has_preview'] = preview_path(app_dir, item['id']).is_file()
+    result.setdefault('preview_text', '')
     return result
 
 
@@ -145,6 +151,10 @@ def save(app_dir, values, voices):
         _drop_recordings(base, ident, keep=options.values())
     record = {'id': ident, 'name': name, 'voice': voice, 'options': options,
               'has_image': bool(existing and existing.get('has_image'))}
+    if existing is not None and existing.get('voice') == voice and existing.get('preview_text'):
+        record['preview_text'] = existing['preview_text']
+    elif existing is not None:
+        _drop_previews(base, ident)   # motor degisti: eski onizleme bu sesi anlatmaz
     image = values.get('image')
     if image is not None:
         target = base / f'{ident}.png'
@@ -218,6 +228,7 @@ def remove(app_dir, ident):
     base = folder(app_dir)
     (base / f'{ident}.png').unlink(missing_ok=True)
     _drop_recordings(base, ident)
+    _drop_previews(base, ident)
     _save(app_dir, remaining)
 
 
@@ -227,3 +238,43 @@ def reorder(app_dir, ids):
     rank = {str(ident): index for index, ident in enumerate(ids or [])}
     items.sort(key=lambda item: rank.get(item['id'], len(rank)))   # sort kararli: bilinmeyenler eski sirasinda
     _save(app_dir, items)
+
+
+def preview_path(app_dir, ident, draft=False):
+    """F191: sesin saklanan onizlemesi (draft: okutulup henuz saklanmayan taslak)."""
+    return folder(app_dir) / f'{ident}-onizleme{"-taslak" if draft else ""}.wav'
+
+
+def preview_text(text):
+    return ' '.join(str(text or '').split())[:PREVIEW_LIMIT]
+
+
+def keep_preview(app_dir, ident, text):
+    """Taslak onizlemeyi sesin onizlemesi yapar, ornek metni kayda yazar; guncel onayari dondurur."""
+    items = _load(app_dir)
+    item = next((entry for entry in items if entry['id'] == ident), None)
+    if item is None:
+        raise ValueError('Ses kaydı bulunamadı.')
+    draft = preview_path(app_dir, ident, draft=True)
+    if not draft.is_file():
+        raise ValueError('Önce örnek metni okutun.')
+    os.replace(draft, preview_path(app_dir, ident))
+    item['preview_text'] = preview_text(text)
+    _save(app_dir, items)
+    return _public(app_dir, item)
+
+
+def drop_preview(app_dir, ident):
+    items = _load(app_dir)
+    item = next((entry for entry in items if entry['id'] == ident), None)
+    if item is None:
+        raise ValueError('Ses kaydı bulunamadı.')
+    _drop_previews(folder(app_dir), ident)
+    item.pop('preview_text', None)
+    _save(app_dir, items)
+    return _public(app_dir, item)
+
+
+def _drop_previews(base, ident):
+    for path in base.glob(f'{ident}-onizleme*.wav'):
+        path.unlink(missing_ok=True)

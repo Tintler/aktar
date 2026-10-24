@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.25.0 — 2026-10-24
+
+### Yeni
+- **Ses önizlemesi (F191):** Metinden ses → Kayıtlı sesler sekmesi artık sayfanın tamamını kullanır; bir sese tıklayınca sağdaki panelde örnek metin yazılıp o sesle okutulabilir. Beğenilen okuma "Önizleme olarak sakla" ile sesin önizlemesi olur: listedeki ▶ düğmesi ve dublajdaki ses seçicileri bu okumayı çalar. Ses başka bir motora geçirilince önizleme silinir.
+
 ## 2.24.2 — 2026-10-24
 
 ### Düzeltme
