@@ -151,6 +151,37 @@ class BridgePresetTests(unittest.TestCase):
         design = self.bridge.tts_preset_save({'name': 'Tarif', 'voice': 'voxcpm/design', 'options': {'description': 'W'}})
         self.assertIsNone(self.bridge._preset_recording('preset:' + design['saved']['id']))   # tarifli ses okunur
 
+    def test_prepared_with_other_voice_is_listed_and_switched_to(self):
+        # F190: bolum baska bir kayitli sesle ve bulutta hazirlandiysa Hazirla menusu onu gosterir, secince ona gecilir
+        mock.patch.stopall()
+        self.addCleanup(mock.patch.stopall)
+        for target in ('bridge.APP_DIR', 'bridge_tts.APP_DIR'):
+            mock.patch(target, self.root).start()
+        for name in ('a.wav', 'b.wav'):
+            (self.root / name).write_bytes(b'RIFF' + name.encode() + b'WAVE')
+        ids = [self.bridge.tts_preset_save({'name': name, 'voice': 'drama3-tr/clone',
+                                            'options': {'reference': str(self.root / f'{name.lower()}.wav'),
+                                                        'reference_text': name}})['saved']['id'] for name in ('A', 'B')]
+        self.bridge.tts_preset_apply(ids[0])
+        book, sentences = '0123456789abcdef', ['Bir.', 'İki.', 'Üç.']
+        self.assertEqual(self.bridge.tts_cached_voices(book, sentences), [])
+        variant = next(v for v in self.bridge._voice_variants('tr')
+                       if v['preset'] == ids[1] and v['prefs'].get('drama3_tr_backend') == 'openrouter')
+        view = self.bridge._engines().with_prefs(variant['tts'])
+        for text in sentences[:2]:
+            path = view._cache_path(book, text, 1.0, 'tr')
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'RIFF')
+        found = self.bridge.tts_cached_voices(book, sentences)
+        self.assertEqual([(f['label'], f['count'], f['total']) for f in found], [('B · Drama 3 TR (16 GB GPU) · bulut', 2, 3)])
+        self.assertEqual(self.bridge.tts_cached(book, sentences), 0)
+        tts = self.bridge.tts_use_voice(found[0]['key'])['tts']
+        self.assertEqual((tts['active_preset'], tts['drama3_tr_backend']), (ids[1], 'openrouter'))
+        self.assertEqual(self.bridge.ui_prefs()['tts']['active_preset'], ids[1])
+        self.assertEqual(self.bridge.tts_cached(book, sentences), 2)
+        self.assertEqual([f['label'] for f in self.bridge.tts_cached_voices(book, sentences)], [])
+        self.assertIn('error', self.bridge.tts_use_voice('yok'))
+
     def test_preset_of_missing_engine_cannot_be_applied(self):
         ident = self.bridge.tts_preset_save({'name': 'EMA', 'voice': 'ema-lightning/default'})['saved']['id']
         with mock.patch.object(self.bridge, '_voice_specs', return_value={}):

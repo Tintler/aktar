@@ -71,7 +71,6 @@
 
   // F171: Drama 3 etiket katalogu (drama3_tags): hangi etiketlerin kullanilacagi burada secilir (ui.json
   // tts.emotion_allowed). Yeni secilen etiket icin kitap kitapliktan yeniden etiketlenmeli; kaldirilan hemen uygulanmaz.
-  const STATUS = { works: 'Çalıştı', fails: 'Çalışmadı', untested: 'Denenmedi' };
   let catalog = $state(null);
   $effect(() => {
     if (app.engines.some((e) => e.emotion_tags) && !catalog) call('tts_emotion_catalog').then((c) => { if (c?.tags) catalog = c; });
@@ -362,7 +361,7 @@
     {/each}
     {#if engine.emotion_tags && open}
       <div class="fr sub">
-        <div class="l">Duygu etiketleri (deneysel)<small>Kitaplıkta kitaba sağ tıklayıp "Duygu etiketleri oluştur" deyince kitabın
+        <div class="l">Duygu etiketleri<small>Kitaplıkta kitaba sağ tıklayıp "Duygu etiketleri oluştur" deyince kitabın
           diyaloglarına duygu, ses ve duraklama yönergeleri bir kez eklenir (anlatıcı ipuçlarından ya da model sunucusuyla
           bağlamdan). Okurken model çalışmaz. Okuyucudaki metin değişmez; etiketli sürüm yalnızca {engine.name}'e
           giden metne eklenir. Okuyucudaki "Duygulu" düğmesiyle de açılıp kapanır.</small></div>
@@ -391,7 +390,7 @@
       {#if catalog && app.ttsPrefs.emotion_tags !== 'off'}
         <div class="fr sub tags-head">
           <div class="l">Kullanılacak etiketler · {allowedTags.length} / {catalog.tags.length}<small>Drama 3'te sabit bir etiket
-            listesi yok; bunlar Fish Audio belgelerinde ve örneklerinde geçenler. Durum sizin dinleme setinize göre. Kelime
+            listesi yok; bunlar Fish Audio belgelerinde ve örneklerinde geçenler. Kelime
             listesi ve "Yalnızca katalog" kipi bunları kullanır: [köşeli] etiketler konuşmanın başına eklenir, &lt;çift&gt;
             etiketler konuşmayı sarar; serbest yönerge bu listeyi kullanmaz. Yeni seçtiğiniz etiket için kitabı
             kitaplıktan yeniden etiketleyin; kaldırdığınız etiket hemen uygulanmaz.</small></div>
@@ -408,7 +407,7 @@
                 <label class="tag" class:on={allowedTags.includes(item.tag)}>
                   <input type="checkbox" checked={allowedTags.includes(item.tag)} onchange={(e) => toggleTag(item.tag, e.currentTarget.checked)} />
                   <span class="tb"><code>{item.kind === 'paired' ? `${item.tag}…</${item.tag.slice(1)}` : item.tag}</code>
-                    <b>{item.label}</b><i class="st {item.status}">{STATUS[item.status]}</i>
+                    <b>{item.label}</b>
                     <small>{item.examples}</small></span>
                 </label>
               {/each}
@@ -597,7 +596,4 @@
   .tb { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; font-size: 13px; }
   .tb code { font-family: var(--mono); font-size: 12px; color: var(--accent); }
   .tb small { flex-basis: 100%; color: var(--dim); font-size: 11px; }
-  .st { font-style: normal; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px; color: var(--secondary); background: var(--surface); }
-  .st.works { color: var(--success, #22c55e); background: color-mix(in srgb, var(--success, #22c55e) 12%, transparent); }
-  .st.fails { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
 </style>

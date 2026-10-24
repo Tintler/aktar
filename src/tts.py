@@ -616,6 +616,22 @@ class Engines:
         return sum(sum(1 for text in sentences[start:end + 1] if str(text).strip())
                    for start, end, ready in self.plan(book, sentences, speed, language, breaks, override) if ready)
 
+    def with_prefs(self, prefs):
+        """F190: a read-only view of the cache as if ui.json 'tts' were `prefs` (another voice or backend), for
+        counting what was prepared with it (cached/plan). It shares the worker: never load or say through it."""
+        import copy
+        view = copy.copy(self)
+        view._prefs = lambda: prefs
+        return view
+
+    def voice_signature(self, language):
+        """F190: what makes the cache of a language's voice differ (engine, voice, options, cache prefs)."""
+        engine_id, voice_id = self.choice(language)
+        if engine_id is None:
+            return None
+        return json.dumps([engine_id, voice_id, self._voice_options(engine_id, voice_id), self._pref_tags(engine_id)],
+                          sort_keys=True, ensure_ascii=False)
+
     def prepare(self, book, sentences, speed, language='tr', progress=None, cancel=None, breaks=None):
         """Renders sentences into the book's cache (blocking) in the groups the reader will ask for (plan);
         already rendered ones are skipped. Progress and the result count sentences."""

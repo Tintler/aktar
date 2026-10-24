@@ -2,6 +2,14 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.24.0 — 2026-10-24
+
+### Yeni
+- **Başka seslerle hazırlanan bölümler (F190):** Okuyucudaki "Hazırla" menüsü, bölüm başka bir kayıtlı sesle, başka bir motorla ya da Drama 3 TR'nin öteki çalışma yeriyle (yerel / bulut) hazırlandıysa onları "Ses adı · Motor — 150/150 hazır" biçiminde listeler; tıklayınca o sese geçilir, yeniden hazırlamaya gerek kalmaz. Böyle bir ses varsa "Hazırla" düğmesinde sayısı görünür.
+
+### Değişiklik
+- Ayarlar'daki duygu etiketlerinden "deneysel" notu ve etiketlerin yanındaki Çalıştı / Çalışmadı / Denenmedi işaretleri kaldırıldı.
+
 ## 2.23.0 — 2026-10-23
 
 ### Yeni

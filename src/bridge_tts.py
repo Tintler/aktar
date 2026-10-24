@@ -7,6 +7,7 @@ calismaz). Secimler ui.json 'tts' altindadir.
 """
 from __future__ import annotations
 
+import json
 import re
 import sys
 import threading
@@ -440,6 +441,71 @@ class TtsMixin:
     def tts_cached(self, book, sentences, speed=1.0, language='tr', breaks=None):
         """Bu cumlelerden kacinin sesi hazir (motor yuklenmeden okunabilir). `breaks`: paragraf sonu cumleleri."""
         return self._engines().cached(book, sentences, speed, language or 'tr', breaks=breaks)
+
+    def _voice_variants(self, language):
+        """F190: okuyucunun gecebilecegi ses secimleri: kayitli sesler ve ayar istemeyen motor sesleri, motor
+        bulutta da calisiyorsa (motor.json cache_prefs) her calisma yeriyle. [{'key', 'label', 'preset', 'voice',
+        'prefs', 'tts'}]; 'tts' o secimle ui.json 'tts'."""
+        from tts import language_key
+        key = language_key(language)
+        engines = self._engines()
+        manifests = engines._manifests()
+        base = dict(self.ui_prefs().get('tts', {}))
+        specs = {value: spec for value, spec in self._voice_specs().items() if spec.get('language', 'tr') == key}
+        try:
+            presets = [p for p in voice_presets.list_presets(APP_DIR) if p.get('voice') in specs]
+        except OSError:
+            presets = []
+        choices = [(p['voice'], p.get('options') or {}, p['id'], p.get('name') or p['id']) for p in presets]
+        choices += [(value, None, '', spec['engine_name'] if (spec.get('name') or value) == spec['engine_name']
+                     else f'{spec["engine_name"]} · {spec["name"]}') for value, spec in specs.items() if not spec.get('options')]
+        result = []
+        for voice, options, preset, label in choices:
+            engine_id = voice.partition('/')[0]
+            manifest = manifests.get(engine_id, {})
+            tts = dict(base, voices=dict(base.get('voices') or {}, **{key: voice}), active_preset=preset)
+            if options is not None:
+                tts['options'] = dict(base.get('options') or {}, **{voice: dict(options)})
+                label = f'{label} · {specs[voice]["engine_name"]}'
+            places = [{}]
+            for pref, default in (manifest.get('cache_prefs') or {}).items():
+                values = list(dict.fromkeys([default, manifest.get('cloud') or default, base.get(pref, default)]))
+                places = [dict(place, **{pref: value}) for place in places for value in values]
+            for place in places:
+                cloud = any(value != (manifest.get('cache_prefs') or {}).get(pref) for pref, value in place.items())
+                result.append({'key': json.dumps([voice, preset, place], sort_keys=True), 'preset': preset,
+                               'voice': voice, 'prefs': place, 'tts': dict(tts, **place),
+                               'label': label + (' · bulut' if cloud else ' · yerel' if place else '')})
+        return result
+
+    def tts_cached_voices(self, book, sentences, speed=1.0, language='tr', breaks=None):
+        """F190: bu cumlelerin baska seslerle (kayitli ses, motor sesi, yerel/bulut) hazirlanmis olanlari; secili ses
+        haric, en az bir cumlesi hazir olanlar: [{'key', 'label', 'count', 'total'}]."""
+        language = language or 'tr'
+        engines = self._engines()
+        current = engines.voice_signature(language)
+        total = sum(1 for text in sentences or () if str(text).strip())
+        found = []
+        try:
+            for variant in self._voice_variants(language):
+                view = engines.with_prefs(variant['tts'])
+                if view.voice_signature(language) == current:
+                    continue
+                count = view.cached(book, sentences, speed, language, breaks=breaks)
+                if count:
+                    found.append({'key': variant['key'], 'label': variant['label'], 'count': count, 'total': total})
+        except Exception as error:
+            return _error(error)
+        found.sort(key=lambda item: -item['count'])
+        return found
+
+    def tts_use_voice(self, key, language='tr'):
+        """F190: tts_cached_voices'taki secime gecer (ses ve calisma yeri ui.json'a yazilir); guncel 'tts' tercihleri."""
+        variant = next((v for v in self._voice_variants(language or 'tr') if v['key'] == key), None)
+        if variant is None:
+            return _error('Bu ses artık yok.')
+        self.save_ui_prefs({'tts': variant['tts']})
+        return {'tts': variant['tts']}
 
     def tts_plan(self, book, sentences, speed=1.0, language='tr', breaks=None):
         """F186: okuyucunun cumleleri hangi gruplarla isteyecegi (Hazirla ile ayni): {'groups': [[bas, son, hazir]]}."""

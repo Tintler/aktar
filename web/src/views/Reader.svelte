@@ -148,6 +148,30 @@
     if (app.ttsPrepare?.book === book?.id || app.ttsPrepare === null) refreshCached();
   });
 
+  // F190: bu bolumun baska bir sesle (kayitli ses, motor, yerel/bulut) hazirlanmis sesi; Hazirla menusunde
+  // listelenir, tiklayinca o sese gecilir (yeniden hazirlamaya gerek kalmaz).
+  let otherVoices = $state([]);
+  async function refreshOtherVoices() {
+    const list = sentences;
+    const result = list.length && book
+      ? await call('tts_cached_voices', book.id, list, app.ttsPrefs.speed, book.language || 'tr', [...breaks]).catch(() => [])
+      : [];
+    if (list === sentences) otherVoices = Array.isArray(result) ? result : [];
+  }
+  $effect(() => {
+    sentences; app.ttsPrefs.voices; app.ttsPrefs.active_preset; app.ttsPrefs.drama3_tr_backend; app.ttsPrefs.speed;
+    if (app.ttsPrepare === null || app.ttsPrepare === undefined) untrack(refreshOtherVoices);
+  });
+
+  async function useVoice(item) {
+    showPrepare = false;
+    const result = await act('tts_use_voice', item.key, book.language || 'tr');
+    if (!result) return;
+    app.ttsPrefs = { ...app.ttsPrefs, ...result.tts };
+    toast(`Ses değişti: ${item.label}`);
+    await voiceChanged();
+  }
+
   // Plays from the cache when the whole chapter is prepared; otherwise starts (or reuses) the engine
   // chosen for the book's language and waits until it is ready.
   async function ensureEngine({ needEngine = false } = {}) {
@@ -644,9 +668,19 @@
               title="Sesi önceden üretip saklar; hazır bölümler motor yüklenmeden anında okunur"
               disabled={Boolean(app.ttsPrepare)} onclick={() => (showPrepare = !showPrepare)}>
               <Icon name={sentences.length && cachedCount === sentences.length ? 'check' : 'headphones'} size={14} />
-              {sentences.length && cachedCount === sentences.length ? 'Hazır' : cachedCount ? `Hazır ${cachedCount}/${sentences.length}` : 'Hazırla'}</button>
+              {sentences.length && cachedCount === sentences.length ? 'Hazır' : cachedCount ? `Hazır ${cachedCount}/${sentences.length}` : 'Hazırla'}
+              {#if otherVoices.length && cachedCount < sentences.length}<span class="badge" title="Bu bölüm başka seslerle de hazırlanmış">{otherVoices.length}</span>{/if}</button>
             {#if showPrepare}
               <div class="prep-menu">
+                {#if otherVoices.length}
+                  <div class="menu-head">Başka seslerle hazır · tıklayınca o sese geçer</div>
+                  {#each otherVoices as item (item.key)}
+                    <button class="voice" onclick={() => useVoice(item)}>
+                      <Icon name={item.count === item.total ? 'check' : 'headphones'} size={14} />
+                      <span class="vl">{item.label}</span><span class="vc" class:full={item.count === item.total}>{item.count}/{item.total} hazır</span></button>
+                  {/each}
+                  <div class="menu-sep"></div>
+                {/if}
                 <button onclick={() => prepare(false)}>Bu bölümü hazırla</button>
                 <button onclick={() => prepare(true)}>Buradan kitabın sonuna kadar hazırla</button>
               </div>
@@ -785,4 +819,12 @@
     padding: 4px; box-shadow: 0 8px 28px var(--shadow); z-index: 20; white-space: nowrap; }
   .prep-menu button { display: block; width: 100%; text-align: left; padding: 8px 12px; border-radius: 7px; font-size: 13px; }
   .prep-menu button:hover { background: var(--surface-hover); }
+  .prep-menu .voice { display: flex; align-items: center; gap: 8px; }
+  .prep-menu .vl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .prep-menu .vc { color: var(--dim); font-size: 12px; font-weight: 600; margin-left: 12px; }
+  .prep-menu .vc.full { color: var(--ok); }
+  .menu-head { font-size: 11px; font-weight: 700; color: var(--dim); padding: 6px 12px 4px; }
+  .menu-sep { height: 1px; background: var(--outline); margin: 4px 6px; }
+  .badge { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--accent); color: var(--on-accent);
+    font-size: 10px; display: grid; place-items: center; }
 </style>
