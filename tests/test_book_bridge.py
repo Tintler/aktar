@@ -111,6 +111,11 @@ class BookBridgeTests(unittest.TestCase):
                          [{'source': 'A', 'target': 'B'}])
         with self.assertRaises(ValueError):
             validate_glossary_rows([{'source': 'A', 'target': ''}])
+        # F192: kisaltma ile kucuk harfli kelime ayri terimdir.
+        self.assertEqual(len(validate_glossary_rows([{'source': 'ART', 'target': 'GAT'},
+                                                     {'source': 'art', 'target': 'sanat'}])), 2)
+        with self.assertRaises(ValueError):
+            validate_glossary_rows([{'source': 'art', 'target': 'sanat'}, {'source': 'Art', 'target': 'Sanat'}])
         with self.assertRaises(ValueError):
             validate_glossary_rows([{'source': 'A', 'target': 'B'}, {'source': 'a', 'target': 'C'}])
 

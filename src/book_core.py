@@ -809,10 +809,25 @@ def _word_regex(pattern, flags=0):
 def source_term_regex(term):
     """Ingilizce kaynak terimi tam kelime olarak arar (G17); yalnizca -s/-es ve
     iyelik 's eklerine izin verir: "Ash" -> "Ash's" evet, "ashamed" hayir.
-    Bosluksuz yazilan kaynak dillerde (Japonca, Cince; F151) alt dize aranir."""
+    Bosluksuz yazilan kaynak dillerde (Japonca, Cince; F151) alt dize aranir.
+    Tamami buyuk harfli kisaltmalar (F192) harfe duyarli: "ART" -> "art" (sanat) hayir."""
+    flags = 0 if is_acronym(term) else re.I
     if languages.no_space(term):
-        return re.compile(re.escape(term), re.I)
-    return re.compile(r'(?<!\w)' + re.escape(term) + r"(?:s|es|'s|’s)?(?!\w)", re.I)
+        return re.compile(re.escape(term), flags)
+    return re.compile(r'(?<!\w)' + re.escape(term) + r"(?:s|es|'s|’s)?(?!\w)", flags)
+
+
+def is_acronym(term):
+    """En az iki harfli ve harflerinin tamami buyuk: ART, NASA, AI-2 (F192)."""
+    term = str(term).strip()
+    return term.isupper() and sum(char.isalpha() for char in term) >= 2
+
+
+def glossary_key(source):
+    """Sozlukte ayni terim sayilma anahtari: kisaltma aynen, digerleri casefold.
+    Boylece "ART -> GAT" ile "art -> sanat" ayri kayit olarak tutulabilir (F192)."""
+    source = str(source).strip()
+    return source if is_acronym(source) else source.casefold()
 
 
 def tr_lower(text):
@@ -927,7 +942,7 @@ def _dedupe_glossary(items):
         target = str(item.get('target', '')).strip()
         if not source or not target:
             continue
-        key = source.casefold()
+        key = glossary_key(source)
         if key in seen:
             continue
         seen.add(key)
@@ -945,7 +960,9 @@ def load_glossary(book):
 def glossary_text(items):
     if not items:
         return '(Kullanici tarafindan tanimlanmis ozel terim yok.)'
-    return '\n'.join(f'- {item["source"]} -> {item["target"]}' for item in items)
+    return '\n'.join(f'- {item["source"]} -> {item["target"]}'
+                     + (' (only this exact uppercase form)' if is_acronym(item['source']) else '')
+                     for item in items)
 
 
 def fixed_context(context):
@@ -1221,7 +1238,7 @@ def analysis_terms(book):
         target = str(item.get('suggested_target', '') or '').strip()
         if not source or not target:
             continue
-        key = source.casefold()
+        key = glossary_key(source)
         if key in seen:
             continue
         seen.add(key)
@@ -1789,15 +1806,15 @@ class TranslationEngine:
         merged, seen = [], set()
         for item in existing:
             merged.append(item)
-            seen.add(item['source'].casefold())
+            seen.add(glossary_key(item['source']))
         for item in analysis_terms(book):
             if item.get('scope', 'book') != 'book':
                 continue  # G26: bolum ozel oneriler kitap geneli zorunlu sozluge otomatik girmez
             source = str(item.get('source', '')).strip()
             target = str(item.get('suggested_target', '') or '').strip()
-            if not source or not target or source.casefold() in seen:
+            if not source or not target or glossary_key(source) in seen:
                 continue
-            seen.add(source.casefold())
+            seen.add(glossary_key(source))
             merged.append({'source': source, 'target': target})
         if merged != existing:
             save_json(glossary_path, merged)

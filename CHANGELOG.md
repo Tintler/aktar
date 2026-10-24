@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.25.2 — 2026-10-24
+
+### Düzeltme
+- Kitap çevirisi sözlüğünde tamamı büyük harfli kısaltmalar (ör. `ART -> GAT`) artık yalnızca aynı yazımla eşleşir: küçük harfli "art" (sanat) geçen bölümlerde sözlük düzeltmesi istenmez ve modele bu terimin yalnızca büyük harfli yazımla geçerli olduğu söylenir. `ART` ve `art` sözlükte ayrı kayıt olarak tutulabilir.
+
 ## 2.25.1 — 2026-10-24
 
 ### Düzeltme

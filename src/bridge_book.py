@@ -20,7 +20,7 @@ import traceback
 
 import book_core
 from book_core import (DEFAULT_CONFIG as BOOK_DEFAULTS, SHARED_CONFIG_KEYS, Client, GracefulStop, PauseController,
-                       TranslationEngine, _dedupe_glossary, analysis_from_checkpoints, analysis_terms,
+                       TranslationEngine, _dedupe_glossary, analysis_from_checkpoints, analysis_terms, glossary_key,
                        chapters_containing, first_heading, load_analysis_selection, read, render_analysis, rows,
                        save_json, validate_rerun)
 from epub_import import prepare
@@ -49,7 +49,7 @@ def validate_glossary_rows(items):
             raise ValueError('Her sözlük satırında iki alan da dolu olmalı.')
         if source:
             result.append({'source': source, 'target': target})
-    if len({item['source'].casefold() for item in result}) != len(result):
+    if len({glossary_key(item['source']) for item in result}) != len(result):
         raise ValueError('Aynı kaynak terim birden fazla kez girilmiş.')
     return result
 
@@ -541,13 +541,13 @@ class BookMixin:
     def _book_ask_review(self, book, pending):
         glossary_path = book / 'glossary.json'
         current = _dedupe_glossary(json.loads(read(glossary_path)) if glossary_path.exists() else [])
-        existing = {item['source'].casefold() for item in current}
+        existing = {glossary_key(item['source']) for item in current}
         proposed = [{'source': str(item.get('source', '')).strip(),
                      'target': str(item.get('suggested_target', '')).strip(),
                      'scope': item.get('scope', 'book'), 'reason': str(item.get('reason', '') or '')}
                     for item in pending
                     if str(item.get('suggested_target', '')).strip()
-                    and str(item.get('source', '')).strip().casefold() not in existing]
+                    and glossary_key(item.get('source', '')) not in existing]
         if not proposed:
             return None
         event = threading.Event()
@@ -594,8 +594,8 @@ class BookMixin:
             return _error(error)
         path = self._bk_book / 'glossary.json'
         existing = json.loads(read(path)) if path.exists() else []
-        old_map = {item.get('source', '').casefold(): item.get('target', '') for item in existing}
-        new_map = {item.get('source', '').casefold(): item.get('target', '') for item in new_glossary}
+        old_map = {glossary_key(item.get('source', '')): item.get('target', '') for item in existing}
+        new_map = {glossary_key(item.get('source', '')): item.get('target', '') for item in new_glossary}
         changed = sorted({key for key in set(old_map) | set(new_map) if old_map.get(key) != new_map.get(key)})
         if not changed:
             return {'changed': False, 'affected': []}

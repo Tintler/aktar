@@ -901,6 +901,33 @@ class CoreTests(unittest.TestCase):
         # düzeltme isteği göndermez, çeviriyi aynen dondurur.
         self.assertEqual(engine._enforce_glossary(client, 'He felt ashamed.', translated, glossary, 100), translated)
 
+    def test_acronym_glossary_terms_are_case_sensitive(self):
+        """F192: tamami buyuk harfli kisaltma ("ART") yalnizca aynen eslesir;
+        "art" (sanat) duzeltme istegi tetiklemez. Normal terimler harfe duyarsiz kalir."""
+        self.assertTrue(book_core.source_term_regex('ART').search('The ART team arrived.'))
+        self.assertTrue(book_core.source_term_regex('ART').search("ART's leader"))
+        self.assertFalse(book_core.source_term_regex('ART').search('Modern art is strange.'))
+        self.assertFalse(book_core.source_term_regex('ART').search('Art and music.'))
+        self.assertTrue(book_core.source_term_regex('Ash').search('ASH kapıda'))
+        self.assertFalse(book_core.is_acronym('A'))
+        self.assertTrue(book_core.is_acronym('AI-2'))
+        # Kisaltma ile ayni yazimli kucuk harfli terim ayri kayit olarak kalir.
+        glossary = book_core._dedupe_glossary([{'source': 'ART', 'target': 'GAT'}, {'source': 'art', 'target': 'sanat'},
+                                               {'source': 'Art', 'target': 'Sanat2'}])
+        self.assertEqual(glossary, [{'source': 'ART', 'target': 'GAT'}, {'source': 'art', 'target': 'sanat'}])
+        self.assertIn('ART -> GAT (only this exact uppercase form)', book_core.glossary_text(glossary))
+        self.assertNotIn('sanat (only', book_core.glossary_text(glossary))
+
+        def fail_request(_route, payload=None):
+            raise AssertionError('duzeltme istegi gonderilmemeli')
+
+        client = Client(dict(DEFAULT_CONFIG, token_estimation_enabled=False), lambda _message: None)
+        client.request = fail_request
+        engine = TranslationEngine(lambda: dict(DEFAULT_CONFIG), log=lambda _message: None)
+        translated = 'Modern sanat tuhaftır.'
+        self.assertEqual(engine._enforce_glossary(client, 'Modern art is strange.', translated,
+                                                  [{'source': 'ART', 'target': 'GAT'}], 100), translated)
+
     def test_enforce_glossary_matches_whole_words_only_in_translated_too(self):
         """G17: zorunlu terim kaynakta tam kelime olarak varsa karşılık da
         çıktıda tam kelime olarak aranır; "külot" içindeki "kül" sayılmaz."""
