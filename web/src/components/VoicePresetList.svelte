@@ -189,8 +189,8 @@
             <button class="icon-btn sm" class:on={playing === preset.id} title={playing === preset.id ? 'Durdur' : 'Önizlemeyi dinle'}
               onclick={() => playPreview(preset)}><Icon name={playing === preset.id ? 'stop' : 'play'} size={14} /></button>
           {/if}
-          <button class="icon-btn sm" title="Yukarı taşı" disabled={index === 0} onclick={() => step(index, -1)}><Icon name="up" size={15} /></button>
-          <button class="icon-btn sm" title="Aşağı taşı" disabled={index === presets.length - 1} onclick={() => step(index, 1)}><Icon name="down" size={15} /></button>
+          <button class="icon-btn sm" title="Öne taşı" disabled={index === 0} onclick={() => step(index, -1)}><Icon name="back" size={15} /></button>
+          <button class="icon-btn sm" title="Sona doğru taşı" disabled={index === presets.length - 1} onclick={() => step(index, 1)}><Icon name="forward" size={15} /></button>
           <button class="icon-btn sm" title="Düzenle" onclick={() => (editing = preset)}><Icon name="pencil" size={15} /></button>
         </li>
       {/each}
@@ -258,8 +258,10 @@
   .top > div { flex: 1; min-width: 0; }
   .top b { display: block; font-size: 15px; }
   .top small { display: block; color: var(--dim); font-size: 12px; margin-top: 2px; }
-  ul { list-style: none; margin: 0; padding: 8px; display: flex; flex-direction: column; gap: 2px; }
-  .item { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 10px; border: 1px solid transparent; }
+  /* F191: sesler sigdigi kadar sutuna dizilir (en fazla 3, sutun en az 360 px); sira soldan saga, satir satir */
+  ul { list-style: none; margin: 0; padding: 8px; display: grid; gap: 4px;
+    grid-template-columns: repeat(auto-fill, minmax(max(360px, calc((100% - 8px) / 3)), 1fr)); }
+  .item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; border: 1px solid transparent; min-width: 0; }
   .pick { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; text-align: left; color: inherit; padding: 0;
     background: none; border: 0; cursor: pointer; }
   .item:hover { background: var(--surface-hover); }

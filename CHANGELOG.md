@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.25.1 — 2026-10-24
+
+### Düzeltme
+- Kayıtlı sesler listesi geniş pencerede yan yana sütunlara dizilir (sığarsa 3 sütun); sıra soldan sağa okunur, taşıma okları "öne / sona doğru" oldu.
+
 ## 2.25.0 — 2026-10-24
 
 ### Yeni
