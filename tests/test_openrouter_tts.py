@@ -255,6 +255,63 @@ class CloudEngineTests(unittest.TestCase):
         self.assertEqual([s['key'] for s in engine['settings'] if s.get('local_only')], ['cfg'])
 
 
+class OtherVoiceTests(unittest.TestCase):
+    """F190: bulutta bir kayitli sesle Hazirla, sonra baska sese gecilince Hazirla menusu onceki sesi gosterir
+    (duygu etiketleri ve cumle gruplamasi acik, kullanicinin durumu)."""
+
+    def setUp(self):
+        import bridge
+        import bridge_tts
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = Path(self.temp.name)
+        for target in ('bridge.APP_DIR', 'bridge_tts.APP_DIR'):
+            patcher = patch(target, root)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        for target, value in (('drama3.prepare_reference', lambda path, text, *_a, **_k:
+                               {'text': text, 'data': 'UklGRg==', 'seconds': 5.0}),
+                              ('openrouter_tts.reference_audio', lambda wav: (b'mp3:' + wav, 'mp3')),
+                              ('openrouter_tts.api_key', lambda: KEY),
+                              ('openrouter_tts.speech', lambda text, *_a, **_k: drama3.wav_bytes(
+                                  array.array('h', pcm(0.05 * len(text))), openrouter_tts.PCM_RATE))):
+            patcher = patch(target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.bridge = bridge.Bridge(emit=lambda *_: None)
+        self.addCleanup(lambda: self.bridge._engines().shutdown())
+        for name in ('isil', 'burt'):
+            (root / f'{name}.wav').write_bytes(b'RIFF' + name.encode())
+        self.ids = {name: self.bridge.tts_preset_save({'name': name.title(), 'voice': 'drama3-tr/clone', 'options': {
+            'reference': str(root / f'{name}.wav'), 'reference_text': 'Kayıt.'}})['saved']['id'] for name in ('isil', 'burt')}
+        self.bridge.save_ui_prefs({'tts': {drama3_tr.PREF_BACKEND: 'openrouter', 'emotion_tags': 'on'}})
+
+    def wait(self):
+        engines = self.bridge._engines()
+        end = time.time() + 30
+        while engines.state == 'loading' and time.time() < end:
+            time.sleep(0.05)
+        return engines.state
+
+    def test_prepared_in_cloud_is_listed_for_other_preset(self):
+        book = '0123456789abcdef'
+        sentences = ['Kapıyı açtı.', '"Kimse yok mu?" diye fısıldadı.', 'Ses gelmedi.', 'Bekledi.', 'Sonra içeri girdi.']
+        breaks = [2, 4]
+        self.bridge._emotion_store().save(book, 'words', [{'sentences': sentences, 'breaks': breaks}],
+                                          [['', '[fısıldar]', '', '', '']])
+        self.bridge.tts_preset_apply(self.ids['burt'])
+        self.bridge.tts_load('tr')
+        self.assertEqual(self.wait(), 'ready')
+        self.assertEqual(self.bridge._engines().prepare(book, sentences, 1.0, 'tr', breaks=breaks), 5)
+        self.assertEqual(self.bridge.tts_cached(book, sentences, 1.0, 'tr', breaks), 5)
+        self.bridge.tts_preset_apply(self.ids['isil'])
+        self.assertEqual(self.bridge.tts_cached(book, sentences, 1.0, 'tr', breaks), 0)
+        found = self.bridge.tts_cached_voices(book, sentences, 1.0, 'tr', breaks)
+        self.assertEqual([(f['label'], f['count']) for f in found], [('Burt · Drama 3 TR (16 GB GPU) · bulut', 5)])
+        self.bridge.tts_use_voice(found[0]['key'], 'tr')
+        self.assertEqual(self.bridge.tts_cached(book, sentences, 1.0, 'tr', breaks), 5)
+
+
 class PrepareWatchTests(unittest.TestCase):
     """F188: Hazirla uzun sure ilerlemezse beklenen yer Konsol'a yazilir."""
 

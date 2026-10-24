@@ -2,6 +2,12 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.24.2 — 2026-10-24
+
+### Düzeltme
+- "Başka seslerle hazır" araması yaklaşık 4 kat hızlandı: kitabın duygu etiketleri ve önbellek dosyaları her ses için yeniden okunmuyor.
+- "Hazırla" menüsü arama sürerken "aranıyor…", hiçbir ses bulunmazsa "Bu bölüm başka bir sesle hazırlanmamış" yazar. Menü açılınca denenen sesler ve hazır cümle sayıları Konsol'a yazılır.
+
 ## 2.24.1 — 2026-10-24
 
 ### Düzeltme

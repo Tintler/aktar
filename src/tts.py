@@ -591,7 +591,7 @@ class Engines:
                         text, tag = self._request_text(texts[start] if end == start else texts[start:end + 1],
                                                        book, language, override)
                         path = self._cache_path(book, text, speed, language, override, tag)
-                        if path is not None and path.exists():
+                        if path is not None and self._cached_file(path):
                             known[start] = end
                             break
             return known[start]
@@ -616,13 +616,49 @@ class Engines:
         return sum(sum(1 for text in sentences[start:end + 1] if str(text).strip())
                    for start, end, ready in self.plan(book, sentences, speed, language, breaks, override) if ready)
 
-    def with_prefs(self, prefs):
+    def with_prefs(self, prefs, shared=None):
         """F190: a read-only view of the cache as if ui.json 'tts' were `prefs` (another voice or backend), for
-        counting what was prepared with it (cached/plan). It shares the worker: never load or say through it."""
+        counting what was prepared with it (cached/plan). It shares the worker: never load or say through it.
+        `shared` ({}), passed to every view of one count, remembers the book's emotion tags and cache files."""
         import copy
         view = copy.copy(self)
         view._prefs = lambda: prefs
+        if shared is not None:
+            tags = shared.setdefault('tags', {})
+            emotion = self._emotion
+
+            def remembered(book, text):
+                if (book, text) not in tags:
+                    tags[book, text] = emotion(book, text) if emotion else ''
+                return tags[book, text]
+
+            view._emotion = remembered
+            view._files = shared.setdefault('files', {})
+            choices = {}
+            plain_choice = view.choice
+
+            def choice(language, override=None):   # engines() is rebuilt on every call; prefs are fixed here
+                if override is not None:
+                    return plain_choice(language, override)
+                if language not in choices:
+                    choices[language] = plain_choice(language)
+                return choices[language]
+
+            view.choice = choice
         return view
+
+    _files = None   # F190: {book: set of cached file names} while counting other voices (with_prefs)
+
+    def _cached_file(self, path):
+        if self._files is None:
+            return path.exists()
+        book = path.parent.name
+        if book not in self._files:
+            try:
+                self._files[book] = set(os.listdir(path.parent))
+            except OSError:
+                self._files[book] = set()
+        return path.name in self._files[book]
 
     def voice_signature(self, language):
         """F190: what makes the cache of a language's voice differ (engine, voice, options, cache prefs)."""

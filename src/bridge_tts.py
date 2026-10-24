@@ -478,30 +478,41 @@ class TtsMixin:
                                'label': label + (' · bulut' if cloud else ' · yerel' if place else '')})
         return result
 
-    def tts_cached_voices(self, book, sentences, speed=1.0, language='tr', breaks=None):
+    def tts_cached_voices(self, book, sentences, speed=1.0, language='tr', breaks=None, report=False):
         """F190: bu cumlelerin baska seslerle (kayitli ses, motor sesi, yerel/bulut) hazirlanmis olanlari; secili ses
-        haric, en az bir cumlesi hazir olanlar: [{'key', 'label', 'count', 'total'}]."""
+        haric, en az bir cumlesi hazir olanlar: [{'key', 'label', 'count', 'total'}]. `report`: denenen her ses ve
+        sayisi Konsol'a yazilir (Hazirla menusu acilinca)."""
         language = language or 'tr'
         engines = self._engines()
         current = engines.voice_signature(language)
         total = sum(1 for text in sentences or () if str(text).strip())
-        found = []
+        found, notes, started = [], [], time.monotonic()
         try:
             variants = self._voice_variants(language)
         except Exception as error:
             self._log(f'UYARI: Başka seslerle hazırlanan sesler okunamadı: {error!r}')
             return _error(error)
+        shared = {}   # duygu etiketleri ve onbellek dosyalari butun sesler icin bir kez okunur
         for variant in variants:   # bir sesin hatasi digerlerini gizlemesin
             try:
-                view = engines.with_prefs(variant['tts'])
+                view = engines.with_prefs(variant['tts'], shared)
                 if view.voice_signature(language) == current:
+                    notes.append(f'{variant["label"]}: seçili ses')
                     continue
                 count = view.cached(book, sentences, speed, language, breaks=breaks)
             except Exception as error:
                 self._log(f'UYARI: "{variant["label"]}" sesiyle hazırlanan ses okunamadı: {error!r}')
                 continue
+            notes.append(f'{variant["label"]}: {count}/{total}')
             if count:
                 found.append({'key': variant['key'], 'label': variant['label'], 'count': count, 'total': total})
+        if report:
+            files = len((shared.get('files') or {}).get(str(book), ()))
+            prefs = self.ui_prefs().get('tts', {})
+            selected = '/'.join(str(part) for part in engines.choice(language))
+            self._log(f'Hazırla: başka sesler denetlendi ({time.monotonic() - started:.1f} sn, kitabın önbelleğinde '
+                      f'{files} dosya, hız {speed}, {len(breaks or ())} paragraf sonu, seçili {selected} '
+                      f'{prefs.get("active_preset") or "-"} {prefs.get("drama3_tr_backend") or "local"}): ' + '; '.join(notes))
         found.sort(key=lambda item: -item['count'])
         return found
 

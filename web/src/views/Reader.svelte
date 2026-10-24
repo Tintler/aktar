@@ -151,12 +151,16 @@
   // F190: bu bolumun baska bir sesle (kayitli ses, motor, yerel/bulut) hazirlanmis sesi; Hazirla menusunde
   // listelenir, tiklayinca o sese gecilir (yeniden hazirlamaya gerek kalmaz).
   let otherVoices = $state([]);
-  async function refreshOtherVoices() {
+  let otherSearching = $state(false);
+  async function refreshOtherVoices(report = false) {
     const list = sentences;
+    otherSearching = true;
     const result = list.length && book
-      ? await call('tts_cached_voices', book.id, list, app.ttsPrefs.speed, book.language || 'tr', [...breaks]).catch(() => [])
+      ? await call('tts_cached_voices', book.id, list, app.ttsPrefs.speed, book.language || 'tr', [...breaks], report).catch(() => [])
       : [];
-    if (list === sentences) otherVoices = Array.isArray(result) ? result : [];
+    if (list !== sentences) return;
+    otherVoices = Array.isArray(result) ? result : [];
+    otherSearching = false;
   }
   $effect(() => {
     sentences; app.ttsPrefs.voices; app.ttsPrefs.active_preset; app.ttsPrefs.drama3_tr_backend; app.ttsPrefs.speed;
@@ -666,7 +670,7 @@
           <div class="prep">
             <button class="chip" class:ready={sentences.length && cachedCount === sentences.length}
               title="Sesi önceden üretip saklar; hazır bölümler motor yüklenmeden anında okunur"
-              disabled={Boolean(app.ttsPrepare)} onclick={() => { showPrepare = !showPrepare; if (showPrepare) refreshOtherVoices(); }}>
+              disabled={Boolean(app.ttsPrepare)} onclick={() => { showPrepare = !showPrepare; if (showPrepare) refreshOtherVoices(true); }}>
               <Icon name={sentences.length && cachedCount === sentences.length ? 'check' : 'headphones'} size={14} />
               {sentences.length && cachedCount === sentences.length ? 'Hazır' : cachedCount ? `Hazır ${cachedCount}/${sentences.length}` : 'Hazırla'}
               {#if otherVoices.length && cachedCount < sentences.length}<span class="badge" title="Bu bölüm başka seslerle de hazırlanmış">{otherVoices.length}</span>{/if}</button>
@@ -679,8 +683,10 @@
                       <Icon name={item.count === item.total ? 'check' : 'headphones'} size={14} />
                       <span class="vl">{item.label}</span><span class="vc" class:full={item.count === item.total}>{item.count}/{item.total} hazır</span></button>
                   {/each}
-                  <div class="menu-sep"></div>
+                {:else}
+                  <div class="menu-head">{otherSearching ? 'Başka seslerle hazırlanan sesler aranıyor…' : 'Bu bölüm başka bir sesle hazırlanmamış'}</div>
                 {/if}
+                <div class="menu-sep"></div>
                 <button onclick={() => prepare(false)}>Bu bölümü hazırla</button>
                 <button onclick={() => prepare(true)}>Buradan kitabın sonuna kadar hazırla</button>
               </div>
