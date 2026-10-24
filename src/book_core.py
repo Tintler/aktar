@@ -810,8 +810,9 @@ def source_term_regex(term):
     """Ingilizce kaynak terimi tam kelime olarak arar (G17); yalnizca -s/-es ve
     iyelik 's eklerine izin verir: "Ash" -> "Ash's" evet, "ashamed" hayir.
     Bosluksuz yazilan kaynak dillerde (Japonca, Cince; F151) alt dize aranir.
-    Tamami buyuk harfli kisaltmalar (F192) harfe duyarli: "ART" -> "art" (sanat) hayir."""
-    flags = 0 if is_acronym(term) else re.I
+    Buyuk harfle baslayan terimler (kisaltma ve ozel isim, F192/F193) harfe duyarli:
+    "ART" -> "art" (sanat) hayir, "Preservation" -> "preservation" (koruma) hayir."""
+    flags = 0 if is_proper(term) else re.I
     if languages.no_space(term):
         return re.compile(re.escape(term), flags)
     return re.compile(r'(?<!\w)' + re.escape(term) + r"(?:s|es|'s|’s)?(?!\w)", flags)
@@ -821,6 +822,51 @@ def is_acronym(term):
     """En az iki harfli ve harflerinin tamami buyuk: ART, NASA, AI-2 (F192)."""
     term = str(term).strip()
     return term.isupper() and sum(char.isalpha() for char in term) >= 2
+
+
+def is_proper(term):
+    """Ilk harfi buyuk terim ozel isim sayilir: Preservation, ART (F193)."""
+    letter = next((char for char in str(term) if char.isalpha()), '')
+    return letter.isupper()
+
+
+# Cumle basindaki kelimeyi kaynaga gore ayirmak icin atlanan tirnak/Markdown isaretleri.
+_SENTENCE_LEAD = ' \t\r\n"\'“‘«(*_#>[-—–'
+
+
+def _at_sentence_start(text, index):
+    before = text[:index]
+    stripped = before.rstrip(_SENTENCE_LEAD)
+    return not stripped or '\n' in before[len(stripped):] or stripped[-1] in '.!?…'
+
+
+def _ambiguous_proper(term):
+    term = str(term).strip()
+    return is_proper(term) and not is_acronym(term) and len(term.split()) == 1
+
+
+def common_word_terms(book, glossary):
+    """Kitabin kaynaginda kucuk harfle siradan kelime olarak da gecen tek
+    kelimelik ozel isimler ("preservation" -> Preservation). Bunlar cumle
+    basinda belirsizdir (F193)."""
+    terms = [item['source'] for item in glossary if _ambiguous_proper(item['source'])]
+    if not terms:
+        return frozenset()
+    text = '\n'.join(read(path) for path in sorted((Path(book) / 'source').glob('*.md')))
+    # term.lower() kucuk harfli oldugu icin source_term_regex harfe duyarsiz arar;
+    # yalnizca kucuk harfle baslayan gecisler sayilir.
+    return frozenset(term for term in terms
+                     if any(match.group(0)[0].islower() for match in source_term_regex(term.lower()).finditer(text)))
+
+
+def glossary_term_present(term, text, common=False):
+    """Sozluk terimi kaynakta zorunlu denetim gerektirecek bicimde geciyor mu.
+    Kitapta siradan kelime olarak da gecen (common) tek kelimelik ozel isim
+    cumle/paragraf basinda belirsizdir ("Preservation of the data..."): orada
+    denetlenmez, karari sozluk talimatiyla model verir (F193)."""
+    exempt = common and _ambiguous_proper(term)
+    return any(not (exempt and _at_sentence_start(text, match.start()))
+               for match in source_term_regex(str(term).strip()).finditer(text))
 
 
 def glossary_key(source):
@@ -1660,12 +1706,13 @@ class TranslationEngine:
         self._budget_check(client.cfg, client, system, user, max_tokens)
         return client.generate(system, user, max_tokens, require_marker=require_marker, allow_json_fence=allow_json_fence)
 
-    def _enforce_glossary(self, client, source, translated, glossary, max_tokens):
+    def _enforce_glossary(self, client, source, translated, glossary, max_tokens, common=frozenset()):
         # Kaynak: tam kelime (G17). Hedef: Turkce cekim/ses olayi toleransli (G24).
         def missing_in(text, items):
             return [item for item in items if not _target_search(item['target'], text, languages.target(client.cfg))]
 
-        present = [item for item in glossary if source_term_regex(item['source']).search(source)]
+        present = [item for item in glossary
+                   if glossary_term_present(item['source'], source, item['source'] in common)]
         missing = missing_in(translated, present)
         if not missing:
             return translated
@@ -1866,6 +1913,7 @@ class TranslationEngine:
             self.log('Bitis isareti/otomatik tekrar ayarlari mevcut yarim bolum icin guncellendi.')
         client = Client(cfg, self.log)
         glossary = existing.get('glossary', []) if existing and 'glossary' in existing else load_glossary(book)
+        common = common_word_terms(book, glossary)
         chunks = split_source(source, int(cfg['chunk_chars']))
         signature = digest(source + '\0' + book_prompt(cfg) + '\0' + json.dumps(glossary, sort_keys=True, ensure_ascii=False))
         if existing and 'effective_config' not in existing:
@@ -1945,7 +1993,7 @@ class TranslationEngine:
                         if trimmed:
                             self.log(f'Kaynagin son baglantisindan sonra modelin ekledigi {trimmed} karakter kesildi.')
                     translated = self._enforce_glossary(
-                        client, prompt_chunk, translated, glossary, int(cfg['max_tokens']))
+                        client, prompt_chunk, translated, glossary, int(cfg['max_tokens']), common)
                     translated = expand_targets(translated, targets)
                     translated, repaired_links = repair_link_openers(chunks[index], translated)
                     if repaired_links:

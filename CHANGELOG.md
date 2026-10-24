@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.25.3 — 2026-10-24
+
+### Düzeltme
+- Kitap çevirisi sözlüğünde büyük harfle başlayan terimler (ör. `Preservation`) özel isim sayılır ve yalnızca büyük harfli yazımla eşleşir; küçük harfli "preservation" (koruma) sözlük düzeltmesi istemez. Kitapta küçük harfle sıradan kelime olarak da geçen tek kelimelik bir özel isim cümle ya da paragraf başındaysa zorunlu düzeltmeye girmez; orada karar sözlük talimatıyla modele bırakılır. `Preservation Station` gibi çok kelimeli terimler her yerde denetlenir.
+
 ## 2.25.2 — 2026-10-24
 
 ### Düzeltme

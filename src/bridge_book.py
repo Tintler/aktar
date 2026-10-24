@@ -596,7 +596,8 @@ class BookMixin:
         existing = json.loads(read(path)) if path.exists() else []
         old_map = {glossary_key(item.get('source', '')): item.get('target', '') for item in existing}
         new_map = {glossary_key(item.get('source', '')): item.get('target', '') for item in new_glossary}
-        changed = sorted({key for key in set(old_map) | set(new_map) if old_map.get(key) != new_map.get(key)})
+        spelled = {glossary_key(item.get('source', '')): item.get('source', '') for item in [*existing, *new_glossary]}
+        changed = sorted({spelled[key] for key in set(old_map) | set(new_map) if old_map.get(key) != new_map.get(key)})
         if not changed:
             return {'changed': False, 'affected': []}
         save_json(path, new_glossary)

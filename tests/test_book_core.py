@@ -908,7 +908,7 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(book_core.source_term_regex('ART').search("ART's leader"))
         self.assertFalse(book_core.source_term_regex('ART').search('Modern art is strange.'))
         self.assertFalse(book_core.source_term_regex('ART').search('Art and music.'))
-        self.assertTrue(book_core.source_term_regex('Ash').search('ASH kapıda'))
+        self.assertTrue(book_core.source_term_regex('ash').search('ASH kapıda'))
         self.assertFalse(book_core.is_acronym('A'))
         self.assertTrue(book_core.is_acronym('AI-2'))
         # Kisaltma ile ayni yazimli kucuk harfli terim ayri kayit olarak kalir.
@@ -927,6 +927,47 @@ class CoreTests(unittest.TestCase):
         translated = 'Modern sanat tuhaftır.'
         self.assertEqual(engine._enforce_glossary(client, 'Modern art is strange.', translated,
                                                   [{'source': 'ART', 'target': 'GAT'}], 100), translated)
+
+    def test_proper_noun_glossary_terms_skip_lowercase_and_sentence_start(self):
+        """F193: buyuk harfle baslayan terim yalnizca buyuk yazimla eslesir; kitapta
+        siradan kelime olarak da gecen tek kelimelik ozel isim cumle/paragraf
+        basinda zorunlu denetime girmez."""
+        present = book_core.glossary_term_present
+        self.assertFalse(present('Preservation', 'Data preservation matters.'))
+        self.assertTrue(present('Preservation', 'We flew back to Preservation.', True))
+        self.assertTrue(present('Preservation', "The Preservation's council met.", True))
+        for start in ('Preservation of data matters.', 'It ended. Preservation of data matters.',
+                      'Line one\n\n"Preservation is hard," she said.', '> *Preservation* first.'):
+            self.assertFalse(present('Preservation', start, True), start)
+            # Kitapta kucuk harfle hic gecmiyorsa cumle basinda da denetlenir.
+            self.assertTrue(present('Preservation', start), start)
+        # Cumle basinda olsa da baska bir yerde gecerse denetlenir.
+        self.assertTrue(present('Preservation', 'Preservation is far. We reached Preservation.', True))
+        # Cok kelimeli ozel isim ve kisaltma cumle basinda da denetlenir.
+        self.assertTrue(present('Preservation Station', 'Preservation Station was quiet.', True))
+        self.assertFalse(present('Preservation Station', 'preservation station logs'))
+        self.assertTrue(present('ART', 'ART said nothing.', True))
+        # Kucuk harfli terim eskisi gibi harfe duyarsiz.
+        self.assertTrue(present('hub', 'The Hub was busy.'))
+
+        with tempfile.TemporaryDirectory() as temp:
+            book = Path(temp); (book / 'source').mkdir()
+            (book / 'source' / '001.md').write_text('Preservation is far. Data preservation matters. Ash came.',
+                                                    encoding='utf-8')
+            glossary = [{'source': 'Preservation', 'target': 'Preservation'}, {'source': 'Ash', 'target': 'Kül'},
+                        {'source': 'Preservation Station', 'target': 'Preservation İstasyonu'}]
+            self.assertEqual(book_core.common_word_terms(book, glossary), {'Preservation'})
+
+        def fail_request(_route, payload=None):
+            raise AssertionError('duzeltme istegi gonderilmemeli')
+
+        client = Client(dict(DEFAULT_CONFIG, token_estimation_enabled=False), lambda _message: None)
+        client.request = fail_request
+        engine = TranslationEngine(lambda: dict(DEFAULT_CONFIG), log=lambda _message: None)
+        translated = 'Verilerin korunması önemlidir.'
+        self.assertEqual(engine._enforce_glossary(client, 'Preservation of data matters.', translated,
+                                                  [{'source': 'Preservation', 'target': 'Preservation'}], 100,
+                                                  {'Preservation'}), translated)
 
     def test_enforce_glossary_matches_whole_words_only_in_translated_too(self):
         """G17: zorunlu terim kaynakta tam kelime olarak varsa karşılık da
