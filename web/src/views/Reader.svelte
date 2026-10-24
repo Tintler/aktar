@@ -666,7 +666,7 @@
           <div class="prep">
             <button class="chip" class:ready={sentences.length && cachedCount === sentences.length}
               title="Sesi önceden üretip saklar; hazır bölümler motor yüklenmeden anında okunur"
-              disabled={Boolean(app.ttsPrepare)} onclick={() => (showPrepare = !showPrepare)}>
+              disabled={Boolean(app.ttsPrepare)} onclick={() => { showPrepare = !showPrepare; if (showPrepare) refreshOtherVoices(); }}>
               <Icon name={sentences.length && cachedCount === sentences.length ? 'check' : 'headphones'} size={14} />
               {sentences.length && cachedCount === sentences.length ? 'Hazır' : cachedCount ? `Hazır ${cachedCount}/${sentences.length}` : 'Hazırla'}
               {#if otherVoices.length && cachedCount < sentences.length}<span class="badge" title="Bu bölüm başka seslerle de hazırlanmış">{otherVoices.length}</span>{/if}</button>

@@ -457,7 +457,7 @@ class TtsMixin:
         except OSError:
             presets = []
         choices = [(p['voice'], p.get('options') or {}, p['id'], p.get('name') or p['id']) for p in presets]
-        choices += [(value, None, '', spec['engine_name'] if (spec.get('name') or value) == spec['engine_name']
+        choices += [(value, None, '', spec['engine_name'] if (spec.get('name') or spec['engine_name']) == spec['engine_name']
                      else f'{spec["engine_name"]} · {spec["name"]}') for value, spec in specs.items() if not spec.get('options')]
         result = []
         for voice, options, preset, label in choices:
@@ -487,15 +487,21 @@ class TtsMixin:
         total = sum(1 for text in sentences or () if str(text).strip())
         found = []
         try:
-            for variant in self._voice_variants(language):
+            variants = self._voice_variants(language)
+        except Exception as error:
+            self._log(f'UYARI: Başka seslerle hazırlanan sesler okunamadı: {error!r}')
+            return _error(error)
+        for variant in variants:   # bir sesin hatasi digerlerini gizlemesin
+            try:
                 view = engines.with_prefs(variant['tts'])
                 if view.voice_signature(language) == current:
                     continue
                 count = view.cached(book, sentences, speed, language, breaks=breaks)
-                if count:
-                    found.append({'key': variant['key'], 'label': variant['label'], 'count': count, 'total': total})
-        except Exception as error:
-            return _error(error)
+            except Exception as error:
+                self._log(f'UYARI: "{variant["label"]}" sesiyle hazırlanan ses okunamadı: {error!r}')
+                continue
+            if count:
+                found.append({'key': variant['key'], 'label': variant['label'], 'count': count, 'total': total})
         found.sort(key=lambda item: -item['count'])
         return found
 

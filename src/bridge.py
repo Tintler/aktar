@@ -139,6 +139,7 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
     def save_ui_prefs(self, values):
         prefs = self.ui_prefs()
         prefs.update(values or {})
+        self._ui_text = None   # ayni boyutta hizli yazimda mtime degismeyebilir: onbellek eski metni vermesin
         try:
             save_json(APP_DIR / UI_FILE, prefs)
         except OSError as error:

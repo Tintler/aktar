@@ -2,6 +2,12 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.24.1 — 2026-10-24
+
+### Düzeltme
+- "Hazırla" menüsünde tek bir sesin okunamaması bütün "Başka seslerle hazır" listesini boşaltıyordu; artık o ses atlanır, hata Konsol'a yazılır. Liste menü her açıldığında yenilenir.
+- Ayarlar aynı uzunlukta art arda kaydedilince eski değer okunabiliyordu (`ui.json` önbelleği).
+
 ## 2.24.0 — 2026-10-24
 
 ### Yeni
