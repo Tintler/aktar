@@ -453,6 +453,25 @@ Oynatıcıda Türkçe bir altyazı seçip CC menüsünden **Bu altyazıyla Türk
 
 İş arka planda çalışır, sağ üstteki iş listesinde görünür ve pencere kapanınca durur. Hazır satırlar saklanır; durdurulup yeniden başlatılınca baştan üretilmez.
 
+---
+
+### 3.19 Oyun Çevirisi (Windows)
+Türkçesi olmayan bir oyunu oynarken ekrandaki yazıyı okuyup Türkçe çevirisini oyunun üstünde gösterir. Oyunun dosyalarına, belleğine ya da kurulumuna dokunulmaz; yalnızca ekranda görünen okunur. **Oyunu pencereli tam ekran (borderless / windowed fullscreen) modunda çalıştırın**: özel tam ekran (exclusive fullscreen) modunda katman görünmez ve ekran okunamaz.
+
+1. Sol menüden **Oyun Çevirisi**'ni açın, **+** ile oyunu ekleyin (bölgeler, isim listesi ve çeviri önbelleği her oyun için ayrıdır).
+2. **Bölgeler** sekmesinde **Ekranda bölge seç**: Aktar küçülür, ekran kararır; okunacak alanı (ör. diyalog kutusu) fareyle sürükleyin. Esc ya da sağ tık vazgeçer. **Şimdi oku** bölgede okunan yazıyı gösterir (ayarı denemek için).
+   - *Konuşanın adı:* Ad diyalog kutusunun ilk satırındaysa **Otomatik bul** onu ayırır; ayrı bir kutudaysa o kutuyu **Konuşan karakterin adı** olarak ayrı bölge ekleyin. Ad, çeviriye bağlam olarak verilir (hitap ve ton için) ve isim listesindeki ada oturtulur.
+   - *Çeviri nerede:* bölgenin altında, üstünde, **orijinal yazının üzerinde** (yazıyı kapatır) ya da **özel konumda** (ekranda ayrıca seçilir).
+   - *Görsel model:* süslü/dekoratif yazılar (oyun girişleri) için görüntü doğrudan görsel destekli modele gider. Bu bölgeler varsayılan olarak yalnızca **Şimdi çevir** ile okunur.
+3. **İsimler ve terimler** sekmesine karakter ve yer adlarını ekleyin. Karşılığı boş ad çevrilmez. Büyük harfle yazılan ad (ör. `Rain`) yalnızca büyük harfle geçince eşleşir: küçük harfli "rain" yağmur diye çevrilir; cümle başında hangisi olduğuna model karar verir. **Son konuşanlar** düğmeleri okunan adları tek tıkla ekler.
+4. **Başlat**. Bölge yalnızca değiştiğinde okunur; harf harf gelen diyalog yerleşince bir kez çevrilir. Daha önce çevrilen cümle (yazı daha ekrana gelirken bile) model beklenmeden gösterilir.
+
+**Kısayollar** (Ayarlar sekmesinden değiştirilebilir; oyun açıkken de çalışır): Ctrl+F9 çeviriyi açar/kapatır, Ctrl+F10 katmanı gizler/gösterir, Ctrl+F11 şu anki ekranı hemen çevirir (bölge yoksa ekranın tamamı görsel modele gider). Kısayola basınca oyunun üstünde kısa bir durum yazısı görünür.
+
+**Ayarlar** sekmesi: çeviri modeli (küçük ve hızlı bir model önerilir; oyun da ekran kartını kullanıyor), görsel model, oyunun dili, okuma yöntemi (Windows OCR; o dil yüklü değilse Tesseract), okuma sıklığı, yazının yerleşmesini bekleme süresi, bağlam satırı sayısı, yazı boyutu, renkler ve zemin opaklığı.
+
+Katman tıklamaları ve fareyi oyuna geçirir, odak almaz, Alt+Tab'da görünmez; klavye ve oyun kumandası dinlenmez (yalnızca seçilen kısayollar alınır). Katman ekran yakalamaya girmez; Aktar kendi yazdığı Türkçe metni tekrar okumaz. Japonca gibi diller için Windows Ayarlar → Zaman ve dil → Dil bölümünden o dili ekleyin (Windows OCR onu okuyabilsin). Aktar kapanınca katman, kısayollar ve okuma tamamen durur.
+
 ## 4. Terim sözlüğü (glossary)
 
 Glossary, belirli kaynak terimlerin çeviride **zorunlu** olarak belirtilen Türkçe karşılığıyla geçmesini sağlar.

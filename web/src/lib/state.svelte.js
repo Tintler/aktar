@@ -45,6 +45,8 @@ export const app = $state({
   emotionBooks: [],           // F170: etiketli surumu olan kitaplar (tts_emotions_books)
   // F178 Metinden ses: yazilan metin, cikti adi, suren kayit {done, total, loading} ve son kaydedilen dosya {path, url, duration}.
   speech: { text: '', name: '', job: null, last: null },
+  // F194 Oyun Cevirisi: canli durum (bridge_game._game_status; 'game' olayiyla gelir).
+  game: { status: { running: false, overlay: true, error: '', recent: [], info: {}, capture_safe: true } },
   ttsPrefs: { device: 'auto', speed: 1, voices: {}, options: {} },
   // Komut satirindan ya da baska sayfadan acilmak uzere bekleyen video (Translate acilinca alir).
   pendingVideo: null,
@@ -81,7 +83,7 @@ export function setThink(value) {
   savePref({ think: app.think });
 }
 
-const VIEWS = ['chat', 'library', 'files', 'translate', 'books', 'reading', 'speech', 'subscriptions', 'console'];
+const VIEWS = ['chat', 'library', 'files', 'translate', 'books', 'reading', 'speech', 'game', 'subscriptions', 'console'];
 
 // F189: focus_* tam ekran okumanin yazi boyutu, renkleri ve gecisi.
 export const READER_DEFAULTS = { size: 19, font: 'serif', leading: 1.75, width: 680, paper: 'theme',
@@ -245,6 +247,7 @@ export async function init() {
     if (added?.length) toast(added.length === 1 ? 'Kitap kitaplığa eklendi.' : `${added.length} kitap kitaplığa eklendi.`, 'ok');
     for (const message of errors ?? []) toast(message, 'error');
   });
+  on('game', (status) => (app.game.status = status));
   on('tts', (status) => {
     app.tts = status;
     // Yuklenirken bir ses inmis olabilir: "indirildi" isaretleri yenilenir.

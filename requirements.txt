@@ -4,3 +4,11 @@ pypdfium2==5.14.0
 Pillow==12.3.0
 # Gomulu oynatici (F122): libmpv-2.dll ayrica bin\ icine konur (bin/README.txt)
 python-mpv==1.0.8
+# Oyun cevirisi (F194): Windows'un kendi OCR'i (Windows.Media.Ocr). Yoksa Tesseract kullanilir.
+winrt-runtime==4.0.3; sys_platform == "win32"
+winrt-Windows.Foundation==4!10.0.28000.2705; sys_platform == "win32"
+winrt-Windows.Foundation.Collections==4!10.0.28000.2705; sys_platform == "win32"
+winrt-Windows.Globalization==4!10.0.28000.2705; sys_platform == "win32"
+winrt-Windows.Graphics.Imaging==4!10.0.28000.2705; sys_platform == "win32"
+winrt-Windows.Media.Ocr==4!10.0.28000.2705; sys_platform == "win32"
+winrt-Windows.Storage.Streams==4!10.0.28000.2705; sys_platform == "win32"

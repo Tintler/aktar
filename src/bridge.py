@@ -8,7 +8,7 @@ Is mantigi app_core / library / qa modullerinde kalir; burada yalnizca arayuz ak
 Bolumler: bu dosyada genel (ayarlar, tema, pencere), bridge_translate.py'de Altyazi Cevir,
 bridge_library.py'de Kutuphane (bridge_mail.py'de e-postadan iceri aktarma), bridge_player.py'de oynatici ve videoya soru sor,
 bridge_document.py'de belge goruntuleyici, bridge_assistant.py'de genel sohbet ve tekil dosyalar,
-bridge_subscriptions.py'de abonelik takibi, bridge_book.py'de Kitap Cevir, bridge_reader.py'de Okuma (EPUB kitapligi), bridge_tts.py'de sesli okuma, bridge_pdf.py'de PDF'den kitap, bridge_voice.py'de sesle soru sorma, bridge_watch.py'de
+bridge_subscriptions.py'de abonelik takibi, bridge_game.py'de oyun ekran cevirisi, bridge_book.py'de Kitap Cevir, bridge_reader.py'de Okuma (EPUB kitapligi), bridge_tts.py'de sesli okuma, bridge_pdf.py'de PDF'den kitap, bridge_voice.py'de sesle soru sorma, bridge_watch.py'de
 klasor izleme, bridge_subtitles.py'de altyazi araclari (zamanlama, disa aktarma, OCR) ve klip.
 """
 from __future__ import annotations
@@ -33,6 +33,7 @@ from app_core import (APP_DIR, DEFAULT_CONFIG, WINDOWS, Client, keep_loaded, loa
                       read, save_json, unload_models, validate_config)
 from bridge_assistant import AssistantMixin, FilesMixin
 from bridge_book import BookMixin
+from bridge_game import GameMixin
 from bridge_reader import ReaderMixin
 from bridge_tts import TtsMixin
 from bridge_pdf import PdfMixin
@@ -67,7 +68,7 @@ def _error(error):
 
 
 class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin, AssistantMixin, FilesMixin,
-             SubscriptionsMixin, VoiceMixin, WatchMixin, SubtitleToolsMixin, NativePlayerMixin):
+             SubscriptionsMixin, VoiceMixin, WatchMixin, SubtitleToolsMixin, NativePlayerMixin, GameMixin):
     def __init__(self, emit=None, dialogs=None):
         self._emit = emit or (lambda _event, _data: None)
         self._dialogs = dialogs          # desktop.Dialogs: open_file(), open_folder() ...
@@ -86,6 +87,7 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         self._init_assistant()
         self._init_subtools()
         self._init_native()
+        self._init_game()
 
     # ------------------------------------------------------------------ yardimcilar
     def _log(self, message):
@@ -113,6 +115,7 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         media_server.detect_async()   # F120: GPU kodlayicilari arka planda bir kez denenir
         paths, self._startup_paths = self._startup_paths, []
         self._start_watch()  # F114: izlenen koleksiyonlar arka planda taranir
+        self._game_startup()  # F194: oyun cevirisi kisayollari (daha once kullanildiysa)
         return {'prefs': self.ui_prefs(), 'themes': themes.list_themes(),
                 'translate': self.translate_state(), 'books': self.book_snapshot(),
                 'library': self.library_open(), 'models': self._models,
@@ -408,6 +411,7 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         self._stop_native_for_close()
         self._stop_assistant_for_close()
         self._stop_watch_for_close()
+        self._stop_game_for_close()
         self._release_models()
         if close:
             threading.Timer(0.1, close).start()
@@ -426,4 +430,5 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         self._stop_native_for_close()
         self._stop_assistant_for_close()
         self._stop_watch_for_close()
+        self._stop_game_for_close()
         self._release_models()

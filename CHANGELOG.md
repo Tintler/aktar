@@ -2,6 +2,17 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.26.0 — 2026-10-25
+
+### Yeni
+- **Oyun Çevirisi (F194):** Türkçesi olmayan oyunlarda ekrandaki yazı okunup Türkçe çevirisi oyunun üstünde gösterilir. Sol menüdeki yeni sayfadan oyun eklenir, ekranda okunacak bölgeler (ör. diyalog kutusu, konuşanın adı) fareyle seçilir ve çeviri başlatılır. Oyunun dosyalarına, belleğine ya da kurulumuna dokunulmaz; yalnızca ekranda görünen okunur.
+  - Yazı Windows'un kendi OCR'ıyla okunur (ekran kartı kullanılmaz, okuma ~10 ms); dil paketi yoksa Tesseract. Bölge yalnızca değişince okunur; harf harf gelen diyalog yerleşince bir kez çevrilir.
+  - Çeviri, Aktar'ın model sunucusuna akışlı istekle gider; sayfada ayrı bir çeviri modeli seçilebilir. Önceki satırlar ve konuşan karakterin adı bağlam olarak verilir. Çevrilen cümleler oyuna özel önbellekte tutulur: aynı cümle (yazı daha ekrana gelirken bile) anında gösterilir.
+  - Oyuna özel isim/terim listesi: karşılığı boş adlar çevrilmez; büyük harfli ad (`Rain`) yalnızca büyük harfle geçince eşleşir, cümle başında model bağlama göre karar verir.
+  - Katman tıklamaları geçirir, odak almaz, Alt+Tab'da görünmez ve ekran yakalamaya girmez (Aktar kendi Türkçe yazısını yeniden okumaz). Çeviri bölgenin altında, üstünde, orijinal yazının üzerinde ya da seçilen bir yerde gösterilir; yazı boyutu, renkler ve saydamlık ayarlanır.
+  - Süslü/dekoratif yazılar için bölge "Görsel model" ile okunabilir; bölge yokken "Şimdi çevir" ekranın tamamını görsel modele gönderir.
+  - Ayarlanabilir genel kısayollar: çeviriyi aç/kapat (Ctrl+F9), katmanı gizle/göster (Ctrl+F10), şu anki ekranı şimdi çevir (Ctrl+F11). Oyun pencereli tam ekran (borderless) modunda çalışmalıdır.
+
 ## 2.25.3 — 2026-10-24
 
 ### Düzeltme

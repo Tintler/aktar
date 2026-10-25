@@ -65,6 +65,11 @@
       list.push({ id: 'speech', icon: 'waveform', title: 'Metinden ses kaydediliyor', detail: sp.loading ? 'ses motoru hazırlanıyor' : '',
         percent: sp.loading ? null : pct(sp.done, sp.total), count: sp.total ? `${sp.done} / ${sp.total} cümle` : '', go: () => go('speech') });
     }
+    if (app.game.status.running) {
+      const last = app.game.status.recent?.[0];
+      list.push({ id: 'game', icon: 'gamepad', title: 'Oyun çevirisi açık', detail: last ? last.translation.slice(0, 60) : 'ekran izleniyor',
+        percent: null, count: '', go: () => go('game') });
+    }
     const e = app.emotionJob;
     if (e) {
       list.push({ id: 'emotions', icon: 'sparkles', title: 'Duygu etiketleri oluşturuluyor', detail: [e.title, e.reading ? 'bölümler okunuyor' : ''].filter(Boolean).join(' · '),
