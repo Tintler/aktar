@@ -65,12 +65,12 @@
   }
 
   async function newGame() {
-    const name = await prompt({ title: 'Yeni oyun', message: 'Bölgeler ve isim listesi her oyun için ayrı tutulur.', placeholder: 'Oyunun adı' });
+    const name = await prompt({ title: 'Yeni profil', message: 'Her profilin (oyun, uygulama, video…) bölgeleri, isim listesi ve çeviri önbelleği ayrı tutulur.', placeholder: 'Ör. oyunun ya da uygulamanın adı' });
     if (name?.trim()) apply(await act('game_create', name.trim()));
   }
 
   async function renameGame() {
-    const name = await prompt({ title: 'Oyunun adı', value: game.name });
+    const name = await prompt({ title: 'Profilin adı', value: game.name });
     if (name?.trim()) await saveGame({ name: name.trim() });
     apply(await act('game_snapshot'));
   }
@@ -209,10 +209,10 @@
     {#if snap?.supported}
       <div class="games">
         <select class="field" value={settings.game} onchange={(e) => act('game_select', e.currentTarget.value).then(apply)} disabled={!snap.games.length}>
-          {#if !snap.games.length}<option value="">Oyun yok</option>{/if}
+          {#if !snap.games.length}<option value="">Profil yok</option>{/if}
           {#each snap.games as g}<option value={g.id}>{g.name}</option>{/each}
         </select>
-        <button class="icon-btn filled" title="Yeni oyun" onclick={newGame}><Icon name="plus" size={18} /></button>
+        <button class="icon-btn filled" title="Yeni profil" onclick={newGame}><Icon name="plus" size={18} /></button>
       </div>
       {#if game}
         {#if status.running}
@@ -229,12 +229,12 @@
     <div class="page-body"><p class="dim">Yükleniyor…</p></div>
   {:else if !snap.supported}
     <div class="page-body"><div class="card empty"><Icon name="gamepad" size={32} /><b>Ekran çevirisi yalnızca Windows'ta çalışır.</b>
-      <span>Ekran okuma ve oyunun üstündeki katman Windows'un pencere özelliklerini kullanıyor.</span></div></div>
+      <span>Ekran okuma ve ekranın üstündeki katman Windows'un pencere özelliklerini kullanıyor.</span></div></div>
   {:else if !game}
     <div class="page-body"><div class="card empty">
-      <Icon name="gamepad" size={32} /><b>Türkçesi olmayan oyunları oynarken ekrandaki yazıyı anında çevirin.</b>
-      <span>Önce oyunu ekleyin; sonra ekranda diyalog kutusunu seçip çeviriyi başlatın. Oyunun dosyalarına ya da belleğine dokunulmaz, yalnızca ekranda görünen okunur.</span>
-      <button class="btn primary" onclick={newGame}><Icon name="plus" size={15} />Oyun ekle</button>
+      <Icon name="screentext" size={32} /><b>Türkçesi olmayan oyun, uygulama ya da videolardaki yazıyı ekranda anında çevirin.</b>
+      <span>Önce bir profil ekleyin (ör. oyunun adı); sonra ekranda okunacak alanı seçip çeviriyi başlatın. Programın dosyalarına ya da belleğine dokunulmaz, yalnızca ekranda görünen okunur.</span>
+      <button class="btn primary" onclick={newGame}><Icon name="plus" size={15} />Profil ekle</button>
     </div></div>
   {:else}
     <div class="tabs" role="tablist">
@@ -257,13 +257,13 @@
               <button class="btn sm" onclick={now}><Icon name="sparkles" size={14} />Şimdi çevir</button>
             </div>
             {#if status.error}<p class="err small selectable">{status.error}</p>{/if}
-            {#if !status.overlay}<p class="warn small">Katman gizli: çeviri sürüyor ama oyunun üstünde gösterilmiyor.</p>{/if}
+            {#if !status.overlay}<p class="warn small">Katman gizli: çeviri sürüyor ama ekranın üstünde gösterilmiyor.</p>{/if}
             <div class="keys">
               {#each ACTIONS as [action, label]}
                 <span><kbd>{settings.hotkeys[action] || '—'}</kbd>{label}</span>
               {/each}
             </div>
-            <p class="note small"><Icon name="info" size={14} /><span>Oyunu <b>pencereli tam ekran</b> (borderless / windowed fullscreen) modunda çalıştırın. Özel tam ekran (exclusive fullscreen) modunda katman oyunun üstünde görünmez ve ekran okunamaz. Fare, klavye ve oyun kumandası doğrudan oyuna gider; katman tıklamaları geçirir.</span></p>
+            <p class="note small"><Icon name="info" size={14} /><span>Oyunları <b>pencereli tam ekran</b> (borderless / windowed fullscreen) modunda çalıştırın. Özel tam ekran (exclusive fullscreen) modunda katman görünmez ve ekran okunamaz. Fare, klavye ve oyun kumandası doğrudan alttaki programa gider; katman tıklamaları geçirir.</span></p>
           </div>
 
           <div class="recent">
@@ -331,7 +331,7 @@
                 {/if}
               </div>
               {#if region.placement === 'blocks'}
-                <p class="note small"><Icon name="info" size={14} /><span>Bölgedeki her yazı (diyalog, menü, açıklama) ayrı okunur; çevirisi oyundaki yazının tam üstüne, aynı boyda basılır. Yeni yazılar yerleşince tek istekte toplu çevrilir, daha önce çevrilenler hemen görünür. Çevirisi beklenen yazı o sırada boş kutuyla örtülür; altındaki yazı değişince ya da kaybolunca kutu hemen kalkar. "Yalnızca cümleler" seçiliyken beceri, silah ve menü adları, nitelik etiketleri ve puanlar (Lv, HP, MP, AP) oyundaki gibi kalır. Geniş alan okunduğu için işlemci biraz daha çalışır.</span></p>
+                <p class="note small"><Icon name="info" size={14} /><span>Bölgedeki her yazı (diyalog, menü, açıklama) ayrı okunur; çevirisi ekrandaki yazının tam üstüne, aynı boyda basılır. Yeni yazılar yerleşince tek istekte toplu çevrilir, daha önce çevrilenler hemen görünür. Çevirisi beklenen yazı o sırada boş kutuyla örtülür; altındaki yazı değişince ya da kaybolunca kutu hemen kalkar. "Yalnızca cümleler" seçiliyken beceri, silah ve menü adları, nitelik etiketleri ve puanlar (Lv, HP, MP, AP) olduğu gibi kalır. Geniş alan okunduğu için işlemci biraz daha çalışır.</span></p>
               {/if}
               {#if region.role === 'text'}
                 <Toggle checked={region.auto} onchange={(v) => updateRegion(index, { auto: v })}
@@ -356,13 +356,13 @@
               {/if}
             </div>
           {:else}
-            <p class="dim">Henüz bölge yok. Oyunu açın, sonra "Ekranda bölge seç" ile diyalog kutusunu seçin. Konuşanın adı ayrı bir kutudaysa onu da "Konuşan karakterin adı" olarak ekleyebilirsiniz.</p>
+            <p class="dim">Henüz bölge yok. Çevrilecek programı açın, sonra "Ekranda bölge seç" ile diyalog kutusunu seçin. Konuşanın adı ayrı bir kutudaysa onu da "Konuşan karakterin adı" olarak ekleyebilirsiniz.</p>
           {/each}
         </div>
 
       {:else if tab === 'terms'}
         <div class="terms">
-          <p class="dim small">Bu oyunun karakter, yer ve eşya adları. Karşılığı boş bırakılan ad çevrilmez, olduğu gibi kalır. Büyük harfle yazılan ad (ör. <b>Rain</b>) yalnızca büyük harfle geçtiğinde eşleşir: küçük harfli "rain" sıradan kelime olarak çevrilir; cümle başında hangisi olduğuna model bağlama göre karar verir.</p>
+          <p class="dim small">Bu profilin karakter, yer ve eşya adları. Karşılığı boş bırakılan ad çevrilmez, olduğu gibi kalır. Büyük harfle yazılan ad (ör. <b>Rain</b>) yalnızca büyük harfle geçtiğinde eşleşir: küçük harfli "rain" sıradan kelime olarak çevrilir; cümle başında hangisi olduğuna model bağlama göre karar verir.</p>
           <div class="card add-card">
             <h3><Icon name="plus" size={15} />Yeni ad ya da terim</h3>
             <div class="add">
@@ -396,7 +396,7 @@
               {/each}
             </div>
           {:else}
-            <p class="dim">Liste boş. Oyunda geçen karakter ve yer adlarını yukarıdan ekleyin.</p>
+            <p class="dim">Liste boş. Ekranda geçen karakter ve yer adlarını yukarıdan ekleyin.</p>
           {/if}
         </div>
 
@@ -404,7 +404,7 @@
         <div class="settings">
           <section class="card">
             <h3>Model</h3>
-            <label class="fr"><span>Çeviri modeli<small>Küçük ve hızlı bir model önerilir: oyun da ekran kartını kullanıyor. Düşünme (reasoning) her zaman kapalıdır.</small></span>
+            <label class="fr"><span>Çeviri modeli<small>Küçük ve hızlı bir model önerilir: oyunlar da ekran kartını kullanır. Düşünme (reasoning) her zaman kapalıdır.</small></span>
               <select class="field" value={settings.model} onchange={(e) => saveSettings({ model: e.currentTarget.value })}>
                 <option value="">(Ayarlar'daki analiz modeli)</option>
                 {#each [...new Set([...models, settings.model].filter(Boolean))] as m}<option value={m}>{m}</option>{/each}
@@ -421,7 +421,7 @@
 
           <section class="card">
             <h3>Okuma</h3>
-            <label class="fr"><span>Oyunun dili<small>{ocrNote}</small></span>
+            <label class="fr"><span>Ekrandaki yazının dili<small>{ocrNote}</small></span>
               <select class="field" value={game.language} onchange={(e) => saveGame({ language: e.currentTarget.value }).then(() => act('game_snapshot').then(apply))}>
                 {#each snap.languages as l}<option value={l.code}>{l.label}</option>{/each}
               </select>
@@ -460,12 +460,12 @@
             </label>
             <div class="fr"><span>Konuşanın adını göster</span><Toggle checked={settings.show_speaker} onchange={(v) => saveSettings({ show_speaker: v })} /></div>
             <div class="fr"><span>Yazı kaybolunca çeviriyi gizle</span><Toggle checked={settings.hide_when_gone} onchange={(v) => saveSettings({ hide_when_gone: v })} /></div>
-            <div class="fr"><span>Tarama kutularında oyunun renkleri<small>"Tüm ekranı tara" kutuları oyundaki yazının zemin ve yazı rengini alır, özgün yazıyı tamamen örter.</small></span><Toggle checked={settings.game_colors} onchange={(v) => saveSettings({ game_colors: v })} /></div>
+            <div class="fr"><span>Tarama kutularında özgün renkler<small>"Tüm ekranı tara" kutuları ekrandaki yazının zemin ve yazı rengini alır, özgün yazıyı tamamen örter.</small></span><Toggle checked={settings.game_colors} onchange={(v) => saveSettings({ game_colors: v })} /></div>
           </section>
 
           <section class="card">
             <h3>Kısayollar</h3>
-            <p class="dim small">Oyun açıkken de çalışır. Değiştirmek için kutuya tıklayıp yeni tuş birleşimine basın (Esc: vazgeç). Seçilen birleşim Aktar açıkken başka programlara gitmez.</p>
+            <p class="dim small">Oyun ya da başka bir program öndeyken de çalışır. Değiştirmek için kutuya tıklayıp yeni tuş birleşimine basın (Esc: vazgeç). Seçilen birleşim Aktar açıkken başka programlara gitmez.</p>
             {#each ACTIONS as [action, label]}
               <div class="fr"><span>{label}{#if snap.hotkey_errors?.[action]}<small class="err">{snap.hotkey_errors[action]}</small>{/if}</span>
                 <span class="hk">
@@ -481,7 +481,7 @@
             <h3>{game.name}</h3>
             <div class="fr"><span>Çeviri önbelleği<small>Daha önce çevrilen {snap.cache} cümle; aynı cümle gelince model beklenmeden gösterilir.</small></span>
               <button class="btn sm" disabled={!snap.cache} onclick={async () => { const r = await act('game_clear_cache'); if (r) snap.cache = 0; }}><Icon name="trash" size={14} />Temizle</button></div>
-            <div class="fr"><span>Oyun</span>
+            <div class="fr"><span>Profil</span>
               <span class="hk"><button class="btn sm" onclick={renameGame}><Icon name="pencil" size={14} />Yeniden adlandır</button>
                 <button class="btn sm danger" onclick={deleteGame}><Icon name="trash" size={14} />Sil</button></span></div>
           </section>
@@ -493,7 +493,7 @@
 
 <style>
   .games { display: flex; gap: 6px; align-items: center; }
-  .games select { min-width: 220px; }
+  .games select { width: 220px; min-width: 0; max-width: 32vw; text-overflow: ellipsis; }
   .tabs { display: flex; gap: 4px; background: var(--surface); border-radius: 999px; padding: 3px; margin: 0 32px 16px; align-self: flex-start; }
   .tabs button { padding: 5px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--secondary); display: flex; align-items: center; gap: 6px; }
   .tabs button.on { background: var(--surface-active); color: var(--text); }
@@ -525,13 +525,15 @@
   .tr { font-size: 15px; line-height: 1.5; }
   .src { font-size: 12px; color: var(--dim); line-height: 1.4; }
   .bar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
-  .regions { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 14px; }
-  .region { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .regions { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr)); gap: 14px; }
+  .region { padding: 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
   .region.off { opacity: .6; }
   .head { display: flex; align-items: center; gap: 10px; }
   .head .name { flex: 1; min-width: 0; font-weight: 600; }
   .thumb { width: 100%; max-height: 140px; object-fit: contain; background: #000; border-radius: 8px; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+  .grid label { min-width: 0; }
+  .grid select { width: 100%; min-width: 0; text-overflow: ellipsis; }
   .grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--secondary); }
   .actions { display: flex; gap: 6px; flex-wrap: wrap; }
   .test .lines { white-space: pre-line; max-height: 260px; overflow: auto; }

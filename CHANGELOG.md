@@ -2,6 +2,13 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.28.1 — 2026-10-25
+
+### Düzeltme
+- Ekran Çeviri: sol menüde ve iş tepsisinde oyun kolu yerine ekran-çeviri simgesi.
+- Sayfa metinleri yalnızca oyunlara değil her ekrana göre yazıldı: oyunlar artık **profil** (Yeni profil, Profil ekle), "Oyunun dili" → "Ekrandaki yazının dili", "oyunun renkleri" → "özgün renkler".
+- Bölgeler sekmesinde uzun seçenekli bölge kartları (ör. "Yalnızca cümleler (diyalog, hikaye, açıklama)") sayfayı sağa taşırıyor, üstteki profil seçici ekranın dışında kalıyordu: kartlar ve açılır listeler artık sütuna sığar.
+
 ## 2.28.0 — 2026-10-25
 
 ### Yeni

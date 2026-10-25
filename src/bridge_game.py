@@ -165,7 +165,7 @@ class GameMixin:
 
     def game_select(self, game_id):
         if game_core.load_game(game_id) is None:
-            return {'error': 'Oyun bulunamadı.'}
+            return {'error': 'Profil bulunamadı.'}
         return self.game_save_settings({'game': game_id})
 
     def game_delete(self, game_id):
@@ -182,7 +182,7 @@ class GameMixin:
         """Secili oyunun adi, dili, bolgeleri ya da terimleri (gelen alanlar degisir)."""
         game = self._game_current()
         if game is None:
-            return {'error': 'Önce bir oyun ekleyin.'}
+            return {'error': 'Önce bir profil ekleyin.'}
         values = dict(values or {})
         for key in ('name', 'language', 'regions', 'terms'):
             if key in values:
@@ -283,7 +283,7 @@ class GameMixin:
         """Bolgeyi simdi okur (cevirmez): {'lines', 'speaker', 'text', 'ms', 'engine', 'preview'}."""
         game = self._game_current()
         if game is None:
-            return {'error': 'Önce bir oyun ekleyin.'}
+            return {'error': 'Önce bir profil ekleyin.'}
         try:
             region = game_core.clean_region(region)
             game_screen.dpi_aware()
@@ -311,7 +311,7 @@ class GameMixin:
         if not WINDOWS:
             return {'error': 'Ekran çevirisi yalnızca Windows\'ta çalışır.'}
         if game is None:
-            return {'error': 'Önce bir oyun ekleyin.'}
+            return {'error': 'Önce bir profil ekleyin.'}
         if not any(region['enabled'] and region['role'] == 'text' for region in game['regions']):
             return {'error': 'Önce okunacak bir bölge ekleyin (Bölgeler sekmesi).'}
         self._game_boot(settings)
@@ -365,7 +365,7 @@ class GameMixin:
         if not WINDOWS:
             return {'error': 'Ekran çevirisi yalnızca Windows\'ta çalışır.'}
         if self._game_current() is None:
-            return {'error': 'Önce bir oyun ekleyin.'}
+            return {'error': 'Önce bir profil ekleyin.'}
         self._game_boot()
         if self._game_running:
             self._game_force = True

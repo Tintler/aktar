@@ -67,7 +67,7 @@
     }
     if (app.game.status.running) {
       const last = app.game.status.recent?.[0];
-      list.push({ id: 'game', icon: 'gamepad', title: 'Ekran çevirisi açık', detail: last ? last.translation.slice(0, 60) : 'ekran izleniyor',
+      list.push({ id: 'game', icon: 'screentext', title: 'Ekran çevirisi açık', detail: last ? last.translation.slice(0, 60) : 'ekran izleniyor',
         percent: null, count: '', go: () => go('game') });
     }
     const e = app.emotionJob;

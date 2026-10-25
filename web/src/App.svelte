@@ -43,7 +43,7 @@
     ['books', 'Kitap Çevir', 'bookA'],
     ['reading', 'Okuma', 'book'],
     ['speech', 'Metinden ses', 'waveform'],
-    ['game', 'Ekran Çeviri', 'gamepad'],
+    ['game', 'Ekran Çeviri', 'screentext'],
     ['subscriptions', 'Abonelikler', 'creditCard'],
     ['console', 'Konsol', 'terminal'],
   ];
