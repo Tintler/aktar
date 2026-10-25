@@ -183,10 +183,29 @@ class WindowsOcr:
         self._lock = threading.Lock()
 
     def __call__(self, image):
+        lines = [line.text for line in self._recognize(_prepared(image.convert('RGB'))).lines]
+        return [_CJK_GAP.sub('', line) for line in lines] if self.cjk else lines
+
+    def boxes(self, image):
+        """Ekran taramasi: [[(kelime, x, y, w, h), ...] satir basina], koordinatlar verilen goruntude.
+        Gri tonlamayla okunur: hareketli renkli oyun sahnesinde Windows OCR renkli goruntude hic satir
+        bulamayabiliyor (savas ekrani denemesi), gri tonlamada buluyor."""
+        prepared = _prepared(image.convert('L'))
+        factor = prepared.height / max(1, image.height)
+        result = []
+        for line in self._recognize(prepared).lines:
+            words = []
+            for word in line.words:
+                box = word.bounding_rect
+                words.append((word.text, box.x / factor, box.y / factor, box.width / factor, box.height / factor))
+            if words:
+                result.append(words)
+        return result
+
+    def _recognize(self, image):
         import asyncio
         from winrt.windows.graphics.imaging import BitmapAlphaMode, BitmapPixelFormat, SoftwareBitmap
         from winrt.windows.storage.streams import Buffer
-        image = _prepared(image.convert('RGB'))
         data = image.convert('RGBA').tobytes('raw', 'BGRA')
         buffer = Buffer(len(data))
         buffer.length = len(data)
@@ -199,9 +218,7 @@ class WindowsOcr:
         with self._lock:
             if self._loop is None:
                 self._loop = asyncio.new_event_loop()
-            result = self._loop.run_until_complete(recognize())
-        lines = [line.text for line in result.lines]
-        return [_CJK_GAP.sub('', line) for line in lines] if self.cjk else lines
+            return self._loop.run_until_complete(recognize())
 
     def close(self):
         if self._loop is not None:
@@ -216,18 +233,46 @@ class TesseractOcr:
         import documents
         import languages
         lang = languages.tesseract(language)
-        self._read = documents.tesseract_reader(cfg, log, lang=lang if lang == 'eng' else lang + '+eng', psm='6')
+        lang = lang if lang == 'eng' else lang + '+eng'
+        self._read = documents.tesseract_reader(cfg, log, lang=lang, psm='6')
+        # ekran taramasi: daginik yazi kipi (11) ve kelime konumlari (tsv)
+        self._read_boxes = documents.tesseract_reader(cfg, log, lang=lang, psm='11', configs=('tsv',))
 
-    def __call__(self, image):
+    @staticmethod
+    def _gray(image):
         from PIL import ImageOps, ImageStat
         gray = _prepared(image.convert('L'))
         if ImageStat.Stat(gray).mean[0] < 110:     # oyunlarda genelde koyu zemine acik yazi
             gray = ImageOps.invert(gray)
-        text = self._read(png_bytes(gray))
+        return gray
+
+    def __call__(self, image):
+        text = self._read(png_bytes(self._gray(image)))
         return [' '.join(line.replace('|', 'I').split()) for line in text.splitlines() if line.strip()]
+
+    def boxes(self, image):
+        gray = self._gray(image)
+        return tsv_lines(self._read_boxes(png_bytes(gray)), gray.height / max(1, image.height))
 
     def close(self):
         pass
+
+
+def tsv_lines(text, factor=1.0):
+    """Tesseract tsv ciktisi -> [[(kelime, x, y, w, h), ...] satir basina] (guveni dusuk kelimeler atilir)."""
+    lines = {}
+    for row in str(text or '').splitlines()[1:]:
+        cells = row.split('\t')
+        if len(cells) < 12 or cells[0] != '5' or not cells[11].strip():
+            continue
+        try:
+            if float(cells[10]) < 30:
+                continue
+            left, top, width, height = (int(value) / factor for value in cells[6:10])
+        except ValueError:
+            continue
+        lines.setdefault(tuple(cells[1:5]), []).append((cells[11].strip(), left, top, width, height))
+    return list(lines.values())
 
 
 def reader(engine, language, cfg, log=print):

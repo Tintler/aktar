@@ -24,10 +24,11 @@ from app_core import APP_DIR, read, save_json
 from book_core import is_acronym, is_proper, source_term_regex
 
 FOLDER = 'oyun-ceviri'
-PLACEMENTS = ('below', 'above', 'cover', 'custom')
+PLACEMENTS = ('below', 'above', 'cover', 'custom', 'blocks')   # blocks: her yazinin kendi ustune
 MODES = ('ocr', 'vision')
 ROLES = ('text', 'speaker')
 SPEAKER_MODES = ('auto', 'first_line', 'none')
+SCAN_MODES = ('prose', 'all')    # tarama: yalnizca cumleler (diyalog, hikaye, aciklama) ya da menuler dahil
 OCR_ENGINES = ('auto', 'windows', 'tesseract')
 HOTKEY_ACTIONS = ('toggle', 'overlay', 'now')
 
@@ -168,6 +169,7 @@ def clean_region(value, index=0):
         'auto': bool(value.get('auto', value.get('mode') != 'vision')),
         'speaker': pick('speaker', SPEAKER_MODES),
         'placement': pick('placement', PLACEMENTS),
+        'scan': pick('scan', SCAN_MODES),
         'target': _rect(value.get('target')),
         # sayfadaki kucuk onizleme (secim anindaki goruntu)
         'preview': value['preview'] if isinstance(value.get('preview'), str)
@@ -175,6 +177,8 @@ def clean_region(value, index=0):
     }
     if region['placement'] == 'custom' and region['target'] is None:
         region['placement'] = 'below'
+    if region['placement'] == 'blocks':
+        region['mode'] = 'ocr'          # tarama kelime konumlarini ister: gorsel model konum vermez
     return region
 
 
@@ -435,6 +439,118 @@ def split_speaker(lines, mode='auto', terms=(), language='en'):
     return '', join_lines(lines, language)
 
 
+# ------------------------------------------------------------------ ekran taramasi (yazilarin ustune)
+SEGMENT_GAP = 1.5     # satirdaki kelimeler arasi bosluk satir yuksekliginin bu katindan buyukse ayri yazi
+BLOCK_GAP = 0.8       # alt alta iki satir arasi bosluk satir yuksekliginin bu katina kadarsa ayni paragraf
+WRAPPED = 8           # genisligi yuksekliginin bu katindan fazla satir kaymis (devami alttaki satirda) sayilir
+_WORD = re.compile(r'[^\W\d_]{3,}')
+_CJK_LANGS = ('ja', 'zh', 'ko', 'th')
+
+
+def _median(values):
+    values = sorted(values)
+    return values[len(values) // 2] if values else 0
+
+
+def _union(boxes):
+    left = min(box[0] for box in boxes)
+    top = min(box[1] for box in boxes)
+    right = max(box[0] + box[2] for box in boxes)
+    bottom = max(box[1] + box[3] for box in boxes)
+    return [round(left), round(top), round(right - left), round(bottom - top)]
+
+
+def segments(lines):
+    """OCR satirlari [[(kelime, x, y, w, h), ...]] -> yazi parcalari {'text', 'box', 'height'}.
+    OCR yan yana duran ayri yazilari (ör. 'Lv.1' ve 'Holy Ray') tek satir okuyabilir: genis bosluk boler."""
+    result = []
+    for words in lines:
+        words = sorted((word for word in words if str(word[0]).strip()), key=lambda word: word[1])
+        if not words:
+            continue
+        height = _median([word[4] for word in words]) or 1
+        group = [words[0]]
+        for word in words[1:] + [None]:
+            if word is not None and word[1] - (group[-1][1] + group[-1][3]) <= SEGMENT_GAP * height:
+                group.append(word)
+                continue
+            # Dikeyde ortanca: tek bir kelimenin tasan kutusu (simge, alt cizgi) satiri buyutmesin.
+            box = _union([item[1:] for item in group])
+            top, tall = _median([item[2] for item in group]), _median([item[4] for item in group]) or height
+            result.append({'text': ' '.join(str(item[0]) for item in group),
+                           'box': [box[0], round(top), box[2], round(tall)], 'height': tall})
+            group = [word]
+    return result
+
+
+def _joins(block, segment):
+    """Parca blogun son satirinin devami mi (ayni paragrafin alt satiri)."""
+    last = block['parts'][-1]
+    height = max(last['height'], segment['height'])
+    gap = segment['box'][1] - (last['box'][1] + last['box'][3])
+    if not -0.3 * height <= gap <= BLOCK_GAP * height:
+        return False
+    if not 0.7 <= segment['height'] / max(1, last['height']) <= 1.4:
+        return False
+    if last['box'][2] < WRAPPED * last['height']:
+        return False        # kisa satir (menu ogesi, baslik, ad) kendi basina bir yazidir
+    left = abs(segment['box'][0] - last['box'][0])
+    center = abs(segment['box'][0] + segment['box'][2] / 2 - (last['box'][0] + last['box'][2] / 2))
+    return min(left, center) <= 1.5 * height
+
+
+def worth_translating(text, language='en'):
+    """Yalnizca rakam, simge ya da kisaltmadan (HP, Lv.1, 98 > 101) olusan yazilar cevrilmez."""
+    if language in _CJK_LANGS:
+        return sum(char.isalpha() for char in str(text)) >= 2
+    return bool(_WORD.search(str(text)))
+
+
+_SENTENCE_END = re.compile(r'[.!?…。！？」』"”)]\s*$')
+
+
+def is_prose(text, language='en'):
+    """Cumle mi (diyalog, hikaye, gorev ya da aciklama metni)? Beceri, silah, menu adlari ve nitelik
+    etiketleri (Holy Ray, Phys. Atk., Radiant Restoration, Hide Tips) cumle sayilmaz: oyunda aynen kalir."""
+    text = ' '.join(str(text).split())
+    if language in _CJK_LANGS:
+        letters = sum(char.isalpha() for char in text)
+        return letters >= 8 or (letters >= 4 and bool(_SENTENCE_END.search(text)))
+    words = [word for word in text.split() if sum(char.isalpha() for char in word) >= 2]
+    return len(words) >= 5 or (len(words) >= 3 and bool(_SENTENCE_END.search(text)))
+
+
+def text_blocks(lines, language='en', prose_only=False):
+    """Tum ekran/bolge taramasi: OCR satirlarindan ayri ayri cevrilecek yazilar.
+    Donen: [{'text', 'lines', 'box': [x, y, w, h], 'height', 'speaker'}] okuma sirasiyla. Uzun bir yazinin
+    hemen ustundeki kisa, ada benzeyen tek satir (ör. 'Innkeeper') konusan olarak baglama verilir."""
+    blocks = []
+    for segment in sorted(segments(lines), key=lambda item: (item['box'][1], item['box'][0])):
+        target = next((block for block in blocks if _joins(block, segment)), None)
+        if target is None:
+            blocks.append({'parts': [segment]})
+        else:
+            target['parts'].append(segment)
+    result = []
+    for block in blocks:
+        parts = block['parts']
+        texts = [part['text'] for part in parts]
+        result.append({'text': join_lines(texts, language), 'lines': texts, 'box': _union([part['box'] for part in parts]),
+                       'height': _median([part['height'] for part in parts]), 'speaker': ''})
+    for item in result:
+        if len(item['text'].split()) < 4:
+            continue
+        x, y = item['box'][0], item['box'][1]
+        for other in result:
+            ox, oy, ow, oh = other['box']
+            if (other is not item and len(other['lines']) == 1 and _looks_like_name(other['text'])
+                    and 0 <= y - (oy + oh) <= 1.2 * item['height'] and abs(ox - x) <= 1.5 * item['height']):
+                item['speaker'] = other['text']
+                break
+    return [item for item in result if worth_translating(item['text'], language)
+            and (not prose_only or is_prose(item['text'], language))]
+
+
 # ------------------------------------------------------------------ istem
 _SENTENCE_LEAD = ' \t\r\n"\'“‘«(*_-—–['
 
@@ -513,6 +629,59 @@ def translation_messages(text, speaker='', history=(), terms=(), language='en'):
     parts.append('Çevrilecek metin:')
     parts.append(text)
     return [{'role': 'system', 'content': system}, {'role': 'user', 'content': '\n'.join(parts)}]
+
+
+BATCH_RULES = (
+    ' Ekrandaki birbirinden ayrı yazılar (menü, başlık, açıklama, diyalog) numaralı olarak verilir. Her birini '
+    'ayrı çevir ve her çeviriyi kendi numarasıyla tek satıra yaz: [1] çeviri. Numara atlama, yazıları '
+    'birleştirme; menü ve başlık gibi kısa yazıları kısa tut.')
+BATCH_MAX = 40          # bir istekte en fazla bu kadar yazi
+BATCH_CHARS = 3000      # ... ya da bu kadar harf
+
+
+def batch_messages(items, history=(), terms=(), language='en'):
+    """Tarama kipinde ekrandaki yeni yazilar tek istekte: items [{'text', 'speaker'}]."""
+    system = SYSTEM_PROMPT.format(language=languages.label(language)) + BATCH_RULES
+    parts = _term_lines('\n'.join(item['text'] for item in items), terms)
+    speakers = [f'[{number}] {item["speaker"]}' for number, item in enumerate(items, 1) if item.get('speaker')]
+    if speakers:
+        parts.append('Konuşanlar (yalnızca bağlam): ' + '; '.join(speakers))
+    if history:
+        parts.append('Önceki satırlar (yalnızca bağlam, bunları çevirme):')
+        for item in history:
+            who = f'{item["speaker"]}: ' if item.get('speaker') else ''
+            parts.append(f'- {who}{item["source"]} => {item["translation"]}')
+    parts.append('Çevrilecek yazılar:')
+    parts.extend(f'[{number}] {" ".join(item["text"].split())}' for number, item in enumerate(items, 1))
+    return [{'role': 'system', 'content': system}, {'role': 'user', 'content': '\n'.join(parts)}]
+
+
+_ITEM = re.compile(r'^\s*\[(\d+)\]\s*', re.M)
+
+
+def parse_batch(text, count, final=True):
+    """'[1] ...\n[2] ...' -> {numara: ceviri}. final=False (akarken): son oge henuz bitmemis olabilir, atlanir."""
+    import qa
+    text = qa.strip_thinking(str(text or ''))
+    marks = list(_ITEM.finditer(text))
+    result = {}
+    for index, mark in enumerate(marks):
+        if not final and index == len(marks) - 1:
+            break
+        end = marks[index + 1].start() if index + 1 < len(marks) else len(text)
+        number = int(mark.group(1))
+        value = clean_translation(text[mark.end():end])
+        if 1 <= number <= count and value and number not in result:
+            result[number] = value
+    if not marks and final and count == 1:      # tek yazida model numarayi yazmayabiliyor
+        value = clean_translation(text)
+        if value:
+            result[1] = value
+    return result
+
+
+def batch_tokens(items):
+    return min(4096, 64 + sum(len(item['text']) * 2 + 8 for item in items))
 
 
 def vision_prompt(terms=(), history=()):

@@ -622,11 +622,12 @@ def tessdata_dir(exe):
     return folder
 
 
-def tesseract_reader(cfg, log=print, lang=None, psm='3'):
+def tesseract_reader(cfg, log=print, lang=None, psm='3', configs=()):
     """(png) -> metin; Tesseract yoksa anlasilir hata. Turkce dil verisi yoksa 'eng'e duser.
 
     `lang`: ayardaki dil yerine kullanilacak Tesseract dilleri ('eng', 'jpn+eng' ...);
-    `psm`: sayfa bolme kipi (altyazi gibi tek blok yazi icin '6')."""
+    `psm`: sayfa bolme kipi (altyazi gibi tek blok yazi icin '6');
+    `configs`: cikti bicimi yapilandirmalari (ör. ('tsv',): kelime konumlari)."""
     import os
     import subprocess
     import tempfile
@@ -661,7 +662,7 @@ def tesseract_reader(cfg, log=print, lang=None, psm='3'):
             image = Path(folder) / 'sayfa.png'
             image.write_bytes(png)
             result = subprocess.run([exe, str(image), 'stdout', '-l', '+'.join(langs),
-                                     '--psm', str(psm), *data_args], capture_output=True, timeout=600,
+                                     '--psm', str(psm), *data_args, *configs], capture_output=True, timeout=600,
                                     env=env, **hide)
         if result.returncode != 0:
             raise ValueError('Tesseract hatası: '

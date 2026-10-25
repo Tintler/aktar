@@ -10,7 +10,7 @@
   import { confirm, prompt } from '../lib/confirm.svelte.js';
 
   const TABS = [['live', 'Çeviri'], ['regions', 'Bölgeler'], ['terms', 'İsimler ve terimler'], ['settings', 'Ayarlar']];
-  const PLACEMENTS = [['below', 'Bölgenin altında'], ['above', 'Bölgenin üstünde'], ['cover', 'Orijinal yazının üzerinde'], ['custom', 'Özel konumda']];
+  const PLACEMENTS = [['below', 'Bölgenin altında'], ['above', 'Bölgenin üstünde'], ['cover', 'Orijinal yazının üzerinde'], ['custom', 'Özel konumda'], ['blocks', 'Her yazının üstünde (bölgeyi tara)']];
   const SPEAKERS = [['auto', 'Otomatik bul'], ['first_line', 'İlk satır her zaman ad'], ['none', 'Yok']];
   const ACTIONS = [['toggle', 'Çeviriyi aç / kapat'], ['overlay', 'Katmanı gizle / göster'], ['now', 'Şu anki ekranı şimdi çevir']];
   const ENGINES = [['auto', 'Otomatik (Windows OCR, yoksa Tesseract)'], ['windows', 'Windows OCR'], ['tesseract', 'Tesseract']];
@@ -96,6 +96,12 @@
     if (!result) return;
     const textCount = regions.filter((r) => r.role === 'text').length;
     await saveGame({ regions: [...regions, { name: textCount ? `Bölge ${regions.length + 1}` : 'Diyalog', rect: result.rect, preview: result.preview }] });
+  }
+
+  async function addScreen() {
+    const result = await act('game_screen_region');
+    if (!result?.rect) return;
+    await saveGame({ regions: [...regions, { name: 'Tüm ekran', rect: result.rect, placement: 'blocks' }] });
   }
 
   async function updateRegion(index, values) {
@@ -278,7 +284,8 @@
       {:else if tab === 'regions'}
         <div class="bar">
           <button class="btn primary" onclick={addRegion} disabled={picking}><Icon name="plus" size={15} />Ekranda bölge seç</button>
-          <span class="dim small">Aktar küçülür; oyunda okunacak alanı (ör. diyalog kutusu) fareyle sürükleyerek seçin. Esc ya da sağ tık vazgeçer.</span>
+          <button class="btn" onclick={addScreen} disabled={picking}><Icon name="monitor" size={15} />Tüm ekranı tara</button>
+          <span class="dim small">Aktar küçülür ve ekranın o anki görüntüsü donar; okunacak alanı (ör. diyalog kutusu) fareyle sürükleyerek seçin. Esc ya da sağ tık vazgeçer. "Tüm ekranı tara" ekrandaki her yazıyı ayrı bulur ve çevirisini tam üstüne basar.</span>
         </div>
         <div class="regions">
           {#each regions as region, index (region.id)}
@@ -298,11 +305,18 @@
                 </label>
                 {#if region.role === 'text'}
                   <label>Okuma yöntemi
-                    <select class="field" value={region.mode} onchange={(e) => updateRegion(index, { mode: e.currentTarget.value, auto: e.currentTarget.value === 'ocr' })}>
+                    <select class="field" value={region.mode} disabled={region.placement === 'blocks'} onchange={(e) => updateRegion(index, { mode: e.currentTarget.value, auto: e.currentTarget.value === 'ocr' })}>
                       <option value="ocr">Yazı okuma (hızlı)</option><option value="vision">Görsel model (süslü yazılar)</option>
                     </select>
                   </label>
-                  {#if region.mode === 'ocr'}
+                  {#if region.placement === 'blocks'}
+                    <label>Ne çevrilsin
+                      <select class="field" value={region.scan} onchange={(e) => updateRegion(index, { scan: e.currentTarget.value })}>
+                        <option value="prose">Yalnızca cümleler (diyalog, hikaye, açıklama)</option><option value="all">Menüler dahil her yazı</option>
+                      </select>
+                    </label>
+                  {/if}
+                  {#if region.mode === 'ocr' && region.placement !== 'blocks'}
                     <label>Konuşanın adı
                       <select class="field" value={region.speaker} onchange={(e) => updateRegion(index, { speaker: e.currentTarget.value })}>
                         {#each SPEAKERS as [value, label]}<option {value}>{label}</option>{/each}
@@ -316,6 +330,9 @@
                   </label>
                 {/if}
               </div>
+              {#if region.placement === 'blocks'}
+                <p class="note small"><Icon name="info" size={14} /><span>Bölgedeki her yazı (diyalog, menü, açıklama) ayrı okunur; çevirisi oyundaki yazının tam üstüne, aynı boyda basılır. Yeni yazılar yerleşince tek istekte toplu çevrilir, daha önce çevrilenler hemen görünür. "Yalnızca cümleler" seçiliyken beceri, silah ve menü adları, nitelik etiketleri ve puanlar (Lv, HP, MP, AP) oyundaki gibi kalır. Geniş alan okunduğu için işlemci biraz daha çalışır.</span></p>
+              {/if}
               {#if region.role === 'text'}
                 <Toggle checked={region.auto} onchange={(v) => updateRegion(index, { auto: v })}
                   label={region.mode === 'vision' ? 'Görüntü değişince otomatik gönder (kapalıyken yalnızca "Şimdi çevir" ile)' : 'Otomatik izle (kapalıyken yalnızca "Şimdi çevir" ile)'} />
@@ -332,7 +349,8 @@
                   {#if tests[region.id].busy}<span class="dim small">Okunuyor…</span>
                   {:else}
                     <div class="dim small">{tests[region.id].engine} · {tests[region.id].ms} ms{#if tests[region.id].speaker} · konuşan: <b>{tests[region.id].speaker}</b>{/if}</div>
-                    <div class="selectable">{tests[region.id].text || '(yazı bulunamadı)'}</div>
+                    {#if tests[region.id].blocks != null}<div class="dim small">{tests[region.id].blocks} ayrı yazı bulundu</div>{/if}
+                    <div class="selectable lines">{tests[region.id].text || '(yazı bulunamadı)'}</div>
                   {/if}
                 </div>
               {/if}
@@ -345,30 +363,41 @@
       {:else if tab === 'terms'}
         <div class="terms">
           <p class="dim small">Bu oyunun karakter, yer ve eşya adları. Karşılığı boş bırakılan ad çevrilmez, olduğu gibi kalır. Büyük harfle yazılan ad (ör. <b>Rain</b>) yalnızca büyük harfle geçtiğinde eşleşir: küçük harfli "rain" sıradan kelime olarak çevrilir; cümle başında hangisi olduğuna model bağlama göre karar verir.</p>
-          <div class="add">
-            <input class="field" placeholder="Ad ya da terim (ör. Lasswell)" bind:value={draft.source} onkeydown={(e) => e.key === 'Enter' && addTerm()} />
-            <input class="field" placeholder="Türkçe karşılığı (boş: çevrilmez)" bind:value={draft.target} onkeydown={(e) => e.key === 'Enter' && addTerm()} />
-            <input class="field" placeholder="Not (ör. kadın, Rain'in kardeşi)" bind:value={draft.note} onkeydown={(e) => e.key === 'Enter' && addTerm()} />
-            <button class="btn primary" onclick={addTerm} disabled={!draft.source.trim()}><Icon name="plus" size={15} />Ekle</button>
-          </div>
-          {#if newSpeakers.length}
-            <div class="suggest small"><span class="dim">Son konuşanlar:</span>
-              {#each newSpeakers as name}<button class="chip" onclick={() => saveTerms([{ source: name, target: '', note: '' }, ...terms])}><Icon name="plus" size={12} />{name}</button>{/each}
+          <div class="card add-card">
+            <h3><Icon name="plus" size={15} />Yeni ad ya da terim</h3>
+            <div class="add">
+              <input class="field" placeholder="Ad ya da terim (ör. Lasswell)" bind:value={draft.source} onkeydown={(e) => e.key === 'Enter' && addTerm()} />
+              <input class="field" placeholder="Türkçe karşılığı (boş: çevrilmez)" bind:value={draft.target} onkeydown={(e) => e.key === 'Enter' && addTerm()} />
+              <input class="field" placeholder="Not (ör. kadın, Rain'in kardeşi)" bind:value={draft.note} onkeydown={(e) => e.key === 'Enter' && addTerm()} />
+              <button class="btn primary" onclick={addTerm} disabled={!draft.source.trim()}>Ekle</button>
             </div>
-          {/if}
-          {#if terms.length > 8}<input class="field filter" placeholder="Listede ara" bind:value={termFilter} />{/if}
-          <div class="list">
-            {#each shownTerms as [term, index] (term.source)}
-              <div class="term">
-                <input class="field" value={term.source} onchange={(e) => editTerm(index, 'source', e.currentTarget.value)} />
-                <input class="field" value={term.target} placeholder="(çevrilmez)" onchange={(e) => editTerm(index, 'target', e.currentTarget.value)} />
-                <input class="field" value={term.note} placeholder="Not" onchange={(e) => editTerm(index, 'note', e.currentTarget.value)} />
-                <button class="icon-btn sm" title="Sil" onclick={() => saveTerms(terms.filter((_, i) => i !== index))}><Icon name="trash" size={15} /></button>
+            {#if newSpeakers.length}
+              <div class="suggest small"><span class="dim">Son konuşanlar:</span>
+                {#each newSpeakers as name}<button class="chip" onclick={() => saveTerms([{ source: name, target: '', note: '' }, ...terms])}><Icon name="plus" size={12} />{name}</button>{/each}
               </div>
-            {:else}
-              <p class="dim">Liste boş.</p>
-            {/each}
+            {/if}
           </div>
+          <div class="list-head">
+            <b>Kayıtlı adlar ve terimler <i>{terms.length}</i></b>
+            {#if terms.length > 8}<input class="field filter" placeholder="Listede ara" bind:value={termFilter} />{/if}
+          </div>
+          {#if terms.length}
+            <div class="card list">
+              <div class="term cols"><span>Ad / terim</span><span>Türkçe karşılığı</span><span>Not</span><span></span></div>
+              {#each shownTerms as [term, index] (term.source)}
+                <div class="term">
+                  <input class="cell" value={term.source} onchange={(e) => editTerm(index, 'source', e.currentTarget.value)} />
+                  <input class="cell" class:keep={!term.target} value={term.target} placeholder="(çevrilmez, aynen kalır)" onchange={(e) => editTerm(index, 'target', e.currentTarget.value)} />
+                  <input class="cell" value={term.note} placeholder="—" onchange={(e) => editTerm(index, 'note', e.currentTarget.value)} />
+                  <button class="icon-btn sm" title="Sil" onclick={() => saveTerms(terms.filter((_, i) => i !== index))}><Icon name="trash" size={15} /></button>
+                </div>
+              {:else}
+                <p class="dim small pad">Aramayla eşleşen yok.</p>
+              {/each}
+            </div>
+          {:else}
+            <p class="dim">Liste boş. Oyunda geçen karakter ve yer adlarını yukarıdan ekleyin.</p>
+          {/if}
         </div>
 
       {:else}
@@ -474,7 +503,7 @@
   .warn { color: var(--warning); }
   .grow { flex: 1; }
   .empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 48px 24px; text-align: center; max-width: 640px; margin: 24px auto; }
-  .empty :global(svg) { color: var(--accent); }
+  .empty > :global(svg) { color: var(--accent); }
   .empty span { color: var(--secondary); font-size: 13px; }
   .live { display: flex; flex-direction: column; gap: 14px; max-width: 980px; }
   .state { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
@@ -504,10 +533,26 @@
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--secondary); }
   .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .test .lines { white-space: pre-line; max-height: 260px; overflow: auto; }
   .test { padding: 10px 12px; border-radius: 8px; background: var(--surface); display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
   .terms { display: flex; flex-direction: column; gap: 12px; max-width: 980px; }
-  .add, .term { display: grid; grid-template-columns: 1fr 1fr 1.3fr auto; gap: 8px; align-items: center; }
-  .list { display: flex; flex-direction: column; gap: 6px; }
+  .add-card { padding: 16px; display: flex; flex-direction: column; gap: 12px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--outline)); }
+  .add-card h3 { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; }
+  .add-card h3 :global(svg) { color: var(--accent); }
+  .add { display: grid; grid-template-columns: 1fr 1fr 1.3fr auto; gap: 8px; align-items: center; }
+  .list-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }
+  .list-head b { font-size: 14px; }
+  .list-head i { font-style: normal; font-weight: 600; font-size: 12px; color: var(--dim); margin-left: 4px; }
+  .list { padding: 4px 0; display: flex; flex-direction: column; }
+  .term { display: grid; grid-template-columns: 1fr 1fr 1.3fr 32px; gap: 8px; align-items: center; padding: 4px 12px; border-top: 1px solid var(--outline); }
+  .term.cols { border-top: 0; padding-top: 8px; padding-bottom: 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); }
+  .term.cols span { padding: 0 9px; }
+  .cell { width: 100%; min-width: 0; height: 32px; padding: 0 9px; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--text); font: inherit; font-size: 13px; }
+  .cell:hover { background: var(--surface); }
+  .cell:focus { outline: none; border-color: var(--accent); background: var(--surface); }
+  .cell.keep::placeholder { color: var(--dim); font-style: italic; }
+  .term .cell:first-child { font-weight: 600; }
+  .pad { padding: 10px 21px; }
   .suggest { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
   .suggest .chip { display: inline-flex; align-items: center; gap: 4px; height: 26px; font-size: 12px; }
   .filter { max-width: 320px; }
@@ -528,5 +573,5 @@
   .hk { display: flex; align-items: center; gap: 6px; flex: none; }
   .key { min-width: 150px; justify-content: center; display: inline-flex; align-items: center; font-weight: 600; cursor: pointer; }
   .key.rec { border-color: var(--accent); color: var(--accent); }
-  @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } .add, .term { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } .add { grid-template-columns: 1fr 1fr; } }
 </style>

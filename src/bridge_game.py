@@ -26,6 +26,10 @@ RECENT = 30          # sayfada gosterilen son ceviriler
 STREAM_REDRAW = 0.08  # akan ceviride katman en sik bu aralikla yeniden cizilir
 ERROR_REPEAT = 15.0   # ayni hata Konsol'a en sik bu aralikla yazilir
 PICK_TIMEOUT = 180    # bolge secimi bu kadar saniye beklenir
+BLOCK_OCR_GAP = 0.6   # tarama kipinde goruntu degisse de OCR en sik bu aralikla
+BLOCK_MISSES = 2      # tarama kipinde yazi bu kadar okumada gorulmezse cevirisi gizlenir
+RETRY_GAP = 5.0       # toplu ceviri istegi basarisizsa yeniden denemeden once beklenir
+SKIP_GAP = 30.0       # modelin atladigi yazi bu kadar saniye yeniden istenmez
 
 
 class _Pass:
@@ -37,8 +41,21 @@ class _Pass:
         self.speakers = {}
         self.showing = {}       # bolge -> ekrandaki cevirinin kaynak metni (compact)
         self.vision_dirty = {}
+        self.blocks = {}        # tarama bolgesi -> _Blocks
         self.reader = None
         self.reader_key = None
+
+
+class _Blocks:
+    """Tarama kipindeki bir bolgenin durumu: son okunan yazilar ve ceviriyi bekleyenler."""
+
+    def __init__(self):
+        self.items = None       # son OCR'deki yazilar (ekran koordinatlari)
+        self.seen = {}          # compact metin -> (ilk gorulme ani, kac bakista goruldu)
+        self.busy = set()       # ceviri istegindeki yazilar
+        self.skip = {}          # modelin atladigi yazilar -> yeniden istenebilecegi an
+        self.next_ocr = 0.0
+        self.retry_after = 0.0
 
 
 class GameMixin:
@@ -64,6 +81,8 @@ class GameMixin:
         self._game_status_timer = None
         self._game_info = {}             # son okuma: motor adi ve sure
         self._game_models = []           # ceviri icin LM Studio'ya yuklenen modeller (durunca bosaltilir)
+        self._game_block_shown = {}      # tarama bolgesi -> {kaynak: {'key', 'translation', 'box', 'miss'}}
+        self._game_block_free = {}       # tarama bolgesi -> bos katman anahtarlari (pencereler yeniden kullanilir)
 
     # ------------------------------------------------------------------ durum
     def _game_settings(self):
@@ -218,19 +237,37 @@ class GameMixin:
             box.append(rect)
             done.set()
         self._game_window(True)
-        time.sleep(0.35)           # pencere kuculurken secici altindaki oyunu gostersin
-        self._game_host.select(chosen, hint)
+        time.sleep(0.45)           # pencere kuculme animasyonu bitsin: donmus karede Aktar gorunmesin
+        # Secim, o anki ekranin donmus karesi uzerinde yapilir; onizleme de ondan kesilir. (Secimden sonra
+        # yakalamak Aktar penceresi geri acilirken onun goruntusunu aliyordu.)
+        try:
+            bounds = game_screen.virtual_screen()
+            frozen = game_screen.grab(bounds)
+        except OSError:
+            bounds, frozen = None, None
+        self._game_host.select(chosen, hint, frozen)
         done.wait(PICK_TIMEOUT)
         self._game_window(False)
         rect = box[0] if box else None
         if not rect:
             return {'cancelled': True}
         try:
-            game_screen.dpi_aware()
-            preview = self._game_preview(game_screen.grab(rect))
+            if frozen is not None:
+                left, top = rect[0] - bounds[0], rect[1] - bounds[1]
+                image = frozen.crop((left, top, left + rect[2], top + rect[3]))
+            else:
+                image = game_screen.grab(rect)
+            preview = self._game_preview(image)
         except OSError:
             preview = ''
         return {'rect': rect, 'preview': preview}
+
+    def game_screen_region(self):
+        """'Tum ekrani tara' bolgesi icin birincil ekranin dikdortgeni (fiziksel piksel)."""
+        if not WINDOWS:
+            return {'error': 'Oyun çevirisi yalnızca Windows\'ta çalışır.'}
+        width, height = game_screen.primary_size()
+        return {'rect': [0, 0, width, height]}
 
     @staticmethod
     def _game_preview(image):
@@ -252,7 +289,14 @@ class GameMixin:
             image = game_screen.grab(region['rect'])
             state = _Pass()
             started = time.perf_counter()
-            lines = self._game_reader(state, self._game_settings(), game)(image)
+            reader = self._game_reader(state, self._game_settings(), game)
+            if region['placement'] == 'blocks':
+                items = game_core.text_blocks(reader.boxes(image), game['language'], region['scan'] == 'prose')
+                return {'lines': [item['text'] for item in items], 'speaker': '', 'blocks': len(items),
+                        'text': '\n'.join(item['text'] for item in items),
+                        'ms': round((time.perf_counter() - started) * 1000), 'engine': reader.label,
+                        'preview': self._game_preview(image)}
+            lines = reader(image)
         except (ValueError, OSError, RuntimeError) as error:
             return {'error': str(error)}
         speaker, text = game_core.split_speaker(lines, region['speaker'], game['terms'], game['language'])
@@ -388,6 +432,11 @@ class GameMixin:
     def _game_reset_display(self):
         self._game_displayed.clear()
         self._game_last.clear()
+        with self._game_lock:
+            for key, shown in self._game_block_shown.items():
+                self._game_generation[key] = self._game_generation.get(key, 0) + 1   # suren tarama istegi
+                self._game_block_free.setdefault(key, []).extend(item['key'] for item in shown.values())
+            self._game_block_shown.clear()
         if self._game_host:
             self._game_host.hide_all()
 
@@ -510,6 +559,9 @@ class GameMixin:
 
     def _game_region(self, state, settings, game, region, regions, force, now):
         key = region['id']
+        if region['placement'] == 'blocks':
+            self._game_blocks(state, settings, game, region, force, now)
+            return
         image = self._game_grab(region['rect'])
         fp = game_screen.fingerprint(image)
         same = not game_screen.changed(state.fps.get(key), fp)
@@ -569,6 +621,148 @@ class GameMixin:
         state.showing[region['id']] = game_core.compact(entry['source'])
         self._game_generation[region['id']] = self._game_generation.get(region['id'], 0) + 1
         self._game_show(region, entry['translation'], speaker or entry.get('speaker', ''), settings)
+
+    # ------------------------------------------------------------------ tarama kipi (yazilarin ustune)
+    def _game_blocks(self, state, settings, game, region, force, now):
+        """Bolgedeki (tum ekran olabilir) her yaziyi ayri bulur ve cevirisini o yazinin tam ustune koyar.
+        Yerlesen yeni yazilar tek istekte toplu cevrilir; onbellektekiler hemen gosterilir."""
+        key = region['id']
+        blocks = state.blocks.setdefault(key, _Blocks())
+        fresh = False
+        if force or blocks.items is None or now >= blocks.next_ocr:
+            image = self._game_grab(region['rect'])
+            fp = game_screen.fingerprint(image)
+            same = not game_screen.changed(state.fps.get(key), fp)
+            state.fps[key] = fp
+            # Her bakis (goruntu ayni kalsa da) kaybolan yazi icin bir 'gorulmedi' sayar: sahne degisip sabit
+            # kalinca eski ekranin cevirileri ekranda kalmasin.
+            fresh = True
+            blocks.next_ocr = now + max(settings['interval_ms'] / 1000, BLOCK_OCR_GAP)
+            if force or blocks.items is None or not same:
+                started = time.perf_counter()
+                lines = state.reader.boxes(image)
+                self._game_info = {'engine': state.reader.label,
+                                   'ocr_ms': round((time.perf_counter() - started) * 1000)}
+                items = game_core.text_blocks(lines, game['language'], region['scan'] == 'prose')
+                for item in items:
+                    item['box'][0] += region['rect'][0]
+                    item['box'][1] += region['rect'][1]
+                blocks.items = items
+                # Genis alanin OCR'i pahali: hareketli sahnede her aralikta degil, en sik BLOCK_OCR_GAP'te bir.
+        cache = self._game_cache_for(game)
+        seen, ready = {}, []
+        for item in blocks.items:
+            text = game_core.compact(item['text'])
+            first, looks = blocks.seen.get(text, (now, 0))
+            seen[text] = (first, looks + 1) if fresh else (first, looks)
+            if text in blocks.busy or blocks.skip.get(text, 0) > now or cache.get(item['text']) is not None:
+                continue
+            # Daktilo bitti: ayni yazi en az iki ayri bakista (aradaki surede) gorulmeli; OCR'siz gecen
+            # turlar yazinin yerlestigini kanitlamaz (yarim cumle cevrilmesin).
+            if force or (seen[text][1] >= 2 and now - first >= settings['settle_ms'] / 1000):
+                ready.append(item)
+        blocks.seen = seen
+        if ready and not blocks.busy and (force or now >= blocks.retry_after):
+            batch, size = [], 0
+            for item in ready:
+                if batch and (len(batch) >= game_core.BATCH_MAX or size + len(item['text']) > game_core.BATCH_CHARS):
+                    break
+                batch.append(item)
+                size += len(item['text'])
+            blocks.busy = {game_core.compact(item['text']) for item in batch}
+            threading.Thread(target=self._game_batch, name='aktar-game-batch', daemon=True,
+                             args=(region, blocks, batch, settings, game, self._game_generation.get(key, 0))).start()
+        self._game_show_blocks(region, blocks.items, settings, game, fresh)
+
+    def _game_batch(self, region, blocks, batch, settings, game, generation):
+        key = region['id']
+        current = lambda: self._game_generation.get(key, 0) == generation and self._game_host is not None  # noqa: E731
+        cache = self._game_cache_for(game)
+        started = time.perf_counter()
+        stored = set()
+        last_draw = [0.0]
+
+        def store(found):
+            for number, translation in found.items():
+                if number in stored:
+                    continue
+                stored.add(number)
+                item = batch[number - 1]
+                cache.put(item['text'], translation, item['speaker'])
+                if len(item['text'].split()) >= 4:        # menu ogeleri son cevirileri doldurmasin
+                    self._game_record(region, item['text'], item['speaker'], translation, False, started)
+            if found and current():
+                self._game_show_blocks(region, blocks.items, settings, game, False)
+
+        def partial(value):     # akarken biten ogeler hemen ekrana gelir
+            if time.monotonic() - last_draw[0] >= STREAM_REDRAW:
+                last_draw[0] = time.monotonic()
+                store(game_core.parse_batch(value, len(batch), final=False))
+        history = list(self._game_history)[-settings['context_lines']:] if settings['context_lines'] else []
+        messages = game_core.batch_messages(batch, history, game['terms'], game['language'])
+        try:
+            client = Client(self._game_cfg(settings), lambda _message: None)
+            result, finish = client.chat_stream(messages, on_delta=partial, temperature=0.2,
+                                                max_tokens=game_core.batch_tokens(batch), cancelled=lambda: not current())
+            if finish != 'cancelled' and current():
+                store(game_core.parse_batch(result, len(batch)))
+                missing = [item for number, item in enumerate(batch, 1) if number not in stored]
+                for item in missing:      # model atladiysa ayni yazi hemen yeniden istenmesin
+                    blocks.skip[game_core.compact(item['text'])] = time.monotonic() + SKIP_GAP
+                if len(missing) == len(batch):
+                    self._game_report('Model çeviri listesini beklenen biçimde döndürmedi.')
+        except (RuntimeError, ValueError, OSError) as error:
+            if current():
+                self._game_report(error)
+            blocks.retry_after = time.monotonic() + RETRY_GAP
+        finally:
+            blocks.busy = set()
+
+    def _game_show_blocks(self, region, items, settings, game, fresh):
+        """Cevirisi bilinen yazilarin ustune kutu; kaybolan yazinin kutusu BLOCK_MISSES okumadan sonra gizlenir
+        (OCR bir okumada yaziyi kacirirsa ceviri yanip sonmesin)."""
+        import game_overlay
+        key = region['id']
+        cache = self._game_cache_for(game)
+        style = self._game_style(settings)
+        screen = game_screen.virtual_screen()
+        with self._game_lock:
+            shown = self._game_block_shown.get(key, {})
+            free = self._game_block_free.setdefault(key, [])
+            current = {}
+            for item in items or []:
+                entry = cache.get(item['text']) or cache.complete(item['text'])
+                if entry is None:
+                    continue
+                source = game_core.compact(entry['source'])
+                if source in current:
+                    continue
+                old = shown.pop(source, None)
+                if old and old['translation'] == entry['translation'] and not _moved(old['box'], item['box'], item['height']):
+                    old['miss'] = 0
+                    current[source] = old
+                    continue
+                if old:
+                    window = old['key']
+                elif free:
+                    window = free.pop()
+                else:
+                    self._game_block_seq = getattr(self, '_game_block_seq', 0) + 1
+                    window = f'{key}#{self._game_block_seq}'
+                if self._game_host:
+                    image, x, y = game_overlay.render_block(entry['translation'], item['box'], item['height'], style, screen)
+                    self._game_host.show(window, image, x, y)
+                current[source] = {'key': window, 'translation': entry['translation'], 'box': list(item['box']), 'miss': 0}
+            for source, old in shown.items():
+                old['miss'] += 1 if fresh else 0
+                covered = any(_overlaps(old['box'], other['box']) for other in current.values())
+                if old['miss'] >= BLOCK_MISSES or covered:
+                    if self._game_host:
+                        self._game_host.hide(old['key'])
+                    free.append(old['key'])
+                else:
+                    current[source] = old
+            self._game_block_shown[key] = current
 
     # ------------------------------------------------------------------ ceviri
     def _game_cfg(self, settings, vision=False):
@@ -679,6 +873,14 @@ class GameMixin:
                   'placement': 'below', 'target': None}
         self._game_toast('Ekran görsel modelle okunuyor…', force=True)
         self._game_vision(region, game_screen.grab([0, 0, width, height]), settings, game)
+
+
+def _moved(before, after, height):
+    return any(abs(a - b) > 0.5 * max(1, height) for a, b in zip(before, after))
+
+
+def _overlaps(a, b):
+    return a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and a[1] < b[1] + b[3] and b[1] < a[1] + a[3]
 
 
 def game_overlay_hide(host, key):

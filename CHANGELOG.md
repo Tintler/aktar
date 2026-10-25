@@ -2,6 +2,18 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.27.0 — 2026-10-25
+
+### Yeni
+- **Oyun Çevirisi — ekran taraması (F195):** Bölgeler sekmesindeki **Tüm ekranı tara** (ya da bir bölgede "Her yazının üstünde" yerleşimi) ekrandaki her yazıyı ayrı bulur ve çevirisini oyundaki yazının tam üstüne, aynı boyda basar. Yazılar Windows OCR'ın kelime konumlarıyla paragraflara ayrılır; yerleşen yeni yazılar tek istekte toplu çevrilir ve akarken biten her çeviri hemen görünür; önbellektekiler beklemeden gösterilir. Yazı ekrandan kalkınca (sahne değişince) çevirisi de kalkar.
+  - Varsayılan **Yalnızca cümleler**: diyalog, hikaye, görev ve açıklama metinleri çevrilir; beceri, silah ve menü adları, nitelik etiketleri ve puanlar (Lv, HP, MP, AP) oyundaki gibi kalır. İstenirse "Menüler dahil her yazı".
+  - Uzun yazının hemen üstündeki tek satırlık ad (ör. `Innkeeper`) konuşan olarak bağlama verilir.
+
+### Düzeltme
+- Ekranda bölge seçerken ekranın o anki görüntüsü donar ve seçim onun üzerinde yapılır; bölge önizlemesi tam olarak seçilen alandan kesilir (önceden seçimden sonra yakalandığı için geri açılan Aktar penceresi görünebiliyordu).
+- Boş oyun sayfasındaki "Oyun ekle" düğmesinin simgesi görünmüyordu (yazı ortalanmamış duruyordu).
+- İsimler ve terimler sekmesi: ekleme alanı ayrı bir kutuda, kayıtlı adlar başlıklı bir tabloda.
+
 ## 2.26.0 — 2026-10-25
 
 ### Yeni

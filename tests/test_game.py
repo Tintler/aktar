@@ -277,6 +277,127 @@ class BridgeTests(unittest.TestCase):
                                      game_core.load_settings(), game)
         self.assertIsNone(cache.get('At this point, it would'))
 
+    def test_blocks_show_cached_at_place_and_batch_new_text_once_settled(self):
+        game = game_core.create_game('Test')
+        region = game_core.clean_region({'rect': [100, 50, 1000, 600], 'id': 'scr', 'placement': 'blocks', 'scan': 'all'})
+        settings = game_core.load_settings()
+        self.bridge._game_cache_for(game).put('Attack', 'Saldır')
+
+        class Reader:
+            label = 'deneme'
+
+            def boxes(self, image):
+                return [[('Attack', 10, 10, 80, 20)], [('Perform', 10, 60, 100, 20), ('a', 115, 60, 10, 20),
+                                                       ('physical', 130, 60, 120, 20)]]
+        from PIL import Image
+        from bridge_game import _Pass
+        state = _Pass()
+        state.reader = Reader()
+        self.bridge._game_host = mock.Mock()
+        with mock.patch('bridge_game.game_screen.grab', return_value=Image.new('RGB', (1000, 600))), \
+                mock.patch('bridge_game.game_screen.virtual_screen', return_value=[0, 0, 1920, 1080]), \
+                mock.patch('bridge_game.threading.Thread') as thread:
+            self.bridge._game_blocks(state, settings, game, region, False, 100.0)
+            thread.assert_not_called()                     # yeni yazi daha yerlesmedi
+            key, image, x, y = self.bridge._game_host.show.call_args[0]
+            self.assertTrue(key.startswith('scr#'))
+            self.assertLess(abs(x - 110), 10)              # cevirinin kutusu yazinin ustunde
+            self.assertLess(abs(y - 60), 10)
+            self.bridge._game_blocks(state, settings, game, region, False, 101.0)
+            thread.assert_called_once()
+            batch = thread.call_args.kwargs['args'][2]
+            self.assertEqual([item['text'] for item in batch], ['Perform a physical'])
+        self.assertEqual(self.bridge._game_host.show.call_count, 1)   # ayni ceviri yeniden cizilmez
+
+
+class BlockTests(unittest.TestCase):
+    @staticmethod
+    def line(text, x, y, height=20, gap=6):
+        words = []
+        for word in text.split():
+            width = len(word) * height // 2
+            words.append((word, x, y, width, height))
+            x += width + gap
+        return words
+
+    def test_paragraph_lines_join_and_list_items_stay_apart(self):
+        lines = [self.line('In the Kolobos Ruins, Rain’s subordinates who had been cut down', 1000, 100),
+                 self.line('at the Earth Shrine return as wraith soldiers.', 1000, 130),
+                 self.line('Though Lazarov manages to elude Rain and Lasswell, they help', 1000, 200),
+                 self.line('Phys. Atk.', 100, 100), self.line('Phys. Def.', 100, 128),
+                 self.line('Lv.1', 600, 300) + self.line('Holy Ray', 700, 300)]
+        texts = [item['text'] for item in game_core.text_blocks(lines)]
+        self.assertIn('In the Kolobos Ruins, Rain’s subordinates who had been cut down at the Earth Shrine '
+                      'return as wraith soldiers.', texts)
+        self.assertIn('Though Lazarov manages to elude Rain and Lasswell, they help', texts)
+        self.assertIn('Phys. Atk.', texts)
+        self.assertIn('Phys. Def.', texts)
+        self.assertIn('Holy Ray', texts)
+        self.assertNotIn('Lv.1', texts)                    # yalnizca kisaltma ve rakam: cevrilmez
+
+    def test_name_line_above_dialog_becomes_speaker_context(self):
+        lines = [self.line('Innkeeper', 500, 880, 32),
+                 self.line('Welcome. How about a rest in our beds, lulled by the gentle sound of', 510, 940, 30),
+                 self.line('the waves?', 510, 980, 30)]
+        blocks = game_core.text_blocks(lines)
+        dialog = next(item for item in blocks if item['text'].startswith('Welcome'))
+        self.assertTrue(dialog['text'].endswith('the waves?'))
+        self.assertEqual(dialog['speaker'], 'Innkeeper')
+
+    def test_prose_only_skips_skill_stat_and_menu_labels(self):
+        for label in ('Holy Ray', 'Radiant Restoration', 'Phys. Atk.', 'Hide Tips', 'Next Rank:', 'Lasswell'):
+            self.assertFalse(game_core.is_prose(label), label)
+        for sentence in ('Perform a physical attack with equipped weapon.', 'Ride the ship out of Grandport',
+                         'Welcome to Grandport!', 'Welcome. How about a rest in our beds?'):
+            self.assertTrue(game_core.is_prose(sentence), sentence)
+        lines = [self.line('Holy Ray', 100, 100), self.line('Perform a physical attack with equipped weapon.', 100, 300)]
+        self.assertEqual([item['text'] for item in game_core.text_blocks(lines, prose_only=True)],
+                         ['Perform a physical attack with equipped weapon.'])
+
+    def test_worth_translating(self):
+        self.assertFalse(game_core.worth_translating('HP 1300'))
+        self.assertFalse(game_core.worth_translating('98 > 101'))
+        self.assertTrue(game_core.worth_translating('Next'))
+        self.assertTrue(game_core.worth_translating('次へ', 'ja'))
+
+    def test_batch_prompt_and_streamed_parse(self):
+        items = [{'text': 'Attack', 'speaker': ''}, {'text': 'Welcome, Rain.', 'speaker': 'Innkeeper'}]
+        terms = [{'source': 'Rain', 'target': '', 'note': ''}]
+        messages = game_core.batch_messages(items, terms=terms)
+        user = messages[1]['content']
+        self.assertIn('[1] Attack', user)
+        self.assertIn('[2] Welcome, Rain.', user)
+        self.assertIn('[2] Innkeeper', user)
+        self.assertIn('Rain', user.split('Çevrilecek')[0])
+        self.assertEqual(game_core.parse_batch('[1] Saldır\n[2] Hoş gel', 2, final=False), {1: 'Saldır'})
+        self.assertEqual(game_core.parse_batch('[1] Saldır\n[2] Hoş geldin, Rain.\n[7] fazla', 2),
+                         {1: 'Saldır', 2: 'Hoş geldin, Rain.'})
+        self.assertEqual(game_core.parse_batch('Saldır', 1), {1: 'Saldır'})
+        self.assertEqual(game_core.parse_batch('Saldır', 2), {})
+
+    def test_blocks_region_is_always_ocr(self):
+        region = game_core.clean_region({'rect': [0, 0, 1920, 1080], 'placement': 'blocks', 'mode': 'vision'})
+        self.assertEqual((region['placement'], region['mode']), ('blocks', 'ocr'))
+
+    def test_tesseract_tsv_lines(self):
+        import game_screen
+        tsv = ('level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n'
+               '5\t1\t1\t1\t1\t1\t20\t10\t40\t16\t91\tHoly\n'
+               '5\t1\t1\t1\t1\t2\t66\t10\t30\t16\t90\tRay\n'
+               '5\t1\t2\t1\t1\t1\t20\t60\t40\t16\t12\tgarbage\n')
+        self.assertEqual(game_screen.tsv_lines(tsv, 2.0), [[('Holy', 10, 5, 20, 8), ('Ray', 33, 5, 15, 8)]])
+
+    def test_render_block_covers_text_and_shrinks_long_translation(self):
+        style = {'font_size': 26, 'opacity': 0.5, 'text_color': '#ffffff', 'background': '#101418'}
+        image, x, y = game_overlay.render_block('Saldırı', [200, 100, 80, 24], 24, style)
+        self.assertLessEqual(x, 200)
+        self.assertLessEqual(y, 100)
+        self.assertGreaterEqual(image.height, 24)
+        self.assertEqual(image.getpixel((1, image.height // 2))[3], round(255 * 0.96))   # ozgun yaziyi orter
+        long, _x, _y = game_overlay.render_block('Donanımlı silahla fiziksel bir saldırı yap ve düşmanı yere ser.',
+                                                 [0, 0, 300, 50], 24, style)
+        self.assertLessEqual(long.height, 50 + 2 * (24 // 3) + 1)
+
 
 if __name__ == '__main__':
     unittest.main()

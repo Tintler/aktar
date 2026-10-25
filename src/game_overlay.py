@@ -115,15 +115,17 @@ def wrap(text, font, width):
     return lines
 
 
-def render(text, width, style, speaker='', fit_height=None):
+def render(text, width, style, speaker='', fit_height=None, pad=None, min_width=80):
     """Ceviri kutusu -> PIL RGBA. style: font_size, opacity, text_color, background, show_speaker.
-    fit_height: 'kapsa' yerlesiminde kutu bu yukseklige sigsin diye yazi kuculur (en az 11 px)."""
+    fit_height: 'kapsa' yerlesiminde kutu bu yukseklige sigsin diye yazi kuculur (en az 11 px).
+    pad: kenar boslugu (varsayilan yazi boyunun yarisi)."""
     from PIL import Image, ImageDraw
     size = int(style.get('font_size', 22))
-    width = max(80, int(width))
-    pad = max(8, size // 2)
+    width = max(min_width, int(width))
+    fixed_pad = pad
     show_name = bool(speaker) and style.get('show_speaker', True)
     while True:
+        pad = fixed_pad if fixed_pad is not None else max(8, size // 2)
         font, bold = _font(size), _font(max(10, int(size * 0.85)), True)
         spacing = int(size * 0.3)
         lines = wrap(text, font, width - 2 * pad)
@@ -174,6 +176,27 @@ def place(region, placement, size, screen, target=None, gap=6):
     x = min(max(x, sx), sx + sw - width)
     y = min(max(y, sy), sy + sh - height)
     return int(x), int(y)
+
+
+def render_block(text, box, line_height, style, screen=None):
+    """Tarama kipi: ceviri, oyundaki yazinin tam ustune ve ayni boyda. (PIL RGBA, x, y) doner.
+    Yazi boyu ozgun satir yuksekliginden; Turkce uzun gelirse kucultulur, tek satirlik kisa yazida kutu
+    biraz genisleyebilir (ozgunun 1,8 katina kadar). Zemin ozgun yaziyi ortecek kadar opak."""
+    x, y, width, height = box
+    size = max(11, min(72, round(line_height)))
+    pad = max(4, size // 3)
+    style = dict(style, font_size=size, show_speaker=False,
+                 opacity=max(0.96, float(style.get('opacity', 0.85))))
+    inner = width
+    if height < 1.8 * line_height:      # tek satir: cevirinin tamami sigsin diye genisleyebilir
+        inner = min(max(width, _font(size).getlength(text) + 2), width * 1.8)
+    image = render(text, inner + 2 * pad, style, fit_height=height + 2 * pad, pad=pad, min_width=1)
+    x, y = x - pad, y - pad
+    if screen:
+        sx, sy, sw, sh = screen
+        x = min(max(x, sx), sx + sw - image.width)
+        y = min(max(y, sy), sy + sh - image.height)
+    return image, int(x), int(y)
 
 
 def box_width(region, placement, target=None):
@@ -298,6 +321,19 @@ if WINDOWS:
 def _signed(value):
     value &= 0xFFFF
     return value - 0x10000 if value & 0x8000 else value
+
+
+def _dib(image):
+    """PIL goruntu -> GDI bitmap (32 bit, ust-alt). Cagiran DeleteObject ile birakir."""
+    width, height = image.size
+    data = image.convert('RGBA').tobytes('raw', 'BGRA')
+    header = BITMAPINFOHEADER(ctypes.sizeof(BITMAPINFOHEADER), width, -height, 1, 32, 0, 0, 0, 0, 0, 0)
+    bits = ctypes.c_void_p()
+    bitmap = gdi32.CreateDIBSection(None, ctypes.byref(header), 0, ctypes.byref(bits), None, 0)
+    if not bitmap:
+        raise OSError('Ekran görüntüsü hazırlanamadı.')
+    ctypes.memmove(bits, data, len(data))
+    return bitmap
 
 
 class OverlayHost:
@@ -526,23 +562,35 @@ class OverlayHost:
         self._hotkeys.clear()
 
     # -------------------------------------------------------------- bolge secici
-    def select(self, callback, hint=''):
-        """Tum ekranlari karartan pencerede surukleyerek dikdortgen sectirir. callback([x, y, w, h] | None)."""
-        self.call(lambda: self._open_selector(callback, hint))
+    def select(self, callback, hint='', frozen=None):
+        """Tum ekranlari karartan pencerede surukleyerek dikdortgen sectirir. callback([x, y, w, h] | None).
+        frozen: secimden hemen once yakalanan sanal ekran goruntusu (PIL); verilirse secim bu donmus kare
+        uzerinde yapilir (oyundaki yazi secerken kaybolmaz, onizleme tam olarak gorulen alandan kesilir)."""
+        self.call(lambda: self._open_selector(callback, hint, frozen))
 
-    def _open_selector(self, callback, hint):
+    def _open_selector(self, callback, hint, frozen=None):
         if self._selector:
             self._close_selector(None)
         metric = user32.GetSystemMetrics
         bounds = [metric(76), metric(77), metric(78), metric(79)]
-        hwnd = user32.CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW, self.CLASS,
-                                      'Aktar bölge seçimi', WS_POPUP, *bounds, None, None, self._instance, None)
+        bitmaps = None
+        if frozen is not None and frozen.size == tuple(bounds[2:]):
+            from PIL import ImageEnhance
+            bitmaps = (_dib(frozen), _dib(ImageEnhance.Brightness(frozen).enhance(0.45)))
+        # Donmus kare varsa pencere opaktir (kendi resmini cizer); yoksa yari saydam karartma + renk anahtari.
+        style = WS_EX_TOPMOST | WS_EX_TOOLWINDOW | (0 if bitmaps else WS_EX_LAYERED)
+        hwnd = user32.CreateWindowExW(style, self.CLASS, 'Aktar bölge seçimi', WS_POPUP, *bounds, None, None,
+                                      self._instance, None)
         if not hwnd:
+            for handle in bitmaps or ():
+                gdi32.DeleteObject(handle)
             callback(None)
             return
         user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)
-        user32.SetLayeredWindowAttributes(hwnd, KEY_COLOR, 120, LWA_COLORKEY | LWA_ALPHA)
+        if not bitmaps:
+            user32.SetLayeredWindowAttributes(hwnd, KEY_COLOR, 120, LWA_COLORKEY | LWA_ALPHA)
         self._selector = {'hwnd': hwnd, 'bounds': bounds, 'start': None, 'end': None, 'callback': callback,
+                          'bitmaps': bitmaps,
                           'hint': hint or 'Okunacak bölgeyi fareyle sürükleyerek seçin · Esc ya da sağ tık: vazgeç'}
         user32.ShowWindow(hwnd, SW_SHOW)
         user32.SetForegroundWindow(hwnd)
@@ -554,6 +602,8 @@ class OverlayHost:
             return
         user32.ReleaseCapture()
         user32.DestroyWindow(selector['hwnd'])
+        for handle in selector.get('bitmaps') or ():
+            gdi32.DeleteObject(handle)
         try:
             selector['callback'](rect)
         except Exception as error:
@@ -609,8 +659,15 @@ class OverlayHost:
         dark, clear, white = gdi32.CreateSolidBrush(0x00101010), gdi32.CreateSolidBrush(KEY_COLOR), \
             gdi32.CreateSolidBrush(0x00FFFFFF)
         font = gdi32.CreateFontW(-30, 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 5, 0, 'Segoe UI')
+        bitmaps = selector.get('bitmaps')
+        source = gdi32.CreateCompatibleDC(hdc) if bitmaps else None
         try:
-            user32.FillRect(memory, ctypes.byref(wintypes.RECT(0, 0, width, height)), dark)
+            if bitmaps:
+                previous = gdi32.SelectObject(source, bitmaps[1])
+                gdi32.BitBlt(memory, 0, 0, width, height, source, 0, 0, 0x00CC0020)
+                gdi32.SelectObject(source, previous)
+            else:
+                user32.FillRect(memory, ctypes.byref(wintypes.RECT(0, 0, width, height)), dark)
             gdi32.SetBkMode(memory, 1)
             gdi32.SetTextColor(memory, 0x00FFFFFF)
             old_font = gdi32.SelectObject(memory, font)
@@ -622,7 +679,12 @@ class OverlayHost:
             rect = self._selection(selector)
             if rect and rect[2] > 0 and rect[3] > 0:
                 box = wintypes.RECT(rect[0], rect[1], rect[0] + rect[2], rect[1] + rect[3])
-                user32.FillRect(memory, ctypes.byref(box), clear)
+                if bitmaps:     # secilen alan donmus karede parlak (karartmasiz) gorunur
+                    previous = gdi32.SelectObject(source, bitmaps[0])
+                    gdi32.BitBlt(memory, rect[0], rect[1], rect[2], rect[3], source, rect[0], rect[1], 0x00CC0020)
+                    gdi32.SelectObject(source, previous)
+                else:
+                    user32.FillRect(memory, ctypes.byref(box), clear)
                 for inset in (0, 1):
                     edge = wintypes.RECT(box.left - inset - 1, box.top - inset - 1, box.right + inset + 1,
                                          box.bottom + inset + 1)
@@ -633,4 +695,6 @@ class OverlayHost:
             for handle in (bitmap, dark, clear, white, font):
                 gdi32.DeleteObject(handle)
             gdi32.DeleteDC(memory)
+            if source:
+                gdi32.DeleteDC(source)
             user32.EndPaint(selector['hwnd'], ctypes.byref(paint))
