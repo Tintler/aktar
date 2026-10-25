@@ -29,6 +29,7 @@ import urllib.request
 import wave
 
 import drama3
+import tr_numbers
 
 ENGINE_ID = 'drama3-tr'
 PREF_DIR = 'drama3_tr_dir'
@@ -408,7 +409,7 @@ class Engine:
         return [best[1]]
 
     def say(self, text, speed=1.0, tag=''):
-        text = drama3.tagged(text, tag) if tag else text
+        text = tr_numbers.spoken(drama3.tagged(text, tag) if tag else text)   # F198: '44. bölüm', 'IV. Murad'
         if self.reference is None or not (self.cloud or (self.server and self.server.alive)):
             raise RuntimeError('Ses motoru hazır değil.')
         clips, rate = [], None

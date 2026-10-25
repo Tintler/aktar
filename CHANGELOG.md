@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.29.1 — 2026-10-25
+
+### Düzeltme
+- **Drama 3 TR sayı okuma (F198):** Sıra sayıları ve Romen rakamları modele yazıyla gider: "44. bölüm" artık "kırk dördüncü bölüm", "IV. Murad" "Dördüncü Murad", "XV. yüzyıl" "on beşinci yüzyıl" okunur. OpenRouter'daki orijinal Drama 3 bunları "kırk dört bölüm" diye ya da harf harf okuyordu. Okuyucuda görünen metin değişmez; ses önbelleğinde yalnızca bu kuralın değiştirdiği cümleler yeniden okunur.
+
 ## 2.29.0 — 2026-10-25
 
 ### Yeni

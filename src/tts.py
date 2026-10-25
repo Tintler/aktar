@@ -483,6 +483,11 @@ class Engines:
         pref_tags = self._pref_tags(engine_id)
         if pref_tags:
             parts.append({'prefs': pref_tags})
+        if self._manifests().get(engine_id, {}).get('spoken_numbers'):   # F198: only sentences it rewrites re-render
+            import tr_numbers
+            joined = ' '.join(text) if isinstance(text, (list, tuple)) else str(text)
+            if tr_numbers.spoken(joined) != joined:
+                parts.append({'numbers': tr_numbers.VERSION})
         if emotion:   # motor.json "emotion_cache_tags": bump to re-render only sentences with that tag (F169)
             renew = (self._manifests().get(engine_id, {}).get('emotion_cache_tags') or {}).get(emotion)
             parts.append({'emotion': emotion, 'tag': renew} if renew else {'emotion': emotion})

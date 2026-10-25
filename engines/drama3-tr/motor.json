@@ -11,6 +11,7 @@
   "group_sentences": true,
   "cloud": "openrouter",
   "cache_prefs": {"drama3_tr_backend": "local"},
+  "spoken_numbers": true,
   "attribution": "Built with Fish Audio",
   "notice": "Rızası olmadan tanınabilir kişilerin sesini klonlamak yasaktır (Fish Audio Community License). Yalnızca hakkına sahip olduğunuz kayıtları kullanın.",
   "description": "Fish Audio Drama 3'ün tam okuyucusu ile 32 uzmanlı Türkçe konuşmacı (kasparovabi/drama-3-tr): duygulu, kayıttan klonlanan ses, tek 16 GB GPU'da, WSL gerekmez. Model Aktar klasöründe değil, seçtiğiniz klasörde durur (~45 GB, hızlı bir SSD önerilir): drama-3-tr reposu, içinde fish-speech, models/drama-3 (orijinal fishaudio/drama-3), speaker.safetensors ve .venv Python ortamı. Aktar sunucuyu bu klasörün Python'uyla kendisi başlatır ve kapanınca durdurur; ilk yükleme birkaç dakika sürebilir. Klon kaydı her istekle gider: dublajda konuşmacılara farklı sesler atanabilir. GPU yoksa aynı ses kayıtlarıyla OpenRouter üzerinden de çalışır (bulutta orijinal Fish Audio Drama 3, ücretli API anahtarı gerekir).",
