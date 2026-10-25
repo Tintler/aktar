@@ -45,6 +45,7 @@ DEFAULT_SETTINGS = {
     'background': '#101418',
     'show_speaker': True,     # konusanin adi cevirinin ustunde
     'hide_when_gone': True,   # oyundaki yazi kaybolunca ceviri de gizlenir
+    'game_colors': True,      # tarama kipinde kutu ve yazi oyundaki renklerle (ozgun yazi tamamen ortulur)
     'context_lines': 3,       # modele baglam olarak verilen onceki satir sayisi
     # Ctrl+Alt kullanilmaz: Turkce klavyede AltGr (Ctrl+Alt) ile yazilan karakterleri (@, ₺ ...) engellerdi.
     'hotkeys': {'toggle': 'Ctrl+F9', 'overlay': 'Ctrl+F10', 'now': 'Ctrl+F11'},
@@ -116,7 +117,7 @@ def clean_settings(values, current=None):
                 result[key] = value if isinstance(value, str) and _COLOR.fullmatch(value) else result[key]
             elif key == 'ocr_engine':
                 result[key] = value if value in OCR_ENGINES else result[key]
-            elif key in ('show_speaker', 'hide_when_gone'):
+            elif key in ('show_speaker', 'hide_when_gone', 'game_colors'):
                 result[key] = bool(value)
             elif key == 'hotkeys':
                 keys = dict(result['hotkeys'])
@@ -517,7 +518,33 @@ def is_prose(text, language='en'):
         letters = sum(char.isalpha() for char in text)
         return letters >= 8 or (letters >= 4 and bool(_SENTENCE_END.search(text)))
     words = [word for word in text.split() if sum(char.isalpha() for char in word) >= 2]
-    return len(words) >= 5 or (len(words) >= 3 and bool(_SENTENCE_END.search(text)))
+    ended = bool(_SENTENCE_END.search(text))
+    if not ended and _title_case(words):
+        return False        # 'Skill Details Hide Tips Back', 'Bronze Chestplate Earrings of Health'
+    return len(words) >= 5 or (len(words) >= 3 and ended)
+
+
+_MINOR = {'a', 'an', 'the', 'of', 'and', 'or', 'to', 'in', 'on', 'for', 'with', 'at', 'by', 'from', 'de', 'la',
+          'le', 'der', 'die', 'das', 'und', 'von'}
+
+
+def _title_case(words):
+    """Kucuk baglaclar disinda her kelime buyuk harfle: dugme cubugu, esya ya da beceri adlari dizisi."""
+    major = [word for word in words if word.lower().strip('.,:;()[]') not in _MINOR]
+    return bool(major) and all(word.lstrip('"\'([“‘')[:1].isupper() for word in major)
+
+
+def reading_change(old, new):
+    """Ekrandaki cevirinin altindaki ozgun yazi yeniden okundu: 'same' (OCR farki tolere edilir), 'grew'
+    (daktilo devam ediyor), 'gone' (yazi kalkti) ya da 'other' (yerine baska bir yazi geldi)."""
+    old, new = compact(old), compact(new)
+    if len(new) < 2:
+        return 'gone'
+    if new.startswith(old) and len(new) > len(old):
+        return 'grew'
+    if difflib.SequenceMatcher(None, old, new).ratio() >= 0.75:
+        return 'same'
+    return 'other'
 
 
 def text_blocks(lines, language='en', prose_only=False):
@@ -535,8 +562,10 @@ def text_blocks(lines, language='en', prose_only=False):
     for block in blocks:
         parts = block['parts']
         texts = [part['text'] for part in parts]
+        tops = [part['box'][1] for part in parts]
+        pitch = _median([after - before for before, after in zip(tops, tops[1:])]) or None   # satir arasi
         result.append({'text': join_lines(texts, language), 'lines': texts, 'box': _union([part['box'] for part in parts]),
-                       'height': _median([part['height'] for part in parts]), 'speaker': ''})
+                       'height': _median([part['height'] for part in parts]), 'pitch': pitch, 'speaker': ''})
     for item in result:
         if len(item['text'].split()) < 4:
             continue

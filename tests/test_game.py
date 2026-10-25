@@ -299,15 +299,88 @@ class BridgeTests(unittest.TestCase):
                 mock.patch('bridge_game.threading.Thread') as thread:
             self.bridge._game_blocks(state, settings, game, region, False, 100.0)
             thread.assert_not_called()                     # yeni yazi daha yerlesmedi
-            key, image, x, y = self.bridge._game_host.show.call_args[0]
+            (key, image, x, y), (pending, _image, _x, py) = [call[0] for call in self.bridge._game_host.show.call_args_list]
             self.assertTrue(key.startswith('scr#'))
             self.assertLess(abs(x - 110), 10)              # cevirinin kutusu yazinin ustunde
             self.assertLess(abs(y - 60), 10)
+            self.assertLess(abs(py - 110), 10)             # cevirisi beklenen yazi bos kutuyla ortulur
             self.bridge._game_blocks(state, settings, game, region, False, 101.0)
             thread.assert_called_once()
             batch = thread.call_args.kwargs['args'][2]
             self.assertEqual([item['text'] for item in batch], ['Perform a physical'])
-        self.assertEqual(self.bridge._game_host.show.call_count, 1)   # ayni ceviri yeniden cizilmez
+            self.assertEqual(self.bridge._game_host.show.call_count, 2)   # ayni kutular yeniden cizilmez
+            self.bridge._game_cache_for(game).put('Perform a physical', 'Fiziksel bir')
+            self.bridge._game_show_blocks(region, state.blocks['scr'], settings, game, False)
+        self.assertEqual(self.bridge._game_host.show.call_args[0][0], pending)   # ceviri bos kutunun yerine
+        self.bridge._game_host.hide.assert_not_called()
+
+    def test_blocks_hide_at_once_when_text_under_translation_changes(self):
+        game = game_core.create_game('Test')
+        region = game_core.clean_region({'rect': [0, 0, 1000, 600], 'id': 'scr', 'placement': 'blocks', 'scan': 'all'})
+        settings = game_core.load_settings()
+        self.bridge._game_cache_for(game).put('Welcome to the inn', 'Hana hoş geldin')
+        reading = ['Welcome to the inn']
+
+        class Reader:
+            label = 'deneme'
+
+            def boxes(self, image):
+                return [[('Welcome', 10, 10, 120, 20), ('to', 135, 10, 30, 20), ('the', 170, 10, 40, 20),
+                         ('inn', 215, 10, 40, 20)]]
+
+            def __call__(self, image):
+                return list(reading)
+        from PIL import Image
+        from bridge_game import _Pass
+        state = _Pass()
+        state.reader = Reader()
+        self.bridge._game_host = mock.Mock(capture_safe=True)
+        screens = [Image.new('RGB', (1000, 600)), Image.new('RGB', (40, 40), 'white')]
+        with mock.patch('bridge_game.game_screen.grab', side_effect=lambda rect: screens[0] if rect[2] == 1000 else screens[1]), \
+                mock.patch('bridge_game.game_screen.virtual_screen', return_value=[0, 0, 1920, 1080]):
+            self.bridge._game_blocks(state, settings, game, region, False, 100.0)
+            window = self.bridge._game_host.show.call_args[0][0]
+            self.bridge._game_blocks(state, settings, game, region, False, 100.1)     # OCR'siz tur: ayni yazi
+            self.bridge._game_host.hide.assert_not_called()
+            reading[:] = []                                                          # diyalog kapandi
+            screens[1] = Image.new('RGB', (40, 40), 'gray')
+            self.bridge._game_blocks(state, settings, game, region, False, 100.2)
+        self.bridge._game_host.hide.assert_called_once_with(window)
+        self.assertEqual(state.blocks['scr'].next_ocr, 100.2)                        # tam OCR one alinir
+
+    def test_blocks_hide_at_once_when_full_ocr_misses_changed_text(self):
+        game = game_core.create_game('Test')
+        region = game_core.clean_region({'rect': [0, 0, 1000, 600], 'id': 'scr', 'placement': 'blocks', 'scan': 'all'})
+        self.bridge._game_cache_for(game).put('Attack', 'Saldır')
+        found = [[('Attack', 10, 10, 80, 20)]]
+
+        class Reader:
+            label = 'deneme'
+
+            def boxes(self, image):
+                return list(found)
+        from PIL import Image
+        from bridge_game import _Pass
+        state = _Pass()
+        state.reader = Reader()
+        self.bridge._game_host = mock.Mock(capture_safe=True)
+        screens = [Image.new('RGB', (1000, 600))]
+        with mock.patch('bridge_game.game_screen.grab', side_effect=lambda rect: screens[0]), \
+                mock.patch('bridge_game.game_screen.virtual_screen', return_value=[0, 0, 1920, 1080]):
+            settings = game_core.load_settings()
+            self.bridge._game_blocks(state, settings, game, region, False, 100.0)
+            found[:] = []
+            self.bridge._game_blocks(state, settings, game, region, False, 101.0)   # OCR kacirdi, alan ayni
+            self.bridge._game_host.hide.assert_not_called()
+            screens[0] = Image.new('RGB', (1000, 600), 'white')
+            self.bridge._game_blocks(state, settings, game, region, False, 102.0)   # alan da degisti
+        self.bridge._game_host.hide.assert_called_once()
+
+    def test_reading_change(self):
+        self.assertEqual(game_core.reading_change('Welcome to the inn', 'Welcome to the lnn'), 'same')
+        self.assertEqual(game_core.reading_change('Welcome to', 'Welcome to the inn'), 'grew')
+        self.assertEqual(game_core.reading_change('Welcome to the inn', ''), 'gone')
+        self.assertEqual(game_core.reading_change('Welcome to the inn', 'Are you ready?'), 'other')
 
 
 class BlockTests(unittest.TestCase):
@@ -345,7 +418,8 @@ class BlockTests(unittest.TestCase):
         self.assertEqual(dialog['speaker'], 'Innkeeper')
 
     def test_prose_only_skips_skill_stat_and_menu_labels(self):
-        for label in ('Holy Ray', 'Radiant Restoration', 'Phys. Atk.', 'Hide Tips', 'Next Rank:', 'Lasswell'):
+        for label in ('Holy Ray', 'Radiant Restoration', 'Phys. Atk.', 'Hide Tips', 'Next Rank:', 'Lasswell',
+                      '@ Skill Details (b Hide Tips O Back', 'Longsword Bronze Chestplate Earrings of Health'):
             self.assertFalse(game_core.is_prose(label), label)
         for sentence in ('Perform a physical attack with equipped weapon.', 'Ride the ship out of Grandport',
                          'Welcome to Grandport!', 'Welcome. How about a rest in our beds?'):
@@ -397,6 +471,19 @@ class BlockTests(unittest.TestCase):
         long, _x, _y = game_overlay.render_block('Donanımlı silahla fiziksel bir saldırı yap ve düşmanı yere ser.',
                                                  [0, 0, 300, 50], 24, style)
         self.assertLessEqual(long.height, 50 + 2 * (24 // 3) + 1)
+        colored, _x, _y = game_overlay.render_block('Saldırı', [200, 100, 80, 24], 24, style,
+                                                    colors=((20, 40, 60), (250, 250, 250)))
+        self.assertEqual(colored.getpixel((2, colored.height // 2)), (20, 40, 60, 255))   # oyunun zemini, opak
+        blank, _x, _y = game_overlay.render_block('', [200, 100, 80, 24], 24, style, placeholder=True)
+        self.assertGreaterEqual(blank.width, 80)
+
+    def test_area_colors(self):
+        from PIL import Image, ImageDraw
+        image = Image.new('RGB', (200, 40), (10, 30, 70))
+        ImageDraw.Draw(image).rectangle((20, 12, 60, 28), fill=(240, 240, 240))
+        background, text = game_overlay.area_colors(image)
+        self.assertEqual(background, (10, 30, 70))
+        self.assertGreater(sum(text), 600)
 
 
 if __name__ == '__main__':

@@ -178,25 +178,75 @@ def place(region, placement, size, screen, target=None, gap=6):
     return int(x), int(y)
 
 
-def render_block(text, box, line_height, style, screen=None):
-    """Tarama kipi: ceviri, oyundaki yazinin tam ustune ve ayni boyda. (PIL RGBA, x, y) doner.
-    Yazi boyu ozgun satir yuksekliginden; Turkce uzun gelirse kucultulur, tek satirlik kisa yazida kutu
-    biraz genisleyebilir (ozgunun 1,8 katina kadar). Zemin ozgun yaziyi ortecek kadar opak."""
-    x, y, width, height = box
-    size = max(11, min(72, round(line_height)))
-    pad = max(4, size // 3)
-    style = dict(style, font_size=size, show_speaker=False,
-                 opacity=max(0.96, float(style.get('opacity', 0.85))))
-    inner = width
-    if height < 1.8 * line_height:      # tek satir: cevirinin tamami sigsin diye genisleyebilir
-        inner = min(max(width, _font(size).getlength(text) + 2), width * 1.8)
-    image = render(text, inner + 2 * pad, style, fit_height=height + 2 * pad, pad=pad, min_width=1)
+WORD_HEIGHT = 0.73     # OCR kelime kutusu yuksekligi / yazi boyu (Segoe, Georgia, Arial, Times ile olculdu)
+
+
+def render_block(text, box, line_height, style, screen=None, pitch=None, colors=None, placeholder=False):
+    """Tarama kipi: ceviri oyundaki yazinin tam ustune, ayni yazi boyu ve satir araligiyla. (RGBA, x, y).
+
+    line_height: OCR kelime kutusu yuksekligi (ust uctan taban cizgisine, yazi boyunun ~%73'u); pitch: ozgun
+    satirlarin arasi. Turkce uzun gelirse once tek satirlik yazida kutu genisler (ozgunun 1,8 katina kadar),
+    sigmazsa yazi kuculur. colors: (zemin, yazi) RGB -- oyundaki kutunun ve yazinin renkleri; verilirse zemin
+    tamamen opaktir (ozgun Ingilizce hic gorunmez). placeholder: ceviri gelene kadar yalnizca ozgunu ortulur."""
+    from PIL import Image, ImageDraw
+    x, y, width, height = (int(round(value)) for value in box)
+    base = max(10, min(96, round(line_height / WORD_HEIGHT)))
+    pitch = pitch or round(base * 1.35)
+    if colors:
+        background, color = (*colors[0], 255), (*colors[1], 255)
+    else:
+        background = _color(style.get('background', '#101418'), round(255 * max(0.96, float(style.get('opacity', 0.85)))))
+        color = _color(style.get('text_color', '#ffffff'))
+    pad = max(3, round(base * 0.2))
+    single = height < 1.6 * line_height
+    size, inner, lines = base, width, []
+    while not placeholder:
+        font = _font(size)
+        if single:
+            inner = int(min(max(width, font.getlength(text) + 2), width * 1.8))
+        lines = wrap(text, font, inner)
+        step = pitch * size / base
+        needed = (len(lines) - 1) * step + size * WORD_HEIGHT
+        if needed <= height + pad or size <= max(10, base * 0.55):
+            break
+        size -= 1
+    step = pitch * size / base
+    ascent = size * WORD_HEIGHT
+    image_height = max(height, round((len(lines) - 1) * step + ascent + size * 0.25)) + 2 * pad
+    image = Image.new('RGBA', (inner + 2 * pad, image_height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((0, 0, image.width - 1, image.height - 1), radius=max(3, size // 5), fill=background)
+    if placeholder:
+        dots = _font(max(10, round(base * 0.8)))
+        draw.text((pad, pad + round(ascent)), '…', font=dots, fill=(*color[:3], 110), anchor='ls')
+    font = _font(size)
+    for index, line in enumerate(lines):     # taban cizgisi ozgun yazininkine oturur
+        draw.text((pad, pad + round(ascent + index * step)), line, font=font, fill=color, anchor='ls')
     x, y = x - pad, y - pad
     if screen:
         sx, sy, sw, sh = screen
         x = min(max(x, sx), sx + sw - image.width)
         y = min(max(y, sy), sy + sh - image.height)
     return image, int(x), int(y)
+
+
+def area_colors(image):
+    """Oyundaki yazinin bulundugu alan -> (zemin, yazi) RGB. Zemin: alanin ortanca rengi (yazi harfleri
+    alanin kucuk bir kismi); yazi: zeminden en uzak %8 pikselin ortalamasi. Kontrast azsa yazi beyaz/siyah."""
+    small = image.convert('RGB')
+    small.thumbnail((96, 48))
+    data = small.tobytes()
+    pixels = [tuple(data[index:index + 3]) for index in range(0, len(data), 3)]
+    if not pixels:
+        return (16, 20, 24), (255, 255, 255)
+    background = tuple(sorted(channel)[len(channel) // 2] for channel in zip(*pixels))
+    far = sorted(pixels, key=lambda pixel: sum((a - b) ** 2 for a, b in zip(pixel, background)), reverse=True)
+    far = far[:max(1, len(far) * 8 // 100)]
+    color = tuple(sum(channel) // len(channel) for channel in zip(*far))
+    luma = lambda rgb: 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]  # noqa: E731
+    if abs(luma(color) - luma(background)) < 90:
+        color = (255, 255, 255) if luma(background) < 128 else (0, 0, 0)
+    return background, color
 
 
 def box_width(region, placement, target=None):
@@ -346,7 +396,7 @@ class OverlayHost:
 
     def __init__(self, on_hotkey=None, log=print):
         if not WINDOWS:
-            raise RuntimeError('Oyun çevirisi katmanı yalnızca Windows\'ta çalışır.')
+            raise RuntimeError('Ekran çevirisi katmanı yalnızca Windows\'ta çalışır.')
         self.on_hotkey = on_hotkey or (lambda _action: None)
         self.log = log
         self.capture_safe = True     # WDA_EXCLUDEFROMCAPTURE kabul edildi mi
@@ -419,7 +469,7 @@ class OverlayHost:
                         try:
                             self.on_hotkey(action)
                         except Exception as error:  # kisayol isleyicisi donguyu durdurmasin
-                            self.log(f'Oyun çevirisi kısayolu hatası: {error}')
+                            self.log(f'Ekran çevirisi kısayolu hatası: {error}')
                     continue
                 if message.message == WM_APP and not message.hWnd:
                     self._drain()
@@ -444,7 +494,7 @@ class OverlayHost:
             try:
                 fn()
             except Exception as error:  # bir cizim hatasi katmani durdurmasin
-                self.log(f'Oyun çevirisi katmanı hatası: {error}')
+                self.log(f'Ekran çevirisi katmanı hatası: {error}')
 
     def _wndproc(self, hwnd, message, wparam, lparam):
         try:
@@ -486,7 +536,7 @@ class OverlayHost:
         if hwnd:
             return hwnd
         style = WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
-        hwnd = user32.CreateWindowExW(style, self.CLASS, 'Aktar oyun çevirisi', WS_POPUP, 0, 0, 1, 1,
+        hwnd = user32.CreateWindowExW(style, self.CLASS, 'Aktar ekran çevirisi', WS_POPUP, 0, 0, 1, 1,
                                       None, None, self._instance, None)
         if not hwnd:
             raise OSError('Katman penceresi açılamadı.')

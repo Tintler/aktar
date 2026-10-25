@@ -2,6 +2,17 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.28.0 — 2026-10-25
+
+### Yeni
+- **Ekran Çeviri (F196):** Sol menüdeki "Oyun Çevirisi" sayfasının adı **Ekran Çeviri** oldu (oyunların yanında ekrandaki her türlü yazı için de kullanılabilir).
+- Tarama kipinde çevirisi beklenen yazı o sırada boş bir kutuyla örtülür: özgün İngilizce çeviri gelene kadar görünmez. Harf harf gelen tek satırın kutusu sağa geniş tutulur, yeni gelen harfler de örtülür.
+- Tarama kutuları oyundaki yazının zemin ve yazı rengini alır, yazı boyu ve satır aralığı özgün yazıya oturur (OCR kelime yüksekliği yazı boyunun ~%73'ü olarak ölçüldü). Ayarlar sekmesinden kapatılabilir.
+
+### Düzeltme
+- Diyalog geçince ya da kutu kapanınca çeviri ekranda gecikmeli kalıyordu: çeviri kutusunun altındaki alan her turda ucuzca denetlenir; yazı kalkınca kutu hemen (~0,1–0,4 sn) kaybolur, yerine yeni yazı geldiyse boş kutuyla örtülür.
+- "Yalnızca cümleler" kipinde düğme çubukları ve ad dizileri (`Skill Details Hide Tips Back`, `Bronze Chestplate Earrings of Health`) cümle sayılmıyor: noktalamasız ve her kelimesi büyük harfle başlayan yazı çevrilmez.
+
 ## 2.27.0 — 2026-10-25
 
 ### Yeni

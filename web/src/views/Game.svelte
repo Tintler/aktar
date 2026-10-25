@@ -205,7 +205,7 @@
 
 <section class="page">
   <div class="page-head">
-    <h1>Oyun Çevirisi</h1>
+    <h1>Ekran Çeviri</h1>
     {#if snap?.supported}
       <div class="games">
         <select class="field" value={settings.game} onchange={(e) => act('game_select', e.currentTarget.value).then(apply)} disabled={!snap.games.length}>
@@ -228,7 +228,7 @@
   {#if !snap}
     <div class="page-body"><p class="dim">Yükleniyor…</p></div>
   {:else if !snap.supported}
-    <div class="page-body"><div class="card empty"><Icon name="gamepad" size={32} /><b>Oyun çevirisi yalnızca Windows'ta çalışır.</b>
+    <div class="page-body"><div class="card empty"><Icon name="gamepad" size={32} /><b>Ekran çevirisi yalnızca Windows'ta çalışır.</b>
       <span>Ekran okuma ve oyunun üstündeki katman Windows'un pencere özelliklerini kullanıyor.</span></div></div>
   {:else if !game}
     <div class="page-body"><div class="card empty">
@@ -331,7 +331,7 @@
                 {/if}
               </div>
               {#if region.placement === 'blocks'}
-                <p class="note small"><Icon name="info" size={14} /><span>Bölgedeki her yazı (diyalog, menü, açıklama) ayrı okunur; çevirisi oyundaki yazının tam üstüne, aynı boyda basılır. Yeni yazılar yerleşince tek istekte toplu çevrilir, daha önce çevrilenler hemen görünür. "Yalnızca cümleler" seçiliyken beceri, silah ve menü adları, nitelik etiketleri ve puanlar (Lv, HP, MP, AP) oyundaki gibi kalır. Geniş alan okunduğu için işlemci biraz daha çalışır.</span></p>
+                <p class="note small"><Icon name="info" size={14} /><span>Bölgedeki her yazı (diyalog, menü, açıklama) ayrı okunur; çevirisi oyundaki yazının tam üstüne, aynı boyda basılır. Yeni yazılar yerleşince tek istekte toplu çevrilir, daha önce çevrilenler hemen görünür. Çevirisi beklenen yazı o sırada boş kutuyla örtülür; altındaki yazı değişince ya da kaybolunca kutu hemen kalkar. "Yalnızca cümleler" seçiliyken beceri, silah ve menü adları, nitelik etiketleri ve puanlar (Lv, HP, MP, AP) oyundaki gibi kalır. Geniş alan okunduğu için işlemci biraz daha çalışır.</span></p>
               {/if}
               {#if region.role === 'text'}
                 <Toggle checked={region.auto} onchange={(v) => updateRegion(index, { auto: v })}
@@ -460,6 +460,7 @@
             </label>
             <div class="fr"><span>Konuşanın adını göster</span><Toggle checked={settings.show_speaker} onchange={(v) => saveSettings({ show_speaker: v })} /></div>
             <div class="fr"><span>Yazı kaybolunca çeviriyi gizle</span><Toggle checked={settings.hide_when_gone} onchange={(v) => saveSettings({ hide_when_gone: v })} /></div>
+            <div class="fr"><span>Tarama kutularında oyunun renkleri<small>"Tüm ekranı tara" kutuları oyundaki yazının zemin ve yazı rengini alır, özgün yazıyı tamamen örter.</small></span><Toggle checked={settings.game_colors} onchange={(v) => saveSettings({ game_colors: v })} /></div>
           </section>
 
           <section class="card">
