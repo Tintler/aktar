@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.28.2 — 2026-10-25
+
+### Düzeltme
+- Sol menüde **Ekran Çeviri**, **Dosya incele**'nin hemen altına taşındı.
+
 ## 2.28.1 — 2026-10-25
 
 ### Düzeltme

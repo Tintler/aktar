@@ -39,11 +39,11 @@
     ['chat', 'Sohbet', 'message'],
     ['library', 'Kütüphane', 'library'],
     ['files', 'Dosya incele', 'fileSearch'],
+    ['game', 'Ekran Çeviri', 'screentext'],
     ['translate', 'Altyazı Çevir', 'languages'],
     ['books', 'Kitap Çevir', 'bookA'],
     ['reading', 'Okuma', 'book'],
     ['speech', 'Metinden ses', 'waveform'],
-    ['game', 'Ekran Çeviri', 'screentext'],
     ['subscriptions', 'Abonelikler', 'creditCard'],
     ['console', 'Konsol', 'terminal'],
   ];
