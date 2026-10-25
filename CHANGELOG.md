@@ -2,6 +2,15 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.29.0 — 2026-10-25
+
+### Yeni
+- **Kitap görselleri (F197):** Kitaplıkta kitaba sağ tıklayıp **Kitap görselleri oluştur** denince dil modeli kitabı okur, sahne değişimlerini seçer ve her sahne için bir görsel istemi yazar; görseller yerel **ComfyUI**'de (ör. Krea2) üretilir. Bütün görseller kitap için bir kez yazılan tek bir stil kılavuzu ve sabit karakter tarifleriyle üretilir, böylece kitap boyunca aynı tarzda kalır.
+- Görsellere söz hakkı: planlamadan önce **kitap notu** ("daha soyut ol, yüz gösterme") ve hazır tarzlar (Sinematik, Suluboya, Gravür, Soyut, Sade), sıklık (Az / Orta / Çok). Plan bitince stil ve karakterler düzenlenebilir; her sahnede kısa bir **Düzelt** notu ("daha karanlık", "kişiyi çıkar") istemi sahneyi baştan kurmadan en az değişiklikle yeniden yazar. Ayrıca **Yeniden dene** (yeni seed), **İstemi düzenle** ve **Görsel olmasın**.
+- Tam ekran okuyucuda yeni **Arka plan: Düz | Görselli** seçimi (Görünüm menüsü). Görselli kipte yazı ortada kalır, sahnenin görseli üstte ve altta açık, ortaya doğru koyulaşan bantla yazıya bağlanır; sahne değişince görsel çapraz geçişle değişir. Bant koyuluğu ayarlanabilir. Var olan düz görünüm değişmedi.
+- **Ayarlar → Kitap görselleri:** ComfyUI adresi, iş akışı ("Export (API)" ile dışa aktarılan JSON; düğümler "Positive", "PRE-PROMPT", "POST-PROMPT" başlıklarından bulunur), görsel boyutu ve bağlantı denemesi.
+- Plan ve üretim arka planda sürer (sağ üstteki işler), durdurulabilir; yarım kalan plan kaldığı yerden sürdürülür. Dil modeli ile görsel modeli aynı GPU'yu paylaştığı için planlamadan önce ComfyUI'den modellerini bırakması istenir, plan bitince dil modeli boşaltılır, plan sürerken ses motoru başlatılmaz. Seslendirilmiş kitapların ses önbelleğine dokunulmaz.
+
 ## 2.28.2 — 2026-10-25
 
 ### Düzeltme

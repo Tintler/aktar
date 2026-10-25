@@ -95,8 +95,15 @@
     onopen(book);
   }
 
+  // F197: kitap gorselleri penceresi (plan, gozden gecirme, uretim)
+  const illustrated = (book) => Boolean(app.artBooks[book.id]?.images);
+  function openArt(book) {
+    menu = null;
+    app.artModal = { book: book.id, title: book.title };
+  }
+
   const progressLabel = (b) => (!b.exists ? 'Dosya bulunamadı' : b.percent >= 100 ? 'Bitti' : b.percent ? `%${Math.round(b.percent)} okundu` : 'Yeni')
-    + (tagged(b) ? ' · duygu etiketli' : '');
+    + (tagged(b) ? ' · duygu etiketli' : '') + (illustrated(b) ? ' · görselli' : '');
 </script>
 
 <svelte:window onclick={() => (menu = null)} />
@@ -151,6 +158,11 @@
     {:else}
       <button disabled={!menu.book.exists || Boolean(app.emotionJob)} onclick={() => createEmotions(menu.book)}>
         <Icon name="sparkles" size={15} />{tagged(menu.book) ? 'Duygu etiketlerini yeniden oluştur' : 'Duygu etiketleri oluştur'}</button>
+    {/if}
+    <button disabled={!menu.book.exists} onclick={() => openArt(menu.book)}>
+      <Icon name="image" size={15} />{app.artBooks[menu.book.id] ? 'Kitap görselleri' : 'Kitap görselleri oluştur'}</button>
+    {#if app.artJob?.book === menu.book.id}
+      <button onclick={() => { menu = null; act('art_cancel'); }}><Icon name="stop" size={15} />Görsel işini durdur</button>
     {/if}
     {#if tagged(menu.book)}
       <button onclick={() => showEmotions(menu.book)}><Icon name="fileText" size={15} />Etiketli metni göster</button>

@@ -88,6 +88,28 @@
     backlogStatus = (await call('backlog_test', cfg.backlog_url)) ?? null;
   }
 
+  // F197 kitap gorselleri: ComfyUI adresi, is akisi (API formati, Aktar kopyasini saklar), gorsel boyutu (ui.json 'art').
+  let art = $state(null);            // art_options
+  let artCheck = $state(null);       // {ok, message} | {error}
+  let artBusy = $state(false);
+  call('art_options').then((r) => { if (r && !r.error) art = r; });
+  function setArt(values) {
+    art = { ...art, ...values };
+    artCheck = null;
+    savePref({ art: { ...(app.prefs.art ?? {}), ...values } });
+  }
+  async function pickWorkflow() {
+    const path = await call('choose_file', 'ComfyUI iş akışı (API formatı)', ['JSON (*.json)']);
+    if (!path) return;
+    const result = await act('art_set_workflow', path);
+    if (result) { art = { ...art, workflow: result }; toast('İş akışı kaydedildi.', 'ok'); }
+  }
+  async function testArt() {
+    artBusy = true;
+    artCheck = await call('art_check', art.url);
+    artBusy = false;
+  }
+
   async function save() {
     saving = true;
     const result = await act('save_settings', $state.snapshot(cfg));
@@ -118,6 +140,7 @@
     { id: 'appearance', label: 'Görünüm', icon: 'palette', keys: [] },
     { id: 'subtitles', label: 'Altyazı çevirisi', icon: 'languages', keys: ['source_language', 'target_language', 'glossary_strict', 'auto_retry_count', 'batch_cues', 'analysis_chunk_chars'] },
     { id: 'books', label: 'Kitap çevirisi', icon: 'bookA', keys: ['auto_retry_count', 'book.'] },
+    { id: 'art', label: 'Kitap görselleri', icon: 'image', keys: [] },
     { id: 'library', label: 'Kütüphane ve belgeler', icon: 'library', keys: ['embedding_model', 'vision_model', 'ocr_engine', 'ocr_model', 'tesseract_path', 'tesseract_lang'] },
     { id: 'chat', label: 'Sohbet', icon: 'message', keys: ['qa_context_chars'] },
     { id: 'voice', label: 'Ses', icon: 'mic', keys: ['whisper_model', 'whisper_device', 'whisper_language', 'whisper_cuda_dir'] },
@@ -532,6 +555,33 @@
               <Toggle bind:checked={cfg.video_direct_hevc} />
             </div>
             {/if}
+          </section>
+      </div>
+
+      <div class="cat-body" data-cat="art" hidden={!searching && tab !== 'art'}>
+        {#if searching}<div class="cat-label">{CATS.find((c) => c.id === 'art').label}</div>{/if}
+          <section>
+            <h2>Kitap görselleri (ComfyUI)</h2>
+            <div class="fr">
+              <div class="l">ComfyUI adresi<small>Kitaplıkta kitaba sağ tıklayıp "Kitap görselleri" deyince görseller bu ComfyUI'de üretilir. ComfyUI'yi siz açarsınız (Aktar başlatmaz); aynı bilgisayarda varsayılan adres çalışır.</small></div>
+              <input class="field w" value={art?.url ?? ''} placeholder="http://127.0.0.1:8188" spellcheck="false" disabled={!art}
+                onchange={(e) => setArt({ comfy_url: e.currentTarget.value.trim(), url: e.currentTarget.value.trim() })} />
+            </div>
+            <div class="fr">
+              <div class="l">İş akışı<small>ComfyUI'de iş akışını "Export (API)" ile dışa aktarıp seçin. Aktar düğümleri başlıklarından bulur: "Positive" (sahne istemi), varsa "PRE-PROMPT" (kitabın stili) ve "POST-PROMPT" (yazı istememe), seed, boyut ve SaveImage. Negatif istem CFG 1'de çalışmaz, kullanılmaz.</small>
+                {#if art}<small class:okc={art.workflow.ok} class:errc={!art.workflow.ok}>{art.workflow.message}</small>{/if}</div>
+              <button class="btn sm" disabled={!art} onclick={pickWorkflow}><Icon name="folderOpen" size={14} />Seç…</button>
+            </div>
+            <div class="fr">
+              <div class="l">Görsel boyutu<small>Tam ekran okuyucu için 16:9. Büyük boyut daha yavaş üretilir; yeni planlarda geçerli olur.</small></div>
+              <select class="field" value={art?.size ?? '1344x768'} disabled={!art} onchange={(e) => setArt({ size: e.currentTarget.value })}>
+                {#each art?.sizes ?? [] as size (size)}<option value={size}>{size.replace('x', ' × ')}</option>{/each}
+              </select>
+            </div>
+            <div class="fr">
+              <div class="l">Bağlantı<small class:okc={artCheck?.ok} class:errc={artCheck?.error}>{artCheck ? (artCheck.error ?? artCheck.message) : 'ComfyUI açık mı ve iş akışı uygun mu, dener.'}</small></div>
+              <button class="btn sm" disabled={!art || artBusy} onclick={testArt}><Icon name="refresh" size={14} />{artBusy ? 'Deneniyor…' : 'Bağlantıyı dene'}</button>
+            </div>
           </section>
       </div>
 

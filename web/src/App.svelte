@@ -6,6 +6,7 @@
   import ReviewModal from './components/ReviewModal.svelte';
   import BookReviewModal from './components/BookReviewModal.svelte';
   import PdfImportModal from './components/PdfImportModal.svelte';
+  import BookArt from './components/BookArt.svelte';
   import SetupWizard from './components/SetupWizard.svelte';
   import Collections from './components/Collections.svelte';
   import ChatPanel from './components/ChatPanel.svelte';
@@ -191,6 +192,7 @@
 {#if app.review}<ReviewModal data={app.review} onsubmit={submitReview} />{/if}
 {#if app.books.review}<BookReviewModal data={app.books.review} onsubmit={submitBookReview} />{/if}
 {#if app.pdfImport?.open}<PdfImportModal />{/if}
+{#if app.artModal}<BookArt book={app.artModal.book} title={app.artModal.title} onclose={() => (app.artModal = null)} />{/if}
 {#if app.setup}<SetupWizard />{/if}
 <ConfirmHost />
 

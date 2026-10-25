@@ -37,9 +37,9 @@ def main():
         book_core.validate_config = lambda cfg: None
     import bridge
     if args.app_dir:
-        import bridge_tts, game_core, library, qa, search_index, series, speech, themes  # noqa: E401
-        for module in (app_core, book_core, bridge, bridge_tts, game_core, library, qa, search_index, speech, series,
-                       themes):
+        import bridge_art, bridge_tts, game_core, library, qa, search_index, series, speech, themes  # noqa: E401
+        for module in (app_core, book_core, bridge, bridge_art, bridge_tts, game_core, library, qa, search_index, speech,
+                       series, themes):
             if hasattr(module, 'APP_DIR'):
                 module.APP_DIR = args.app_dir.resolve()
 

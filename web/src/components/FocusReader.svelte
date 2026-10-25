@@ -4,6 +4,9 @@
   // okunan cumle vurgulanmaz: vurgu sesle tam ortusmuyordu, butun grup ayni parlaklikta durur.
   // Yazi boyutu, renkler ve gecis Gorunum menusunden secilir (ui.json reader.focus_*); uzun grup ekrana sigmazsa
   // yazi yalnizca o grup icin kuculur. Fare 2,5 sn durunca ust satir, dugmeler ve ilerleme cubugu gizlenir.
+  // F197 Gorselli arka plan (ui.json reader.focus_art 'art'): kitabin gorselleri varsa okunan cumlenin sahnesi tam
+  // ekran arkada; yazi ortada kalir, gorsel ustte ve altta acik, ortaya dogru sayfa rengine koyulasir (focus_band).
+  // Sahne degisince gorsel capraz gecisle degisir; bolumun ilk sahnesine kadar onceki bolumun son gorseli kalir.
   import { onDestroy, onMount, tick } from 'svelte';
   import { fly } from 'svelte/transition';
   import { cubicOut, cubicInOut } from 'svelte/easing';
@@ -12,7 +15,7 @@
   import { app, saveReaderPrefs, READER_DEFAULTS } from '../lib/state.svelte.js';
   import { player, step } from '../lib/player.svelte.js';
 
-  let { sentences, start = 0, title, subtitle, paper, font, ontoggle, onclose } = $props();
+  let { sentences, start = 0, title, subtitle, paper, font, ontoggle, onclose, book = '', section = 0 } = $props();
 
   // paper: okuyucunun sayfa rengi; digerleri uzaktan okumaya uygun sabit ciftler.
   const COLORS = {
@@ -36,6 +39,43 @@
   const range = $derived(player.active && player.from >= 0 ? [player.from, player.to] : [start, start]);
   const text = $derived(sentences.slice(range[0], range[1] + 1).join(' '));
   const progress = $derived(sentences.length ? ((range[1] + 1) / sentences.length) * 100 : 0);
+
+  // F197: bolumun sahne gorselleri; baslangic cumlesi metniyle (anchor) yeniden bulunur, bolme degistiyse kaymasin.
+  const hasArt = $derived(Boolean(app.artBooks[book]?.images));
+  const artOn = $derived(hasArt && app.reader.focus_art === 'art');
+  const band = $derived(app.reader.focus_band ?? READER_DEFAULTS.focus_band);
+  let art = $state({ scenes: [], carry: '' });
+  $effect(() => {
+    const [id, number, on] = [book, section, artOn];
+    app.artBooks[book]?.images;   // uretim bitince (sayi degisince) yeniden sorulur
+    if (!on || !id) { art = { scenes: [], carry: '' }; return; }
+    call('art_section', id, number).then((r) => { if (r && !r.error && id === book && number === section) art = r; });
+  });
+  const norm = (s) => String(s ?? '').split(/\s+/).filter(Boolean).join(' ');
+  const starts = $derived(art.scenes.map((scene) => {
+    if (norm(sentences[scene.start]) === scene.anchor) return { ...scene };
+    const found = sentences.findIndex((s) => norm(s) === scene.anchor);
+    return { ...scene, start: found >= 0 ? found : scene.start };
+  }).sort((a, b) => a.start - b.start));
+  const image = $derived(artOn ? ([...starts].reverse().find((s) => s.start <= range[0])?.url ?? art.carry) : '');
+  // iki katman: yeni gorsel ustteki katmana gelir, yuklenince belirir (capraz gecis)
+  let layers = $state([{ url: '', on: false }, { url: '', on: false }]);
+  let top = 0;
+  $effect(() => {
+    const url = image;
+    if (url === layers[top].url) return;
+    if (!url) { layers[0].on = layers[1].on = false; return; }
+    const next = 1 - top;
+    const img = new Image();
+    img.onload = () => {
+      if (image !== url) return;
+      layers[next].url = url;
+      layers[next].on = true;
+      layers[top].on = false;
+      top = next;
+    };
+    img.src = url;
+  });
 
   function setPref(key, value) {
     app.reader[key] = value;
@@ -96,8 +136,15 @@
 <svelte:window onkeydown={keydown} />
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="focus" class:idle onmousemove={poke} onpointerdown={poke}
-  style:--paper={colors ? colors.bg : 'var(--panel)'} style:--ink={colors ? colors.ink : 'var(--text)'} style:font-family={font}>
+<div class="focus" class:idle class:art={artOn} onmousemove={poke} onpointerdown={poke}
+  style:--paper={colors ? colors.bg : 'var(--panel)'} style:--ink={colors ? colors.ink : 'var(--text)'} style:font-family={font}
+  style:--band={band}>
+  {#if artOn}
+    {#each layers as layer, i (i)}
+      <div class="art-layer" class:on={layer.on} style:background-image={layer.url ? `url("${layer.url}")` : 'none'}></div>
+    {/each}
+    <div class="veil"></div>
+  {/if}
   <div class="top">
     <div class="ttl"><b>{title}</b><small>{subtitle}</small></div>
     <span class="count">{#if player.waiting}hazırlanıyor… · {/if}Cümle {range[0] + 1} / {sentences.length}</span>
@@ -133,6 +180,17 @@
           <button class:on={motion === 'fade'} onclick={() => setPref('focus_motion', 'fade')}>Belirme</button>
         </div>
       </div>
+      <div class="r">Arka plan
+        <div class="seg" title={hasArt ? '' : 'Bu kitabın görseli yok: kitaplıkta kitaba sağ tıklayıp "Kitap görselleri oluştur"'}>
+          <button class:on={!artOn} onclick={() => setPref('focus_art', 'plain')}>Düz</button>
+          <button class:on={artOn} disabled={!hasArt} onclick={() => setPref('focus_art', 'art')}>Görselli</button>
+        </div>
+      </div>
+      {#if artOn}
+        <div class="r">Yazı bandı <span class="val">%{Math.round(band * 100)}</span></div>
+        <input type="range" min="0" max="1" step="0.05" value={band} title="Ortadaki yazının arkasındaki koyuluk"
+          oninput={(e) => setPref('focus_band', Number(e.currentTarget.value))} />
+      {/if}
     </div>
   {/if}
 
@@ -154,6 +212,18 @@
 <style>
   .focus { position: fixed; inset: 0; z-index: 45; background: var(--paper); color: var(--ink); display: flex; flex-direction: column; transition: background .4s, color .4s; }
   .focus.idle { cursor: none; }
+  /* F197: gorsel tam ekran; ust ve alt acik, orta yazi bandi sayfa rengine koyulasir. z-index -1: .focus'un
+     yigin baglaminda arka planin ustunde, yazi ve dugmelerin altinda */
+  .art-layer { position: absolute; inset: 0; background: center / cover no-repeat; opacity: 0; transition: opacity 1.2s ease; pointer-events: none; z-index: -1; }
+  .art-layer.on { opacity: 1; }
+  .veil { position: absolute; inset: 0; pointer-events: none; z-index: -1;
+    background: linear-gradient(to bottom, transparent 0%,
+      color-mix(in srgb, var(--paper) calc(var(--band) * 55%), transparent) 16%,
+      color-mix(in srgb, var(--paper) calc(var(--band) * 100%), transparent) 36%,
+      color-mix(in srgb, var(--paper) calc(var(--band) * 100%), transparent) 64%,
+      color-mix(in srgb, var(--paper) calc(var(--band) * 55%), transparent) 84%, transparent 100%); }
+  .focus.art .chunk { text-shadow: 0 0 18px color-mix(in srgb, var(--paper) 90%, transparent), 0 1px 2px color-mix(in srgb, var(--paper) 80%, transparent); }
+  .focus.art .top, .focus.art .controls { text-shadow: 0 1px 3px rgba(0, 0, 0, .6); }
   .top, .controls, .track { transition: opacity .4s; }
   .focus.idle .top, .focus.idle .controls, .focus.idle .track { opacity: 0; pointer-events: none; }
   .top { display: flex; align-items: center; gap: 10px; padding: 14px 20px; font-family: var(--sans); }

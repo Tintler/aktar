@@ -717,6 +717,7 @@
     </div>
     {#if focus}
       <FocusReader {sentences} start={focusStart} title={book.title} subtitle={sectionTitle} {paper} font={fonts[app.reader.font]}
+        book={book.id} {section}
         ontoggle={togglePlay} onclose={closeFocus} />
     {/if}
   </section>

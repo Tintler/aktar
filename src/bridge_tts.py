@@ -127,6 +127,8 @@ class TtsMixin:
             job = getattr(self, '_emotion_job', None)
             if job is not None and job.is_alive():
                 return _error('Duygu etiketleri zaten oluşturuluyor.')
+            if getattr(self, '_art_planning', lambda: False)():
+                return _error('Kitap görselleri planlanırken duygu etiketi oluşturulamaz (ikisi de dil modelini kullanır).')
             for name in ('_prepare_job', '_audiobook_job'):
                 running = getattr(self, name, None)
                 if running is not None and running.is_alive():
@@ -267,6 +269,9 @@ class TtsMixin:
         job = getattr(self, '_emotion_job', None)
         if job is not None and job.is_alive():   # F170: dil modeli calisirken ses motoru bellege yuklenmez
             return {'state': 'error', 'message': 'Duygu etiketleri oluşturulurken ses motoru başlatılmaz; '
+                    'bitmesini bekleyin ya da sağ üstteki işlerden durdurun.'}
+        if getattr(self, '_art_planning', lambda: False)():   # F197: dil modeli gorsel plani cikariyor
+            return {'state': 'error', 'message': 'Kitap görselleri planlanırken ses motoru başlatılmaz; '
                     'bitmesini bekleyin ya da sağ üstteki işlerden durdurun.'}
         device = self.ui_prefs().get('tts', {}).get('device', 'auto')
         override = self._voice_override(voice)

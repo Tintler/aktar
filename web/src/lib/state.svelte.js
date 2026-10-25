@@ -43,6 +43,11 @@ export const app = $state({
   ttsAudiobook: null,         // F141: {book, title, done, total, chapter, chapters}: sesli kitap kaydedilirken
   emotionJob: null,           // F170: {book, title, done, total, reading}: kitabin duygu etiketleri olusturulurken
   emotionBooks: [],           // F170: etiketli surumu olan kitaplar (tts_emotions_books)
+  // F197 kitap gorselleri: suren is {book, title, stage: 'plan'|'generate', done, total, current, reading},
+  // plani olan kitaplar {kitap: {complete, scenes, images}} ve acik pencere {book} (BookArt.svelte).
+  artJob: null,
+  artBooks: {},
+  artModal: null,
   // F178 Metinden ses: yazilan metin, cikti adi, suren kayit {done, total, loading} ve son kaydedilen dosya {path, url, duration}.
   speech: { text: '', name: '', job: null, last: null },
   // F194 Oyun Cevirisi: canli durum (bridge_game._game_status; 'game' olayiyla gelir).
@@ -87,7 +92,7 @@ const VIEWS = ['chat', 'library', 'files', 'translate', 'books', 'reading', 'spe
 
 // F189: focus_* tam ekran okumanin yazi boyutu, renkleri ve gecisi.
 export const READER_DEFAULTS = { size: 19, font: 'serif', leading: 1.75, width: 680, paper: 'theme',
-  focus_size: 44, focus_colors: 'paper', focus_motion: 'slide' };
+  focus_size: 44, focus_colors: 'paper', focus_motion: 'slide', focus_art: 'plain', focus_band: 0.85 };
 
 // EPUB'u kitapliga ekleyip Okuma sayfasinda acar (Kitap Cevir'in urettigi Turkce EPUB icin).
 export async function openInReader(path) {
@@ -133,6 +138,11 @@ export function clearLog() {
 export function log(line) {
   app.log.push(line);
   if (app.log.length > LOG_LIMIT) app.log.splice(0, app.log.length - LOG_LIMIT);
+}
+
+export async function refreshArtBooks() {
+  const books = await call('art_books').catch(() => null);
+  if (books && typeof books === 'object' && !books.error) app.artBooks = books;
 }
 
 export async function refreshEmotionBooks() {
@@ -282,6 +292,23 @@ export async function init() {
     else if (data.cancelled) toast('Duygu etiketleme durduruldu.');
     else toast(`Duygu etiketleri hazır: ${data.title || 'kitap'} · ${data.info?.tagged ?? 0} konuşma etiketlendi.`, 'ok');
   });
+  // F197: kitap gorselleri (plan ya da uretim); acik pencere ayrica dinler (sahne gorseli geldikce).
+  on('art', (data) => {
+    if (!data.finished) {
+      app.artJob = { book: data.book, title: data.title, stage: data.stage, done: data.done ?? 0, total: data.total ?? 0,
+        current: data.current ?? app.artJob?.current ?? '' };
+      return;
+    }
+    app.artJob = null;
+    refreshArtBooks();
+    const what = data.stage === 'plan' ? 'Görsel planı' : 'Görsel üretimi';
+    if (data.error) toast(`${what}: ${data.error}`, 'error');
+    else if (data.cancelled) toast(`${what} durduruldu${data.stage === 'plan' ? '; yeniden başlatınca kaldığı yerden sürer' : ''}.`);
+    else if (data.stage === 'plan') {
+      toast(`Görsel planı hazır: ${data.title || 'kitap'} · ${data.summary?.scenes ?? 0} sahne. Kitaplıkta kitaba sağ tıklayıp ` +
+        '"Kitap görselleri" ile gözden geçirip üretebilirsiniz.', 'ok');
+    } else toast(`Görseller hazır: ${data.title || 'kitap'} · ${data.done ?? 0} görsel.`, 'ok');
+  });
   // F141: sesli kitap kaydi (okuyucu); bitince dosya/klasor gosterilir.
   on('tts_audiobook', async (data) => {
     if (!data.finished) { app.ttsAudiobook = { ...data, chapters: data.chapters, chapter: data.chapter }; return; }
@@ -385,6 +412,7 @@ export async function init() {
   applyBookSnapshot(start.books);
   call('shelf_list').then((books) => { if (Array.isArray(books)) app.shelf = books; });
   refreshEmotionBooks();
+  refreshArtBooks();
   call('tts_status').then((status) => { if (status?.state) app.tts = status; });
   call('refresh_models');
   if (!app.prefs.setup_seen) app.setup = true;   // F154: ilk acilista bilesen denetimi

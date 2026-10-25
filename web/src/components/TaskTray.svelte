@@ -76,6 +76,14 @@
         percent: e.total ? pct(e.done, e.total) : null, count: e.total ? `${e.done} / ${e.total} cümle` : '',
         go: () => go('reading') });
     }
+    const art = app.artJob;
+    if (art) {
+      const plan = art.stage === 'plan';
+      list.push({ id: 'art', icon: 'image', title: plan ? 'Kitap görselleri planlanıyor' : 'Kitap görselleri üretiliyor',
+        detail: [art.title, art.reading ? 'bölümler okunuyor' : plan ? '' : art.current].filter(Boolean).join(' · '),
+        percent: art.total ? pct(art.done, art.total) : null, count: art.total ? `${art.done} / ${art.total} ${plan ? 'cümle' : 'görsel'}` : '',
+        go: () => { app.artModal = { book: art.book, title: art.title }; } });
+    }
     return list;
   });
 
