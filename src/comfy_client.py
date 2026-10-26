@@ -6,6 +6,10 @@ Kullanicinin ComfyUI'den "API formatinda" disa aktardigi is akisi sablondur; Akt
   - 'PRE-PROMPT' / 'POST-PROMPT' (istege bagli): stil oneki ve sabit son ek; yoksa olumlu isteme eklenir
   - seed girdisi olan ornekleyici (KSampler, RandomNoise ...), width/height girdisi olan bos latent, SaveImage oneki
 Uclar: POST /prompt kuyruga koyar, GET /history/<id> bitti mi, GET /view gorseli verir, POST /interrupt durdurur.
+
+Karakter kimligi (F201, istege bagli ikinci is akisi, orn. Krea 2 Identity Edit): basligi 'REFERENCE' (ikinci kisi
+icin istege bagli 'REFERENCE-B') olan LoadImage dugumune karakterin portresi konur; portre once POST /upload/image
+ile ComfyUI'nin input klasorune yuklenir.
 """
 from __future__ import annotations
 
@@ -15,6 +19,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 DEFAULT_URL = 'http://127.0.0.1:8188'
 TEXT_INPUTS = ('positive', 'text', 'prompt', 'string', 'value')
@@ -37,9 +42,9 @@ def normalize_url(url):
     return url
 
 
-def _request(url, path, body=None, timeout=30):
-    data = json.dumps(body).encode('utf-8') if body is not None else None
-    request = urllib.request.Request(url + path, data, {'Content-Type': 'application/json'})
+def _request(url, path, body=None, timeout=30, content_type='application/json'):
+    data = json.dumps(body).encode('utf-8') if body is not None and not isinstance(body, bytes) else body
+    request = urllib.request.Request(url + path, data, {'Content-Type': content_type})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.read()
@@ -142,12 +147,45 @@ def describe_workflow(workflow):
     return {'ok': not missing, 'missing': missing, 'message': message}
 
 
-def fill(workflow, prompt, style='', suffix='', seed=None, size=None, prefix='Aktar/kitap'):
-    """Sablonun doldurulmus kopyasi. PRE/POST dugumu yoksa stil ve son ek olumlu isteme eklenir."""
+REFERENCE_TITLES = ('reference', 'reference-b')
+
+
+def references(workflow):
+    """Karakter portresinin konacagi LoadImage dugumleri, sirayla ('REFERENCE', 'REFERENCE-B')."""
+    found = []
+    for title in REFERENCE_TITLES:
+        node = next((node for node in workflow.values() if _title(node) == title
+                     and isinstance((node.get('inputs') or {}).get('image'), str)), None)
+        if node is not None:
+            found.append(node)
+    return found
+
+
+def describe_identity_workflow(workflow):
+    """Kimlik is akisi: ana is akisinin dugumleri + 'REFERENCE' LoadImage."""
+    info = describe_workflow(workflow)
+    count = len(references(workflow))
+    if not count:
+        missing = info['missing'] + ['başlığı "REFERENCE" olan LoadImage düğümü']
+        return {'ok': False, 'missing': missing, 'message': 'İş akışında eksik: ' + ', '.join(missing)}
+    if info['ok']:
+        info['message'] += ' · ' + ('iki kişilik referans' if count > 1 else 'tek kişilik referans')
+    return info
+
+
+def fill(workflow, prompt, style='', suffix='', seed=None, size=None, prefix='Aktar/kitap', images=()):
+    """Sablonun doldurulmus kopyasi. PRE/POST dugumu yoksa stil ve son ek olumlu isteme eklenir. `images`: yuklenmis
+    portre adlari, REFERENCE dugumlerine sirayla (fazlasi kullanilmaz)."""
     workflow = copy.deepcopy(workflow)
     found = slots(workflow)
     if found['positive'] is None or found['save'] is None:
         raise ComfyError(describe_workflow(workflow)['message'])
+    if images:
+        nodes = references(workflow)
+        if not nodes:
+            raise ComfyError(describe_identity_workflow(workflow)['message'])
+        for node, name in zip(nodes, images):
+            node['inputs']['image'] = name
     text = str(prompt or '').strip()
     for key, value, before in (('pre', style, True), ('post', suffix, False)):
         value = str(value or '').strip()
@@ -208,6 +246,25 @@ def generate(url, workflow, cancel=None, timeout=TIMEOUT):
         if time.monotonic() > deadline:
             interrupt(url, prompt_id)
             raise ComfyError(f'ComfyUI {timeout} saniyede görseli bitirmedi.')
+
+
+def upload_image(url, data, name):
+    """POST /upload/image (ayni adli dosyanin ustune yazar); LoadImage'in bekledigi adi doner."""
+    boundary = uuid.uuid4().hex
+    safe = ''.join(ch for ch in str(name) if ch.isalnum() or ch in '-_.') or 'aktar.png'
+    body = b''.join([
+        f'--{boundary}\r\nContent-Disposition: form-data; name="image"; filename="{safe}"\r\n'
+        f'Content-Type: image/png\r\n\r\n'.encode(), data,
+        f'\r\n--{boundary}\r\nContent-Disposition: form-data; name="overwrite"\r\n\r\ntrue\r\n'
+        f'--{boundary}--\r\n'.encode()])
+    try:
+        info = json.loads(_request(normalize_url(url), '/upload/image', body, timeout=60,
+                                   content_type=f'multipart/form-data; boundary={boundary}').decode('utf-8'))
+    except ValueError:
+        raise ComfyError('ComfyUI portreyi yüklemedi.') from None
+    if not isinstance(info, dict) or not info.get('name'):
+        raise ComfyError('ComfyUI portreyi yüklemedi.')
+    return f'{info["subfolder"]}/{info["name"]}' if info.get('subfolder') else info['name']
 
 
 def free(url):

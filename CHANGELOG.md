@@ -2,6 +2,13 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.30.0 — 2026-10-26
+
+### Yeni
+- **Kitap görsellerinde karakter kimliği (F201, isteğe bağlı):** Kitap görselleri penceresinde yeni **Karakter kimliği** anahtarı; açılınca karakterler her görselde aynı yüzle çıkar. Her karaktere düz fonlu bir portre üretilir (ya da kendi görselinizi seçersiniz), karakterli sahneler bu portre referans verilerek ikinci bir ComfyUI iş akışıyla (ör. Krea 2 Identity Edit LoRA'sı ve ComfyUI-Krea2Edit düğümleri) çizilir. Kapalıyken görseller eskisi gibi yalnızca metin tarifinden üretilir; var olan planlar ve görseller değişmez.
+- Kimlik açıkken planlanan kitaplarda dil modeli her sahnede görünen karakterleri yazar ve onların pozunu, bakışını, ifadesini ayrıca tarif eder (portredeki duruş sahneye kopyalanmasın). Eski planlarda karakterler sahne isteminden bulunur. Her sahne kartında karakter düğmeleriyle kimin referans alınacağı değiştirilebilir; portresi olmayan karakterin portresi sahneden önce kendiliğinden üretilir.
+- **Ayarlar → Kitap görselleri → Karakter kimliği iş akışı:** "Export (API)" ile dışa aktarılan iş akışı; Aktar portreyi başlığı "REFERENCE" olan LoadImage düğümüne (ikinci kişi için "REFERENCE-B") koyar.
+
 ## 2.29.3 — 2026-10-26
 
 ### Düzeltme

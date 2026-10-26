@@ -13,6 +13,13 @@ Turbo modellerde CFG 1 oldugu icin olumsuz istem calismaz; "kisiyi cikar" istemd
 Cumleler okuyucunun bolmesiyle (web/src/lib/sentences.js) gelir; sahne {section, start, anchor} ile baglanir,
 anchor (baslangic cumlesinin metni) bolme degisirse yeniden bulmak icin. Kayit: APP_DIR/kitap-gorselleri/<kitap>/
 plan.json + <sahne>-<surum>.png. Ses onbellegine dokunulmaz.
+
+Karakter kimligi (F201, kitap basina acilir, plan['identity']): kapaliyken yukaridaki akis hic degismez. Acikken
+her karakterin duz fonlu bir portresi (portrait_prompt, stilin yalnizca ilk cumlesiyle: tam stil ortami portreye,
+portre de sahnelere tasiyordu) ana is akisiyla uretilir ya da kullanici kendi gorselini koyar; karakterli sahne kimlik
+is akisiyla (comfy_client.references) portre referans verilerek uretilir (identity_prompt). Sahnedeki karakterler
+scene['cast'] (plan kimlik aciyken cikarildiysa dil modeli yazar, kullanici degistirebilir), yoksa cast_of karakterin
+adini ya da gorunusunu istemde arar. Kayit: <kitap>/portre-<ad>-<surum>.png.
 """
 from __future__ import annotations
 
@@ -26,6 +33,7 @@ from pathlib import Path
 STORE_DIR = 'kitap-gorselleri'
 VERSION = 1
 WORKFLOW_FILE = 'is-akisi.json'   # Ayarlar'da secilen is akisinin kopyasi (STORE_DIR altinda)
+IDENTITY_FILE = 'kimlik-is-akisi.json'   # karakter kimligi is akisi (F201)
 
 # Kitap notuna yazilan hazir tarzlar (kullanici duzenleyebilir; dil modeli Turkce notu anlar).
 PRESETS = (
@@ -49,6 +57,9 @@ CHUNK_CHARS = 14000    # bir sahne isteginin en fazla metni
 DIGEST_CHARS = 24000   # stil kilavuzu icin kitaptan alinan ornek
 MIN_SCENE_CHARS = 600  # daha kisa bolum (kunye, ithaf) kendi sahnesini almaz
 MAX_TOKENS = 6000
+PORTRAIT_SIZE = (1024, 1024)
+PORTRAIT_SUFFIX = 'no text, no letters, no watermark, no logo, no frame, no border'
+MAX_CAST = 2   # kimlik is akisinin en fazla referansi (REFERENCE, REFERENCE-B)
 
 
 class Cancelled(RuntimeError):
@@ -181,18 +192,27 @@ SCENE_TASK = (
     'reflective passages prefer places, objects, period details or symbolic imagery.\n'
     '- "characters": optional, new recurring characters introduced here with a fixed look '
     '[{{"name": "...", "look": "..."}}]\n'
-    'JSON shape: {{"scenes": [{{"start": {first}, "title": "...", "prompt": "...", "characters": []}}]}}\n\n')
+    '{cast}'
+    'JSON shape: {{"scenes": [{{"start": {first}, "title": "...", "prompt": "...", "characters": []{cast_shape}}}]}}\n\n')
+# karakter kimligi acikken (F201): her sahneye gorunen karakterlerin adlari; poz ve bakis portreden kopyalanmasin
+CAST_TASK = (
+    '- "cast": names of the recurring characters visible in the image (exact names from the list above or from '
+    '"characters"), the most important first, at most {limit}; [] if none. Each of them is drawn from a reference '
+    'portrait, so for them describe pose, action, gaze direction and expression clearly (people are caught in the '
+    'middle of the action, not posing or looking at the camera unless the text says so).\n')
 
 
 def character_lines(characters):
     return '\n'.join(f'- {c["name"]}: {c["look"]}' for c in characters) or '- (none yet)'
 
 
-def scene_prompt(style, characters, sentences, start, stop, count, note='', previous=None):
+def scene_prompt(style, characters, sentences, start, stop, count, note='', previous=None, identity=False):
     lines = '\n'.join(f'{i}: {_clean(sentences[i])}' for i in range(start, stop))
     before = (f'The previous image showed: {previous}\n\n') if previous else ''
     task = SCENE_TASK.format(style=style, characters=character_lines(characters), note=note_text(note),
-                             previous=before, count=count, low=max(1, count - 1), high=count + 1, first=start)
+                             previous=before, count=count, low=max(1, count - 1), high=count + 1, first=start,
+                             cast=CAST_TASK.format(limit=MAX_CAST) if identity else '',
+                             cast_shape=', "cast": []' if identity else '')
     return SCENE_SYSTEM, task + lines
 
 
@@ -225,6 +245,8 @@ def parse_scenes(raw, start, stop, sentences, style=''):
             continue
         found[index] = {'start': index, 'title': _clean(item.get('title'))[:80] or _clean(sentences[index])[:40],
                         'prompt': prompt[:1200]}
+        if isinstance(item.get('cast'), list):
+            found[index]['cast'] = clean_cast(item['cast'])
         characters += clean_characters(item.get('characters'))
     scenes = [found[key] for key in sorted(found)]
     if scenes and scenes[0]['start'] != start:
@@ -237,11 +259,86 @@ def merge_characters(characters, extra, limit=12):
     return (characters + [c for c in extra if c['name'].lower() not in names])[:limit]
 
 
-def new_plan(note='', preset='', density='medium', size=DEFAULT_SIZE, title=''):
+def keep_portraits(characters, old):
+    """Karakterler elle duzenlenince portreler ada gore korunur (clean_characters yalnizca ad ve gorunus tutar)."""
+    by_name = {c['name'].lower(): c for c in old or ()}
+    for character in characters:
+        before = by_name.get(character['name'].lower(), {})
+        character.update({key: before[key] for key in ('portrait', 'portrait_version', 'portrait_seed', 'portrait_own')
+                          if key in before})
+    return characters
+
+
+# ---------------------------------------------------------------- karakter kimligi (F201)
+def clean_cast(value):
+    names = []
+    for item in value if isinstance(value, list) else ():
+        name = _clean(item)[:60]
+        if name and name.lower() not in (n.lower() for n in names):
+            names.append(name)
+    return names[:6]
+
+
+def _words(text):
+    return re.findall(r'\w+', str(text or '').lower())
+
+
+def cast_of(scene, characters):
+    """Sahnede gorunen karakterler (sirayla). scene['cast'] varsa o; yoksa adi ya da gorunusunun ilk alti kelimesi
+    istemde geciyor mu (sahne istemine dil modeli gorunusu aynen kopyalar)."""
+    by_name = {c['name'].lower(): c for c in characters}
+    if isinstance(scene.get('cast'), list):
+        return [by_name[name.lower()] for name in scene['cast'] if name.lower() in by_name]
+    prompt = f' {" ".join(_words(scene.get("prompt")))} '
+    found = []
+    for character in characters:
+        parts = (' '.join(_words(character['look'])[:6]), ' '.join(_words(character['name'])))
+        hits = [prompt.find(f' {part} ') for part in parts if part and f' {part} ' in prompt]
+        if hits:
+            found.append((min(hits), character))
+    return [character for _at, character in sorted(found, key=lambda item: item[0])]
+
+
+def medium(style):
+    """Portre icin stilin yalnizca ilk cumlesi (teknik ve malzeme); ortam, isik ve renk portreye girmesin."""
+    first = re.split(r'(?<=[.!?])\s+', _clean(style), maxsplit=1)[0]
+    return first[:240]
+
+
+def _sentence(text):
+    """Sonundaki noktalama atilmis metin (istemler birlestirilirken '..' olmasin)."""
+    return _clean(text).rstrip(' .')
+
+
+def portrait_prompt(character):
+    return (f'Character reference portrait, head and shoulders, three-quarter view with the head turned slightly, '
+            f'relaxed natural expression, face clearly visible. {_sentence(character["look"])}. Plain flat mid-grey '
+            f'studio backdrop with nothing else behind, soft even studio light.')
+
+
+def identity_prompt(scene, people, style):
+    """Kimlik is akisinin istemi (talimat bicimi: LoRA "bu kisiyi ... ciz" diye egitildi). Stil sona eklenir;
+    kimlik is akisinda PRE/POST dugumu yoktur (son ek comfy_client.fill'de '. ' ile eklenir)."""
+    who = ('this person' if len(people) == 1 else 'these people')
+    names = ' and '.join(f'the person from reference {n + 1} ({_sentence(c["look"])})' for n, c in enumerate(people)) \
+        if len(people) > 1 else _sentence(people[0]['look'])
+    return (f'Create an illustration of {who}: {names}. {_sentence(scene["prompt"])}. Preserve the exact facial '
+            f'identity of the reference portrait, but not its pose, framing or background: the pose, gaze and '
+            f'expression follow the scene. Style: {_sentence(style)}')
+
+
+def portrait_slug(name):
+    table = str.maketrans('çğıöşüÇĞİÖŞÜâîû', 'cgiosuCGIOSUaiu')
+    slug = re.sub(r'[^0-9a-z]+', '-', str(name).translate(table).lower()).strip('-')
+    return slug[:40] or 'karakter'
+
+
+def new_plan(note='', preset='', density='medium', size=DEFAULT_SIZE, title='', identity=False):
     return {'version': VERSION, 'created': datetime.now().isoformat(timespec='seconds'), 'title': title,
             'note': _clean(note), 'preset': preset, 'density': density if density in DENSITY else 'medium',
             'size': size if size in SIZES else DEFAULT_SIZE, 'seed': random.randrange(1, 2 ** 31),
-            'style': '', 'characters': [], 'scenes': [], 'complete': False, 'next_chunk': 0, 'numbered': True}
+            'style': '', 'characters': [], 'scenes': [], 'complete': False, 'next_chunk': 0, 'numbered': True,
+            'identity': bool(identity)}
 
 
 def renumber(plan, texts):
@@ -286,16 +383,18 @@ def plan_book(sections, ask, plan, cancel=None, progress=None, save=None):
         if count:
             previous = plan['scenes'][-1]['prompt'] if plan['scenes'] else None
             scenes, extra = parse_scenes(ask(*scene_prompt(plan['style'], plan['characters'], sentences, start, stop,
-                                                            count, plan.get('note'), previous)), start, stop, sentences,
-                                         plan['style'])
+                                                            count, plan.get('note'), previous, plan.get('identity'))),
+                                         start, stop, sentences, plan['style'])
             plan['characters'] = merge_characters(plan['characters'], extra)
             for scene in scenes:
                 order = len(plan['scenes'])
                 real = sections[section].get('number', section)   # okuyucunun bolum numarasi
-                plan['scenes'].append({'id': f'{real}-{scene["start"]}', 'section': real, 'start': scene['start'],
-                                       'anchor': _clean(sentences[scene['start']]), 'title': scene['title'],
-                                       'prompt': scene['prompt'], 'seed': plan['seed'] + order, 'image': '',
-                                       'skip': False})
+                entry = {'id': f'{real}-{scene["start"]}', 'section': real, 'start': scene['start'],
+                         'anchor': _clean(sentences[scene['start']]), 'title': scene['title'],
+                         'prompt': scene['prompt'], 'seed': plan['seed'] + order, 'image': '', 'skip': False}
+                if 'cast' in scene:
+                    entry['cast'] = scene['cast']
+                plan['scenes'].append(entry)
         plan['next_chunk'] = number + 1
         done += stop - start
         if save:
@@ -402,6 +501,51 @@ class Store:
         old = holder.get('old')
         if old and old != next(s for s in plan['scenes'] if s['id'] == scene_id)['image']:
             (folder / old).unlink(missing_ok=True)
+        return plan
+
+    def portrait_path(self, book, character):
+        return self.folder(book) / character['portrait'] if character.get('portrait') else None
+
+    def character(self, plan, name):
+        found = next((c for c in plan['characters'] if c['name'].lower() == str(name or '').lower()), None)
+        if found is None:
+            raise ValueError('Karakter bulunamadı.')
+        return found
+
+    def write_portrait(self, book, name, data, own=False, seed=None):
+        """Karakterin portresi portre-<ad>-<surum>.png (eskisi silinir); `own` kullanicinin kendi gorseli."""
+        folder = self.folder(book)
+        folder.mkdir(parents=True, exist_ok=True)
+        holder = {}
+
+        def change(plan):
+            character = self.character(plan, name)
+            version = int(character.get('portrait_version', 0)) + 1
+            file = f'portre-{portrait_slug(character["name"])}-{version}.png'
+            partial = folder / (file + '.part')
+            partial.write_bytes(data)
+            partial.replace(folder / file)
+            holder['old'] = character.get('portrait')
+            character.update(portrait=file, portrait_version=version, portrait_own=bool(own))
+            if seed is not None:
+                character['portrait_seed'] = int(seed)
+
+        plan = self.update(book, change)
+        if holder.get('old') and holder['old'] != self.character(plan, name)['portrait']:
+            (folder / holder['old']).unlink(missing_ok=True)
+        return plan
+
+    def clear_portrait(self, book, name):
+        holder = {}
+
+        def change(plan):
+            character = self.character(plan, name)
+            holder['old'] = character.pop('portrait', None)
+            character.pop('portrait_own', None)
+
+        plan = self.update(book, change)
+        if holder.get('old'):
+            (self.folder(book) / holder['old']).unlink(missing_ok=True)
         return plan
 
     def books(self):

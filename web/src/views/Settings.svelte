@@ -98,11 +98,16 @@
     artCheck = null;
     savePref({ art: { ...(app.prefs.art ?? {}), ...values } });
   }
-  async function pickWorkflow() {
-    const path = await call('choose_file', 'ComfyUI iş akışı (API formatı)', ['JSON (*.json)']);
+  async function pickWorkflow(kind = 'main') {
+    const identity = kind === 'identity';
+    const path = await call('choose_file', identity ? 'Karakter kimliği iş akışı (API formatı)' : 'ComfyUI iş akışı (API formatı)', ['JSON (*.json)']);
     if (!path) return;
-    const result = await act('art_set_workflow', path);
-    if (result) { art = { ...art, workflow: result }; toast('İş akışı kaydedildi.', 'ok'); }
+    const result = await act('art_set_workflow', path, kind);
+    if (result) { art = { ...art, [identity ? 'identity_workflow' : 'workflow']: result }; toast('İş akışı kaydedildi.', 'ok'); }
+  }
+  async function clearIdentityWorkflow() {
+    const result = await act('art_clear_identity_workflow');
+    if (result) art = { ...art, identity_workflow: result };
   }
   async function testArt() {
     artBusy = true;
@@ -570,7 +575,15 @@
             <div class="fr">
               <div class="l">İş akışı<small>ComfyUI'de iş akışını "Export (API)" ile dışa aktarıp seçin. Aktar düğümleri başlıklarından bulur: "Positive" (sahne istemi), varsa "PRE-PROMPT" (kitabın stili) ve "POST-PROMPT" (yazı istememe), seed, boyut ve SaveImage. Negatif istem CFG 1'de çalışmaz, kullanılmaz.</small>
                 {#if art}<small class:okc={art.workflow.ok} class:errc={!art.workflow.ok}>{art.workflow.message}</small>{/if}</div>
-              <button class="btn sm" disabled={!art} onclick={pickWorkflow}><Icon name="folderOpen" size={14} />Seç…</button>
+              <button class="btn sm" disabled={!art} onclick={() => pickWorkflow()}><Icon name="folderOpen" size={14} />Seç…</button>
+            </div>
+            <div class="fr">
+              <div class="l">Karakter kimliği iş akışı<small>İsteğe bağlı. Kitap görsellerinde "Karakter kimliği" açılınca karakterli sahneler bununla, karakterin portresi referans verilerek üretilir (örneğin Krea 2 Identity Edit LoRA'sı ve ComfyUI-Krea2Edit düğümleri). Aktar portreyi başlığı "REFERENCE" olan LoadImage düğümüne koyar (ikinci kişi için "REFERENCE-B"), sahne istemini "Positive" düğümüne yazar.</small>
+                {#if art}<small class:okc={art.identity_workflow?.ok} class:errc={art.identity_workflow && !art.identity_workflow.ok && !art.identity_workflow.none}>{art.identity_workflow?.none ? 'Seçilmedi: karakter kimliği kullanılamaz.' : art.identity_workflow?.message}</small>{/if}</div>
+              <div class="row-btns">
+                {#if art?.identity_workflow && !art.identity_workflow.none}<button class="btn sm ghost" onclick={clearIdentityWorkflow}><Icon name="trash" size={14} /></button>{/if}
+                <button class="btn sm" disabled={!art} onclick={() => pickWorkflow('identity')}><Icon name="folderOpen" size={14} />Seç…</button>
+              </div>
             </div>
             <div class="fr">
               <div class="l">Görsel boyutu<small>Tam ekran okuyucu için 16:9. Büyük boyut daha yavaş üretilir; yeni planlarda geçerli olur.</small></div>
@@ -683,6 +696,7 @@
   .col { max-width: 900px; display: flex; flex-direction: column; gap: 28px; }
   h2 { font-size: 20px; font-weight: 700; letter-spacing: -.01em; margin-bottom: 6px; }
   .fr { display: flex; align-items: center; gap: 20px; padding: 12px 0; border-bottom: 1px solid var(--outline); }
+  .row-btns { display: flex; gap: 6px; flex: none; }
   .fr:last-child { border-bottom: 0; }
   .l { flex: 1; min-width: 0; font-weight: 500; }
   .l small { display: block; color: var(--dim); font-size: 12px; font-weight: 400; margin-top: 2px; }

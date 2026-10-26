@@ -29,13 +29,27 @@ WORKFLOW = {
                '_meta': {'title': 'Empty Latent Image'}},
 }
 PNG = b'\x89PNG\r\n\x1a\nfake'
+# Karakter kimligi is akisi (F201, Krea 2 Identity Edit ozu): REFERENCE LoadImage + grounded encode'da istem.
+IDENTITY = {
+    '5': {'inputs': {'image': 'portre.png', 'upload': 'image'}, 'class_type': 'LoadImage', '_meta': {'title': 'REFERENCE'}},
+    '7': {'inputs': {'width': 1344, 'height': 768, 'batch_size': 1}, 'class_type': 'EmptySD3LatentImage',
+          '_meta': {'title': 'Empty Latent Image'}},
+    '9': {'inputs': {'clip': ['2', 0], 'prompt': '', 'image': ['5', 0], 'grounding_px': 768, 'system_prompt': ''},
+          'class_type': 'Krea2EditGroundedEncode', '_meta': {'title': 'Positive'}},
+    '10': {'inputs': {'clip': ['2', 0], 'prompt': '', 'image': ['5', 0], 'grounding_px': 768, 'system_prompt': ''},
+           'class_type': 'Krea2EditGroundedEncode', '_meta': {'title': 'Negative'}},
+    '11': {'inputs': {'seed': 1, 'steps': 10, 'cfg': 1, 'positive': ['9', 0], 'negative': ['10', 0],
+                      'latent_image': ['7', 0]}, 'class_type': 'KSampler', '_meta': {'title': 'KSampler'}},
+    '13': {'inputs': {'filename_prefix': 'Aktar/kimlik', 'images': ['12', 0]}, 'class_type': 'SaveImage',
+           '_meta': {'title': 'Save Image'}},
+}
 
 
 class FakeComfy:
     """ComfyUI'nin yerine: /prompt kuyruga alir, /history ilk sorguda bitmis gosterir, /view gorseli verir."""
 
     def __init__(self, fail=None):
-        self.prompts, self.calls, self.fail = [], [], fail
+        self.prompts, self.calls, self.fail, self.uploads = [], [], fail, []
         owner = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -67,8 +81,13 @@ class FakeComfy:
 
             def do_POST(self):  # noqa: N802
                 length = int(self.headers.get('Content-Length') or 0)
-                body = json.loads(self.rfile.read(length) or b'{}')
+                raw = self.rfile.read(length)
                 owner.calls.append(('POST', self.path))
+                if self.path == '/upload/image':
+                    name = raw.split(b'filename="', 1)[1].split(b'"', 1)[0].decode()
+                    owner.uploads.append((name, PNG in raw, b'name="overwrite"' in raw))
+                    return self._send(200, {'name': name, 'subfolder': '', 'type': 'input'})
+                body = json.loads(raw or b'{}')
                 if self.path == '/prompt':
                     if owner.fail == 'queue':
                         return self._send(400, {'error': {'message': 'Prompt outputs failed validation'},
@@ -120,7 +139,30 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn('SaveImage', comfy_client.describe_workflow(missing)['message'])
 
 
+    def test_identity_workflow(self):
+        self.assertFalse(comfy_client.describe_identity_workflow(WORKFLOW)['ok'])
+        self.assertIn('REFERENCE', comfy_client.describe_identity_workflow(WORKFLOW)['message'])
+        info = comfy_client.describe_identity_workflow(IDENTITY)
+        self.assertTrue(info['ok'], info)
+        self.assertIn('tek kişilik', info['message'])
+        filled = comfy_client.fill(IDENTITY, 'Create an illustration of this person', '', 'no text', 7, (1344, 768),
+                                   'Aktar/b/1', images=['aktar-portre.png', 'fazla.png'])
+        self.assertEqual(filled['5']['inputs']['image'], 'aktar-portre.png')
+        self.assertEqual(filled['9']['inputs']['prompt'], 'Create an illustration of this person. no text')
+        self.assertEqual(filled['10']['inputs']['prompt'], '')   # olumsuz grounded encode bos kalir
+        self.assertEqual(IDENTITY['5']['inputs']['image'], 'portre.png')
+        with self.assertRaisesRegex(comfy_client.ComfyError, 'REFERENCE'):
+            comfy_client.fill(WORKFLOW, 'x', images=['a.png'])
+
+
 class ServerTest(unittest.TestCase):
+    def test_upload_image(self):
+        fake = FakeComfy()
+        self.addCleanup(fake.close)
+        self.assertEqual(comfy_client.upload_image(fake.url, PNG, 'aktar-ab/portre sekai-1.png'),
+                         'aktar-abportresekai-1.png')
+        self.assertEqual(fake.uploads, [('aktar-abportresekai-1.png', True, True)])
+
     def test_generate_returns_image(self):
         fake = FakeComfy()
         self.addCleanup(fake.close)
@@ -237,6 +279,57 @@ class PlanTest(unittest.TestCase):
         plan['style'] = 'x'
         with self.assertRaises(book_art.Cancelled):
             book_art.plan_book(book(60), lambda *_a: '{}', plan, cancel)
+
+    def test_identity_asks_for_cast(self):
+        sentences = ['a', 'b', 'c']
+        plain = book_art.scene_prompt('s', [], sentences, 0, 3, 1)[1]
+        asked = book_art.scene_prompt('s', [], sentences, 0, 3, 1, identity=True)[1]
+        self.assertNotIn('cast', plain)   # kimlik kapaliyken istem eskisiyle ayni
+        self.assertIn('"cast": []', asked)
+        self.assertIn('not posing or looking at the camera', asked)
+        raw = json.dumps({'scenes': [{'start': 0, 'title': 'A', 'prompt': 'p', 'cast': ['Sekai', ' sekai ', '', 'Asa']}]})
+        self.assertEqual(book_art.parse_scenes(raw, 0, 3, sentences)[0][0]['cast'], ['Sekai', 'Asa'])
+
+        def ask(system, user):
+            if 'JSON shape: {"style"' in user:
+                return json.dumps({'style': 'Oil painting. Rusty mine.', 'characters': [{'name': 'Sekai', 'look': 'w'}]})
+            return json.dumps({'scenes': [{'start': 0, 'title': 'T', 'prompt': 'p', 'cast': ['Sekai']}]})
+
+        plan = book_art.plan_book(book(60), ask, book_art.new_plan(identity=True))
+        self.assertEqual(plan['scenes'][0]['cast'], ['Sekai'])
+        self.assertTrue(plan['identity'])
+        self.assertFalse(book_art.new_plan()['identity'])
+
+    def test_cast_of(self):
+        characters = [{'name': 'Sekai', 'look': 'a young woman in a scuffed white jumpsuit and cracked helmet'},
+                      {'name': 'Murderbot', 'look': 'a bulky matte-black security exosuit with an opaque visor'}]
+        scene = {'prompt': 'A bulky matte-black security exosuit with an opaque visor lifts a young woman in a scuffed '
+                           'white jumpsuit and cracked helmet.'}
+        self.assertEqual([c['name'] for c in book_art.cast_of(scene, characters)], ['Murderbot', 'Sekai'])
+        self.assertEqual(book_art.cast_of({'prompt': 'Sekai sits alone.'}, characters)[0]['name'], 'Sekai')
+        self.assertEqual(book_art.cast_of({'prompt': 'An empty shaft.'}, characters), [])
+        scene['cast'] = ['sekai', 'Yok']
+        self.assertEqual([c['name'] for c in book_art.cast_of(scene, characters)], ['Sekai'])
+        scene['cast'] = []
+        self.assertEqual(book_art.cast_of(scene, characters), [])
+
+    def test_identity_prompts(self):
+        self.assertEqual(book_art.medium('Cinematic digital painting, matte. Rust palette and fog.'),
+                         'Cinematic digital painting, matte.')
+        character = {'name': 'Sekai', 'look': 'a young woman with short black hair'}
+        self.assertIn('Plain flat mid-grey studio backdrop', book_art.portrait_prompt(character))
+        text = book_art.identity_prompt({'prompt': 'She clings to a ledge.'}, [character], 'Oil painting.')
+        self.assertTrue(text.startswith('Create an illustration of this person: a young woman with short black hair.'))
+        self.assertIn('She clings to a ledge.', text)
+        self.assertTrue(text.endswith('Style: Oil painting'))   # son eki fill '. ' ile ekler
+        self.assertNotIn('..', text + book_art.portrait_prompt({'name': 'A', 'look': 'a robot.'}))
+        two = book_art.identity_prompt({'prompt': 'p'}, [character, {'name': 'B', 'look': 'a robot'}], 's')
+        self.assertIn('reference 2 (a robot)', two)
+        self.assertEqual(book_art.portrait_slug('Şükrü Çağ'), 'sukru-cag')
+        kept = book_art.keep_portraits([{'name': 'sekai', 'look': 'new'}],
+                                       [{'name': 'Sekai', 'look': 'old', 'portrait': 'portre-sekai-2.png',
+                                         'portrait_version': 2}])
+        self.assertEqual(kept, [{'name': 'sekai', 'look': 'new', 'portrait': 'portre-sekai-2.png', 'portrait_version': 2}])
 
     def test_refined_prompt(self):
         self.assertEqual(book_art.parse_refined('Prompt: "a dark hall"', 'old'), 'a dark hall')
@@ -367,6 +460,84 @@ class BridgeTest(unittest.TestCase):
         updated = self.bridge.art_scene_update('ab12cd34ef', scene['id'], {'reseed': True, 'skip': True})
         self.assertTrue(updated['plan']['scenes'][0]['skip'])
         self.assertEqual(self.bridge.art_section('ab12cd34ef', 1)['scenes'], [])
+
+    def identity_plan(self, identity=True):
+        store = self.bridge._art_store()
+        plan = book_art.new_plan(identity=identity)
+        plan.update(complete=True, style='Oil painting with heavy brushwork. Rusty mine, fog and hazard lamps.',
+                    characters=[{'name': 'Sekai', 'look': 'a young woman in a scuffed white jumpsuit'}])
+        plan['scenes'] = [{'id': '1-0', 'section': 1, 'start': 0, 'anchor': 'a', 'title': 'Kurtarma', 'seed': 5,
+                           'prompt': 'A young woman in a scuffed white jumpsuit clings to a ledge.', 'image': '',
+                           'skip': False},
+                          {'id': '1-9', 'section': 1, 'start': 9, 'anchor': 'b', 'title': 'Boş', 'seed': 6,
+                           'prompt': 'An empty mine shaft.', 'image': '', 'skip': False}]
+        store.save('ab12cd34ef', plan)
+        return store
+
+    def test_identity_off_keeps_old_flow(self):
+        self.identity_plan(identity=False)
+        self.assertTrue(self.bridge.art_generate('ab12cd34ef')['started'])   # kimlik is akisi olmadan da
+        self.assertEqual(self.finish()['done'], 2)
+        self.assertEqual(self.fake.uploads, [])
+        self.assertTrue(all('97' in sent for sent in self.fake.prompts))
+        self.assertNotIn('people', self.bridge.art_plan_get('ab12cd34ef')['plan']['scenes'][0])
+
+    def test_identity_portrait_then_scene(self):
+        store = self.identity_plan()
+        self.assertIn('kimlik iş akışını', self.bridge.art_generate('ab12cd34ef')['error'])
+        source = Path(self.tmp.name) / 'kimlik.json'
+        source.write_text(json.dumps(IDENTITY), encoding='utf-8')
+        self.assertIn('error', self.bridge.art_set_workflow(str(Path(self.tmp.name) / 'akis.json'), 'identity'))
+        self.assertTrue(self.bridge.art_set_workflow(str(source), 'identity')['ok'])
+        self.assertTrue(self.bridge.art_options()['identity_workflow']['ok'])
+
+        started = self.bridge.art_generate('ab12cd34ef')
+        self.assertEqual(started['total'], 3)   # Sekai'nin portresi + iki sahne
+        done = self.finish()
+        self.assertEqual(done['done'], 3, done)
+        portrait, scene, empty = self.fake.prompts
+        self.assertEqual(portrait['96']['inputs']['positive'], 'Oil painting with heavy brushwork.')   # yalnizca teknik
+        self.assertIn('studio backdrop', portrait['97']['inputs']['positive'])
+        self.assertEqual((portrait['106:10']['inputs']['width'], portrait['106:10']['inputs']['height']), (1024, 1024))
+        plan = store.load('ab12cd34ef')
+        name = plan['characters'][0]['portrait']
+        self.assertTrue((store.folder('ab12cd34ef') / name).is_file())
+        self.assertEqual(self.fake.uploads[0][0], f'aktar-ab12cd34ef-{name}')
+        self.assertEqual(scene['5']['inputs']['image'], f'aktar-ab12cd34ef-{name}')
+        self.assertTrue(scene['9']['inputs']['prompt'].startswith('Create an illustration of this person'))
+        self.assertEqual(scene['11']['inputs']['seed'], 5)
+        self.assertIn('97', empty)   # karaktersiz sahne ana is akisiyla
+        view = self.bridge.art_plan_get('ab12cd34ef')['plan']
+        self.assertEqual((view['scenes'][0]['people'], view['scenes'][1]['people']), (['Sekai'], []))
+        self.assertTrue(view['characters'][0]['portrait_url'].endswith('.png'))
+
+        # yalnizca portreyi yeniden uret: yeni seed, sahne uretilmez; karakter duzenlenince portre kalir
+        seed = plan['characters'][0]['portrait_seed']
+        self.assertEqual(self.bridge.art_generate('ab12cd34ef', portraits=['sekai'])['total'], 1)
+        self.finish()
+        plan = store.load('ab12cd34ef')
+        self.assertEqual(len(self.fake.prompts), 4)
+        self.assertNotEqual(plan['characters'][0]['portrait_seed'], seed)
+        self.assertFalse((store.folder('ab12cd34ef') / name).exists())
+        saved = self.bridge.art_plan_save('ab12cd34ef', {'characters': [{'name': 'Sekai', 'look': 'short hair'}]})
+        self.assertTrue(saved['plan']['characters'][0]['portrait_url'])
+
+        # sahnenin kadrosu elle bosaltilinca referans kullanilmaz; None ile kendiliginden bulmaya doner
+        self.bridge.art_scene_update('ab12cd34ef', '1-0', {'cast': []})
+        self.assertEqual(self.bridge.art_plan_get('ab12cd34ef')['plan']['scenes'][0]['people'], [])
+        self.bridge.art_scene_update('ab12cd34ef', '1-0', {'cast': None})
+        self.assertNotIn('cast', store.load('ab12cd34ef')['scenes'][0])
+
+        # kendi gorseli PNG'ye cevrilir; portre silinebilir
+        from PIL import Image
+        own = Path(self.tmp.name) / 'own.jpg'
+        Image.new('RGB', (8, 8), 'red').save(own)
+        shown = self.bridge.art_portrait_set('ab12cd34ef', 'Sekai', str(own))['plan']['characters'][0]
+        self.assertTrue(shown['portrait_own'])
+        self.assertEqual((store.folder('ab12cd34ef') / shown['portrait']).read_bytes()[:4], b'\x89PNG')
+        cleared = self.bridge.art_portrait_clear('ab12cd34ef', 'Sekai')['plan']['characters'][0]
+        self.assertEqual(cleared['portrait_url'], '')
+        self.assertIn('error', self.bridge.art_portrait_clear('ab12cd34ef', 'Yok'))
 
     def test_old_plan_renumbered_on_read(self):
         from unittest.mock import patch

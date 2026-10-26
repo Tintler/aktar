@@ -3,7 +3,10 @@
   // planini cikarir, 2) stil, karakterler ve sahneler gozden gecirilir, 3) ComfyUI gorselleri uretir. Sahne basina
   // kucuk duzeltme ("daha karanlik", "kisiyi cikar") istemi en az degisiklikle yeniden yazar, sahneyi bastan kurmaz.
   // Isler arka planda surer (sag ustteki is listesi); pencere kapansa da devam eder.
+  // F201 Karakter kimligi (kitap basina acilir/kapanir, kapaliyken akis aynen eskisi): karakter portreleri uretilir
+  // ya da kullanici kendi gorselini koyar; karakterli sahneler portre referansiyla kimlik is akisinda uretilir.
   import Modal from './Modal.svelte';
+  import Toggle from './Toggle.svelte';
   import Icon from '../lib/Icon.svelte';
   import { app, act, go, toast, refreshArtBooks } from '../lib/state.svelte.js';
   import { call, on } from '../lib/api.js';
@@ -27,6 +30,7 @@
   let editing = $state({});         // sahne -> elle duzenlenen istem
   let fixes = $state({});           // sahne -> duzeltme notu
   let refining = $state('');        // duzeltilen sahne
+  let identity = $state(false);     // yeni planda karakter kimligi
 
   const job = $derived(app.artJob?.book === book ? app.artJob : null);
   const otherJob = $derived(app.artJob && app.artJob.book !== book ? app.artJob : null);
@@ -36,6 +40,8 @@
   const shown = $derived(scenes.filter((s) => !s.skip));
   const missing = $derived(shown.filter((s) => !s.url).length);
   const setup = $derived(!planning && (!plan || !plan.complete || replanning));
+  const faces = $derived(plan?.identity ? plan.characters ?? [] : []);
+  const identityReady = $derived(Boolean(options?.identity_workflow?.ok));
 
   async function load() {
     const [opts, result] = await Promise.all([call('art_options'), call('art_plan_get', book)]);
@@ -52,6 +58,7 @@
     note = value.note ?? note;           // baştan planlarken önceki not ve seçimler hazır gelsin
     preset = value.preset ?? preset;
     density = value.density ?? density;
+    identity = Boolean(value.identity);
   }
 
   load();
@@ -60,6 +67,10 @@
     if (data.scene && plan) {
       const index = plan.scenes.findIndex((s) => s.id === data.scene.id);
       if (index >= 0) plan.scenes[index] = data.scene;
+    }
+    if (data.character && plan) {
+      const index = plan.characters.findIndex((c) => c.name === data.character.name);
+      if (index >= 0) plan.characters[index] = data.character;
     }
     if (data.finished) call('art_plan_get', book).then((r) => { if (r?.plan !== undefined) applyPlan(r.plan); });
   });
@@ -92,16 +103,16 @@
       toast(String(error?.message ?? error), 'error');
       return;
     }
-    const result = await act('art_plan_create', book, sections, note, preset, density, title, resume);
+    const result = await act('art_plan_create', book, sections, note, preset, density, title, resume, identity);
     if (!result?.started) { app.artJob = null; return; }
     if (app.artJob?.reading) app.artJob = { book, title, stage: 'plan', done: 0, total: result.total };
     replanning = false;
     plan = null;
   }
 
-  async function generate(ids = null, all = false) {
+  async function generate(ids = null, all = false, portraits = null) {
     if (otherJob) { toast('Başka bir kitabın görselleri için iş sürüyor.'); return; }
-    const result = await act('art_generate', book, ids, title, all);
+    const result = await act('art_generate', book, ids, title, all, portraits);
     if (result?.started) app.artJob = { book, title, stage: 'generate', done: 0, total: result.total, current: '' };
   }
 
@@ -149,6 +160,29 @@
     applyPlan(result.plan);
     delete fixes[scene.id];
     generate([scene.id]);
+  }
+
+  async function setIdentity(value) {
+    const result = await act('art_plan_save', book, { identity: value });
+    if (result) applyPlan(result.plan);
+  }
+
+  async function ownPortrait(character) {
+    const path = await call('choose_file', `${character.name} için portre`, ['Görsel (*.png;*.jpg;*.jpeg;*.webp)']);
+    if (!path) return;
+    const result = await act('art_portrait_set', book, character.name, path);
+    if (result) applyPlan(result.plan);
+  }
+
+  async function clearPortrait(character) {
+    const result = await act('art_portrait_clear', book, character.name);
+    if (result) applyPlan(result.plan);
+  }
+
+  // Sahnedeki karakterler: dokunulan karakter eklenir/cikarilir (sahneye elle kadro yazilir).
+  function toggleCast(scene, name) {
+    const people = scene.people ?? [];
+    updateScene(scene, { cast: people.includes(name) ? people.filter((n) => n !== name) : [...people, name] });
   }
 
   async function remove() {
@@ -207,6 +241,10 @@
           </div>
           <span class="dim">{DENSITY_HINT[density]}</span>
         </div>
+        <div class="row">
+          <Toggle bind:checked={identity} label="Karakter kimliği" />
+          <span class="dim">Karakterler her görselde aynı yüzle çıkar: her karaktere bir portre üretilir, karakterli sahneler bu portreyle çizilir. Ayarlar'da kimlik iş akışı gerekir.</span>
+        </div>
         <div class="row end">
           {#if replanning}<button class="btn ghost" onclick={() => (replanning = false)}>Vazgeç</button>{/if}
           {#if plan && !plan.complete}
@@ -242,6 +280,39 @@
         {#if plan.note}<div class="dim">Kitap notu: {plan.note}</div>{/if}
       </details>
 
+      <details class="look" open={plan.identity && faces.some((c) => !c.portrait_url)}>
+        <summary>Karakter kimliği {plan.identity ? '· açık' : '· kapalı'}</summary>
+        <div class="row">
+          <Toggle checked={Boolean(plan.identity)} disabled={Boolean(app.artJob)} label="Karakterler her görselde aynı yüzle" onchange={setIdentity} />
+        </div>
+        <p class="dim">Açıkken her karakterin düz fonlu bir portresi üretilir (ya da kendi görselinizi seçersiniz); karakterli sahneler bu portre referans verilerek
+          kimlik iş akışıyla çizilir. Kapalıyken görseller yalnızca metin tarifinden üretilir. Var olan görseller kendiliğinden değişmez.</p>
+        {#if plan.identity && !identityReady}
+          <div class="warn"><Icon name="alert" size={16} /><span>{options?.identity_workflow?.message ?? 'Kimlik iş akışı seçilmedi.'}</span>
+            <button class="btn sm" onclick={openSettings}><Icon name="settings" size={14} />Ayarlar</button></div>
+        {/if}
+        {#if plan.identity}
+          {#if !faces.length}<p class="dim">Planda tekrar eden karakter yok; yukarıdaki "Karakterler" kutusuna ekleyebilirsiniz.</p>{/if}
+          <div class="faces">
+            {#each faces as character (character.name)}
+              <div class="face card">
+                <div class="portrait">
+                  {#if character.portrait_url}<img src={character.portrait_url} alt={character.name} />
+                  {:else}<span class="dim">{generating && job.current === `Portre: ${character.name}` ? 'Üretiliyor…' : 'Portre yok'}</span>{/if}
+                </div>
+                <b class="ellipsis" title={character.look}>{character.name}</b>
+                <div class="acts">
+                  <button class="btn sm ghost" disabled={Boolean(app.artJob) || !options?.workflow.ok} title="Yeni seed ile portre"
+                    onclick={() => generate(null, false, [character.name])}><Icon name="refresh" size={13} />{character.portrait_url ? '' : 'Üret'}</button>
+                  <button class="btn sm ghost" disabled={Boolean(app.artJob)} title="Kendi görselinizi portre yapın" onclick={() => ownPortrait(character)}><Icon name="folderOpen" size={13} /></button>
+                  {#if character.portrait_url}<button class="btn sm ghost" disabled={Boolean(app.artJob)} title="Portreyi sil" onclick={() => clearPortrait(character)}><Icon name="trash" size={13} /></button>{/if}
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </details>
+
       <div class="grid">
         {#each scenes as scene (scene.id)}
           <div class="scene card" class:skip={scene.skip}>
@@ -253,6 +324,14 @@
               <b class="ellipsis" title={scene.title}>{scene.title}</b>
               <span class="dim">Bölüm {scene.section + 1} · cümle {scene.start + 1}</span>
             </div>
+            {#if plan.identity && faces.length}
+              <div class="cast" title="Görselde kimliği korunacak karakterler (en fazla iki referans kullanılır)">
+                {#each faces as character (character.name)}
+                  <button class="chip" class:on={scene.people?.includes(character.name)} disabled={Boolean(app.artJob)}
+                    onclick={() => toggleCast(scene, character.name)}>{character.name}</button>
+                {/each}
+              </div>
+            {/if}
             {#if editing[scene.id] !== undefined}
               <textarea class="field" rows="5" bind:value={editing[scene.id]}></textarea>
               <div class="acts">
@@ -314,6 +393,14 @@
   .meta { display: flex; flex-direction: column; gap: 1px; font-size: 13px; min-width: 0; }
   .meta .dim { font-size: 11.5px; }
   .prompt { margin: 0; font-size: 12px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .look p { margin: 0; font-size: 12px; line-height: 1.5; }
+  .faces { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .face { display: flex; flex-direction: column; gap: 6px; padding: 8px; min-width: 0; font-size: 13px; }
+  .portrait { aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: var(--surface); display: grid; place-items: center; font-size: 12px; }
+  .portrait img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .face .acts { flex-wrap: nowrap; }
+  .cast { display: flex; gap: 4px; flex-wrap: wrap; }
+  .cast .chip { font-size: 11.5px; padding: 2px 8px; }
   .fix { display: flex; gap: 6px; }
   .fix .field { flex: 1; min-width: 0; height: 30px; font-size: 12px; }
   .acts { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
