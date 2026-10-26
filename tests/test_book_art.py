@@ -49,7 +49,7 @@ class FakeComfy:
     """ComfyUI'nin yerine: /prompt kuyruga alir, /history ilk sorguda bitmis gosterir, /view gorseli verir."""
 
     def __init__(self, fail=None):
-        self.prompts, self.calls, self.fail, self.uploads = [], [], fail, []
+        self.prompts, self.calls, self.fail, self.uploads, self.loras = [], [], fail, [], []
         owner = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -77,6 +77,9 @@ class FakeComfy:
                                                                                  'type': 'output'}]}}}})
                 if self.path.startswith('/view?'):
                     return self._send(200, PNG, raw=True)
+                if self.path == '/object_info/LoraLoaderModelOnly':
+                    return self._send(200, {'LoraLoaderModelOnly': {'input': {'required': {
+                        'model': ['MODEL'], 'lora_name': ['COMBO', {'options': owner.loras}]}}}})
                 self._send(404, {})
 
             def do_POST(self):  # noqa: N802
@@ -153,6 +156,40 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(IDENTITY['5']['inputs']['image'], 'portre.png')
         with self.assertRaisesRegex(comfy_client.ComfyError, 'REFERENCE'):
             comfy_client.fill(WORKFLOW, 'x', images=['a.png'])
+
+
+    def test_add_loras_after_model_loader(self):
+        """F202: LoRA model yukleyicisinin arkasina eklenir; arada Power Lora Loader / kimlik LoRA'si varsa korunur."""
+        main = dict(WORKFLOW, **{
+            '57': {'inputs': {'model': ['106:1', 0], 'clip': ['106:13', 0]}, 'class_type': 'Power Lora Loader (rgthree)'},
+            '106:1': {'inputs': {'unet_name': 'krea2.safetensors'}, 'class_type': 'UNETLoader'}})
+        filled = comfy_client.add_loras(main, [('a.safetensors', 0.9), ('b.safetensors', 1)])
+        self.assertEqual(filled['57']['inputs']['model'], ['aktar-lora-0-1', 0])
+        self.assertEqual(filled['aktar-lora-0-1']['inputs']['model'], ['aktar-lora-0-0', 0])
+        self.assertEqual(filled['aktar-lora-0-0']['inputs'], {'lora_name': 'a.safetensors', 'strength_model': 0.9,
+                                                              'model': ['106:1', 0]})
+        self.assertEqual(filled['57']['inputs']['clip'], ['106:13', 0])
+        self.assertNotIn('aktar-lora-0-0', main)
+        self.assertEqual(comfy_client.add_loras(main, []), main)
+
+        identity = dict(IDENTITY, **{
+            '1': {'inputs': {'unet_name': 'krea2.safetensors'}, 'class_type': 'UNETLoader'},
+            '4': {'inputs': {'lora_name': 'identity.safetensors', 'model': ['1', 0]}, 'class_type': 'LoraLoaderModelOnly'},
+            '8': {'inputs': {'model': ['4', 0]}, 'class_type': 'Krea2EditModelPatch'}})
+        identity['11'] = dict(identity['11'], inputs=dict(identity['11']['inputs'], model=['8', 0]))
+        filled = comfy_client.add_loras(identity, [('a.safetensors', 1)])
+        self.assertEqual(filled['4']['inputs']['model'], ['aktar-lora-0-0', 0])
+        self.assertEqual(filled['11']['inputs']['model'], ['8', 0])
+        with self.assertRaisesRegex(comfy_client.ComfyError, 'model yükleyici'):
+            comfy_client.add_loras(WORKFLOW, [('a.safetensors', 1)])
+
+    def test_resolve_lora(self):
+        names = ['Krea2\\DarkFanKrea2_c1-st3000.safetensors', 'other.safetensors', 'YFG-Fwshn-Krea2_1.8k-v2 (1).safetensors']
+        self.assertEqual(comfy_client.resolve_lora(names, 'other.safetensors'), 'other.safetensors')
+        self.assertEqual(comfy_client.resolve_lora(names, 'DarkFanKrea2_c1-st3000.safetensors'), names[0])
+        self.assertEqual(comfy_client.resolve_lora(['yfg_fwshn_krea2_1.8k_v2.safetensors'], 'YFG-Fwshn-Krea2_1.8k-v2.safetensors'),
+                         'yfg_fwshn_krea2_1.8k_v2.safetensors')
+        self.assertIsNone(comfy_client.resolve_lora(names, 'missing.safetensors'))
 
 
 class ServerTest(unittest.TestCase):
@@ -244,6 +281,39 @@ class PlanTest(unittest.TestCase):
         prompts.clear()
         book_art.plan_book(sections, ask, half)
         self.assertFalse(any('JSON shape: {"style"' in p for p in prompts))
+
+    def test_presets_and_modifiers(self):
+        """F202: LoRA'li tarz plana kopyalanir; secenekler dil modeline kural, gorsel istemine olumlu son ek olur."""
+        ids = [p['id'] for p in book_art.PRESETS]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertIsNone(book_art.preset_lora('watercolor'))
+        plan = book_art.new_plan('', 'dc-dark-fantasy', identity=True, modifiers=['landscape', 'bilinmeyen', 'no-people'])
+        self.assertEqual(plan['modifiers'], ['no-people', 'landscape'])
+        self.assertFalse(plan['identity'])   # karakter cizilmeyen secenekte kimlik kapali
+        self.assertEqual(plan['lora']['trigger'], 'dcd@rkf@ntsy.')
+        self.assertTrue(plan['lora']['lora'].endswith('.safetensors'))
+        self.assertEqual(book_art.image_style(plan, 'Oil painting.'), 'dcd@rkf@ntsy. Oil painting.')
+        self.assertTrue(book_art.image_suffix(plan).startswith('uninhabited, deserted scene, wide establishing shot'))
+        self.assertTrue(book_art.image_suffix(plan).endswith(book_art.SUFFIX))
+        self.assertEqual(book_art.image_suffix(plan, book_art.PORTRAIT_SUFFIX, False), book_art.PORTRAIT_SUFFIX)
+        plain = book_art.new_plan('', 'watercolor', identity=True, modifiers=['no-faces'])
+        self.assertTrue(plain['identity'])
+        self.assertEqual((plain['lora'], book_art.image_style(plain, 'Style.')), (None, 'Style.'))
+        self.assertIn('Hard rule: Faces are never shown', book_art.refine_prompt('p', 'daha karanlık', ['no-faces'])[1])
+        self.assertNotIn('Hard rule', book_art.refine_prompt('p', 'daha karanlık')[1])
+
+        prompts = []
+
+        def ask(system, user):
+            prompts.append(user)
+            if 'JSON shape: {"style"' in user:
+                return json.dumps({'style': 's', 'characters': [{'name': 'Ana', 'look': 'red coat'}]})
+            return json.dumps({'scenes': [{'start': 0, 'title': 'T', 'prompt': 'p',
+                                           'characters': [{'name': 'Bo', 'look': 'tall'}]}]})
+
+        result = book_art.plan_book(book(60), ask, plan)
+        self.assertTrue(all('Hard rule: No people' in p and 'Hard rule: Every image is a wide' in p for p in prompts))
+        self.assertEqual(result['characters'], [])   # karakter olmasin: tarif tutulmaz
 
     def test_scene_keeps_reader_section_number(self):
         # bos bolumler (kapak, gorsel sayfasi) okuyucuda sayilir ama plana gelmez: sahne okuyucunun numarasini almali
@@ -538,6 +608,36 @@ class BridgeTest(unittest.TestCase):
         cleared = self.bridge.art_portrait_clear('ab12cd34ef', 'Sekai')['plan']['characters'][0]
         self.assertEqual(cleared['portrait_url'], '')
         self.assertIn('error', self.bridge.art_portrait_clear('ab12cd34ef', 'Yok'))
+
+    def test_lora_preset_generation(self):
+        """F202: LoRA ComfyUI'de yoksa uretim baslamaz; varsa is akisina eklenir, tetik kelimesi istemin basinda."""
+        main = dict(WORKFLOW, **{'2': dict(WORKFLOW['2'], inputs=dict(WORKFLOW['2']['inputs'], model=['1', 0])),
+                                 '1': {'inputs': {'unet_name': 'krea2.safetensors'}, 'class_type': 'UNETLoader'}})
+        source = Path(self.tmp.name) / 'akis-lora.json'
+        source.write_text(json.dumps(main), encoding='utf-8')
+        self.assertTrue(self.bridge.art_set_workflow(str(source))['ok'])
+        store = self.bridge._art_store()
+        plan = book_art.new_plan('', 'dc-colossal-future', modifiers=['no-faces'])
+        plan.update(complete=True, style='Matte painting.')
+        plan['scenes'] = [{'id': '1-0', 'section': 1, 'start': 0, 'anchor': 'a', 'title': 'Şehir', 'seed': 5,
+                           'prompt': 'A vast city.', 'image': '', 'skip': False}]
+        store.save('ab12cd34ef', plan)
+        file = plan['lora']['lora']
+
+        self.assertIn('models/loras', self.bridge.art_generate('ab12cd34ef')['error'])
+        self.assertFalse(self.bridge.art_lora_check('dc-colossal-future')['ok'])
+        self.assertTrue(self.bridge.art_lora_check('watercolor')['ok'])
+        self.fake.loras = ['other.safetensors', 'Krea2/' + file]
+        self.assertTrue(self.bridge.art_lora_check('dc-colossal-future')['ok'])
+        self.assertEqual(self.bridge.art_plan_save('ab12cd34ef', {'lora_strength': 0.75})['plan']['lora']['strength'], 0.75)
+        self.assertTrue(self.bridge.art_generate('ab12cd34ef')['started'])
+        self.assertEqual(self.finish()['done'], 1)
+        sent = self.fake.prompts[0]
+        self.assertEqual(sent['2']['inputs']['model'], ['aktar-lora-0-0', 0])
+        self.assertEqual(sent['aktar-lora-0-0']['inputs']['lora_name'], 'Krea2/' + file)
+        self.assertEqual(sent['aktar-lora-0-0']['inputs']['strength_model'], 0.75)
+        self.assertEqual(sent['96']['inputs']['positive'], 'DCC0LFUT. Matte painting.')
+        self.assertEqual(sent['98']['inputs']['positive'], 'figures seen from behind or in silhouette, ' + book_art.SUFFIX)
 
     def test_old_plan_renumbered_on_read(self):
         from unittest.mock import patch

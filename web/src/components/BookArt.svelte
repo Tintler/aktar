@@ -31,6 +31,9 @@
   let fixes = $state({});           // sahne -> duzeltme notu
   let refining = $state('');        // duzeltilen sahne
   let identity = $state(false);     // yeni planda karakter kimligi
+  let modifiers = $state([]);       // F202 tarzdan bagimsiz secenekler (karakter olmasin, yalnizca manzara ...)
+  let loraCheck = $state(null);     // secilen LoRA'li tarzin dosyasi ComfyUI'de var mi
+  let loraStrength = $state(1);
 
   const job = $derived(app.artJob?.book === book ? app.artJob : null);
   const otherJob = $derived(app.artJob && app.artJob.book !== book ? app.artJob : null);
@@ -42,6 +45,10 @@
   const setup = $derived(!planning && (!plan || !plan.complete || replanning));
   const faces = $derived(plan?.identity ? plan.characters ?? [] : []);
   const identityReady = $derived(Boolean(options?.identity_workflow?.ok));
+  const plainPresets = $derived((options?.presets ?? []).filter((p) => !p.lora));
+  const loraPresets = $derived((options?.presets ?? []).filter((p) => p.lora));
+  const noCast = $derived(modifiers.some((m) => options?.no_cast?.includes(m)));
+  const modifierLabels = $derived((plan?.modifiers ?? []).map((id) => options?.modifiers?.find((m) => m.id === id)?.label ?? id));
 
   async function load() {
     const [opts, result] = await Promise.all([call('art_options'), call('art_plan_get', book)]);
@@ -59,6 +66,8 @@
     preset = value.preset ?? preset;
     density = value.density ?? density;
     identity = Boolean(value.identity);
+    modifiers = value.modifiers ?? modifiers;
+    loraStrength = value.lora?.strength ?? 1;
   }
 
   load();
@@ -77,13 +86,30 @@
   $effect(() => stop);
 
   // Hazir tarz notun basina yazilir; baska tarza gecince yalnizca onceki tarzin metni degisir, kullanicinin eki kalir.
-  function pickPreset(entry) {
+  async function pickPreset(entry) {
     let rest = note;
     for (const p of options.presets) rest = rest.replace(p.note, '');
     rest = rest.trim();
+    loraCheck = null;
     if (preset === entry.id) { preset = ''; note = rest; return; }
     preset = entry.id;
     note = entry.note + (rest ? ' ' + rest : '');
+    if (entry.lora) {
+      loraCheck = { pending: true, message: 'LoRA dosyası ComfyUI\'de aranıyor…' };
+      const result = await call('art_lora_check', entry.id);
+      if (preset === entry.id) loraCheck = result;
+    }
+  }
+
+  function toggleModifier(id) {
+    modifiers = modifiers.includes(id) ? modifiers.filter((m) => m !== id) : [...modifiers, id];
+  }
+
+  async function saveLoraStrength() {
+    const value = Number(loraStrength);
+    if (!plan?.lora || !Number.isFinite(value) || value === plan.lora.strength) return;
+    const result = await act('art_plan_save', book, { lora_strength: value });
+    if (result) { applyPlan(result.plan); toast('LoRA gücü kaydedildi. Görsellere yansıması için yeniden üretin.'); }
   }
 
   async function startPlan(resume = false) {
@@ -103,7 +129,7 @@
       toast(String(error?.message ?? error), 'error');
       return;
     }
-    const result = await act('art_plan_create', book, sections, note, preset, density, title, resume, identity);
+    const result = await act('art_plan_create', book, sections, note, preset, density, title, resume, identity && !noCast, modifiers);
     if (!result?.started) { app.artJob = null; return; }
     if (app.artJob?.reading) app.artJob = { book, title, stage: 'plan', done: 0, total: result.total };
     replanning = false;
@@ -227,10 +253,31 @@
         <textarea id="art-note" class="field" rows="3" bind:value={note}
           placeholder="Örn. daha soyut ol, insan yüzü gösterme, suluboya tarzında, dönemin mimarisini öne çıkar"></textarea>
         <div class="row">
-          <span class="dim">Hazır tarz</span>
-          {#each options?.presets ?? [] as entry (entry.id)}
+          <span class="dim lead">Hazır tarz</span>
+          {#each plainPresets as entry (entry.id)}
             <button class="chip" class:on={preset === entry.id} title={entry.note} onclick={() => pickPreset(entry)}>{entry.label}</button>
           {/each}
+        </div>
+        {#if loraPresets.length}
+          <div class="row">
+            <span class="dim lead">LoRA tarzı</span>
+            {#each loraPresets as entry (entry.id)}
+              <button class="chip" class:on={preset === entry.id} title={`${entry.note}\nLoRA: ${entry.lora}${entry.trigger ? `\nTetik: ${entry.trigger}` : ''}`}
+                onclick={() => pickPreset(entry)}>{entry.label}</button>
+            {/each}
+          </div>
+          {#if loraCheck}
+            <div class="lora-note" class:bad={loraCheck.ok === false}>
+              <Icon name={loraCheck.ok === false ? 'alert' : 'check'} size={14} /><span>{loraCheck.message}</span>
+            </div>
+          {/if}
+        {/if}
+        <div class="row">
+          <span class="dim lead">Seçenekler</span>
+          {#each options?.modifiers ?? [] as entry (entry.id)}
+            <button class="chip" class:on={modifiers.includes(entry.id)} title={entry.rule} onclick={() => toggleModifier(entry.id)}>{entry.label}</button>
+          {/each}
+          <span class="dim">Tarzdan bağımsız, birlikte seçilebilir.</span>
         </div>
         <div class="row">
           <span class="dim">Sıklık</span>
@@ -242,8 +289,10 @@
           <span class="dim">{DENSITY_HINT[density]}</span>
         </div>
         <div class="row">
-          <Toggle bind:checked={identity} label="Karakter kimliği" />
-          <span class="dim">Karakterler her görselde aynı yüzle çıkar: her karaktere bir portre üretilir, karakterli sahneler bu portreyle çizilir. Ayarlar'da kimlik iş akışı gerekir.</span>
+          {#if noCast}<Toggle checked={false} disabled label="Karakter kimliği" />
+          {:else}<Toggle bind:checked={identity} label="Karakter kimliği" />{/if}
+          <span class="dim">{noCast ? 'Seçilen seçenekle karakter çizilmediği için kapalı.'
+            : 'Karakterler her görselde aynı yüzle çıkar: her karaktere bir portre üretilir, karakterli sahneler bu portreyle çizilir. Ayarlar\'da kimlik iş akışı gerekir.'}</span>
         </div>
         <div class="row end">
           {#if replanning}<button class="btn ghost" onclick={() => (replanning = false)}>Vazgeç</button>{/if}
@@ -277,6 +326,13 @@
         <textarea id="art-style" class="field" rows="4" bind:value={style} onchange={saveStyle}></textarea>
         <label class="l" for="art-chars">Karakterler <small>Satır başına "Ad: görünüş". Sahne istemlerine dil modeli kopyalar; yeni sahnelere yansır, var olan istemler değişmez.</small></label>
         <textarea id="art-chars" class="field" rows="3" bind:value={characters} onchange={saveCharacters}></textarea>
+        {#if plan.lora}
+          <div class="row lora">
+            <span><b>LoRA:</b> {plan.lora.label}{#if plan.lora.trigger} · tetik <code>{plan.lora.trigger}</code>{/if}</span>
+            <label class="dim">Güç <input class="field num" type="number" min="0" max="2" step="0.05" bind:value={loraStrength} onchange={saveLoraStrength} /></label>
+          </div>
+        {/if}
+        {#if modifierLabels.length}<div class="dim">Seçenekler: {modifierLabels.join(', ')}</div>{/if}
         {#if plan.note}<div class="dim">Kitap notu: {plan.note}</div>{/if}
       </details>
 
@@ -374,6 +430,12 @@
   .l small { font-weight: 400; color: var(--dim); font-size: 12px; }
   .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
   .row.end { justify-content: flex-end; margin-top: 6px; }
+  .row .lead { min-width: 78px; }
+  .lora-note { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--secondary); padding-left: 86px; }
+  .lora-note.bad { color: var(--warning); }
+  .row.lora { margin-top: 6px; justify-content: space-between; }
+  .row.lora code { font-size: 12px; }
+  .num { width: 70px; height: 28px; font-size: 12px; margin-left: 6px; }
   .seg { display: flex; align-items: center; background: var(--surface); border-radius: 999px; padding: 3px; }
   .seg button { padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--secondary); }
   .seg button.on { background: var(--surface-active); color: var(--text); }

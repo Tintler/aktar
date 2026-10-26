@@ -20,6 +20,11 @@ portre de sahnelere tasiyordu) ana is akisiyla uretilir ya da kullanici kendi go
 is akisiyla (comfy_client.references) portre referans verilerek uretilir (identity_prompt). Sahnedeki karakterler
 scene['cast'] (plan kimlik aciyken cikarildiysa dil modeli yazar, kullanici degistirebilir), yoksa cast_of karakterin
 adini ya da gorunusunu istemde arar. Kayit: <kitap>/portre-<ad>-<surum>.png.
+
+LoRA'li hazir tarzlar ve secenekler (F202): tarzin LoRA'si plana kopyalanir (plan['lora']: dosya, guc, tetik kelimesi,
+son ek); uretimde iki is akisina da eklenir (comfy_client.add_loras), tetik kelimesi istemin en basina. Secenekler
+(plan['modifiers']: karakter olmasin, yalnizca manzara, yuz gosterme) tarzdan bagimsizdir: dil modeline kesin kural,
+gorsel istemine olumlu son ek olarak gider.
 """
 from __future__ import annotations
 
@@ -46,7 +51,65 @@ PRESETS = (
                                                    'veren nesneler; insan figürü az ya da hiç, yüz gösterme.'},
     {'id': 'minimal', 'label': 'Sade', 'note': 'Sade ve sakin kompozisyonlar: geniş boşluk, tek bir konu, '
                                                  'az renk.'},
+) + (
+    # LoRA'li tarzlar (F202, Krea 2; dosyalar ComfyUI'nin models/loras klasorunde). 'trigger' gorsel isteminin en basina
+    # (stil kilavuzundan once), 'suffix' sona eklenir; tetik kelimeleri ve guc LoRA sayfalarindaki ornek istemlerden.
+    # Notu dil modeli okur: stil kilavuzu LoRA'nin gorunusuyle catismasin.
+    {'id': 'fever-dream', 'label': 'Fever Dream', 'lora': 'FeverDreamKrea2_c1-st4000.safetensors', 'strength': 1.0,
+     'trigger': '', 'url': 'https://civitai.com/models/2675439',
+     'note': 'Rüya gibi, hafif tekinsiz analog fotoğraf havası: parlak renk lekeleri, ışıltılı dokular, sinematik '
+             'ışık, gerçeküstü ama gerçekçi ayrıntılar.'},
+    {'id': 'yfg-fwshn', 'label': 'Pastel neon sis', 'lora': 'YFG-Fwshn-Krea2_1.8k-v2.safetensors', 'strength': 0.9,
+     'trigger': 'YFG-Fwshn', 'suffix': 'dreamy, hazy, neon pastel, foggy, surreal, soft glow',
+     'url': 'https://civitai.com/models/1123717',
+     'note': 'Sisli, rüya gibi gerçeküstü dijital resim: soluk pastel neon pembe, kırmızı, turuncu ve sarı; '
+             'yumuşak ışıma, belirsiz kenarlar, yer yer mimari yapılar.'},
+    {'id': 'grimm', 'label': 'Grimm yağlıboya', 'lora': 'Grimm_s_realistic_painting_alternative_krea2_epoch_12.safetensors',
+     'strength': 0.9, 'trigger': 'grimmspaintalt,', 'url': 'https://civitai.com/models/1980971',
+     'note': 'Gerçekçi, izlenimci yağlıboya: belirgin fırça darbeleri, zengin doku, ışıltılı renk geçişleri, '
+             'klasik resim zarafeti.'},
+    {'id': 'dark-fantasy', 'label': 'Karanlık fantastik', 'lora': 'DarkFanKrea2_c1-st3000.safetensors', 'strength': 1.0,
+     'trigger': 'Dark Fantasy Art Style,', 'suffix': 'eerie atmosphere, grainy, painterly texture',
+     'url': 'https://civitai.com/models/1223108',
+     'note': 'Karanlık fantastik resim: soluk renkler, gotik ve kasvetli hava, chiaroscuro ışık, grenli boyalı doku.'},
+    {'id': 'krea-sketching', 'label': 'Eskiz', 'lora': 'KreaSketching_V2c.safetensors', 'strength': 1.0,
+     'trigger': 'Bradhamel art style.', 'url': 'https://civitai.com/models/2817577',
+     'note': 'Ayrıntılı kalem eskizi: ince tarama ve çapraz tarama gölgeleri, sade dokulu kâğıt, yer yer hafif renk.'},
+    {'id': 'chaotic-shapes', 'label': 'Kaotik şekiller', 'lora': 'Chaotic_Shapes_krea2_3390106_epoch_10.safetensors',
+     'strength': 1.0, 'trigger': 'Abstract composition. Cubism art style, ChaLOSTIC, The illustration has a stylized, '
+                                 'geometric, and somewhat abstract art style, abstract,',
+     'url': 'https://civitai.com/models/2990211',
+     'note': 'Kübist, geometrik soyut çizim: keskin açılı biçimler, kıvrımlar, cesur ve zıt renkler; sahneyi '
+             'biçimlerle ima et.'},
+    {'id': 'dc-dark-fantasy', 'label': 'Fantastik illüstrasyon',
+     'lora': 'DC_Dark_Fantasy_Style_7_[Krea2Raw][Gpt4.1Captioned][Trigger=dcd@rkf@ntsy.][Rank32]_v1.safetensors',
+     'strength': 1.0, 'trigger': 'dcd@rkf@ntsy.', 'url': 'https://civitai.com/models/3012486',
+     'note': 'Ayrıntılı karanlık fantastik illüstrasyon: işlemeli zırhlar, yaratıklar, sisli ve ışıltılı atmosferik '
+             'mekânlar, dramatik ışık.'},
+    {'id': 'dc-colossal-future', 'label': 'Devasa gelecek',
+     'lora': 'DC_Colossal_Future_[Krea2Raw][Gpt4.1Captioned][Trigger=DCC0LFUT.][Rank32]_v1.safetensors',
+     'strength': 1.0, 'trigger': 'DCC0LFUT.', 'url': 'https://civitai.com/models/3019065',
+     'note': 'Bilimkurgu: devasa uzay gemileri, göğe uzanan megayapılar, ayrıntılı mekanik mimari, atmosferik '
+             'derinlik ve olağanüstü ölçek; geniş ve alçak açılı çekimler.'},
 )
+LORA_KEYS = ('lora', 'strength', 'trigger', 'suffix', 'label')
+
+# Hazir tarzdan bagimsiz secenekler (F202, birlikte secilebilir): 'rule' her iki dil modeli istemine kesin kural
+# olarak girer, 'suffix' gorsel isteminin sonuna (turbo modelde olumsuz istem yok: olumlu ifade).
+MODIFIERS = (
+    {'id': 'no-people', 'label': 'Karakter olmasın',
+     'rule': 'No people or creatures are visible in any image: show the places, objects, traces and atmosphere of the '
+             'scene instead. Leave "characters" empty.',
+     'suffix': 'uninhabited, deserted scene'},
+    {'id': 'landscape', 'label': 'Yalnızca manzara',
+     'rule': 'Every image is a wide landscape or environment shot: the setting fills the frame; people, if any, are '
+             'tiny distant figures.',
+     'suffix': 'wide establishing shot, expansive landscape'},
+    {'id': 'no-faces', 'label': 'Yüz gösterme',
+     'rule': 'Faces are never shown: people are seen from behind, in silhouette, from far away or cropped.',
+     'suffix': 'figures seen from behind or in silhouette'},
+)
+NO_CAST = ('no-people', 'landscape')   # bu seceneklerle karakter kimligi anlamsiz
 # sahne basina hedef karakter (Turkce sayfa ~2000): az ~4 sayfa, orta ~1,5 sayfa, cok ~yarim-bir sayfa
 DENSITY = {'low': 8000, 'medium': 3000, 'high': 1500}
 SIZES = {'1344x768': (1344, 768), '1536x864': (1536, 864), '1920x1088': (1920, 1088)}
@@ -120,13 +183,39 @@ STYLE_TASK = (
     'Book excerpts (beginning of each chapter):\n\n')
 
 
-def note_text(note):
+def note_text(note, modifiers=()):
     note = _clean(note)
-    return (f'The reader asked for this direction; it overrides your own taste: "{note}"\n') if note else ''
+    text = (f'The reader asked for this direction; it overrides your own taste: "{note}"\n') if note else ''
+    rules = [m['rule'] for m in MODIFIERS if m['id'] in (modifiers or ())]
+    return text + ''.join(f'Hard rule: {rule}\n' for rule in rules)
 
 
-def style_prompt(sample, note=''):
-    return STYLE_SYSTEM, STYLE_TASK.format(note=note_text(note)) + sample
+def clean_modifiers(value):
+    known = [m['id'] for m in MODIFIERS]
+    return [key for key in known if key in (value if isinstance(value, (list, tuple)) else ())]
+
+
+def preset_lora(preset):
+    """Hazir tarzin LoRA'si (plana kopyalanir: tarz listesi sonradan degisse de plan ayni kalir) ya da None."""
+    entry = next((p for p in PRESETS if p['id'] == preset), None)
+    return {key: entry.get(key, '') for key in LORA_KEYS} if entry and entry.get('lora') else None
+
+
+def image_style(plan, style):
+    """Gorsel isteminin oneki: LoRA'nin tetik kelimesi en basta, sonra stil."""
+    trigger = _clean((plan.get('lora') or {}).get('trigger'))
+    return ' '.join(part for part in (trigger, _clean(style)) if part)
+
+
+def image_suffix(plan, base=SUFFIX, modifiers=True):
+    """Gorsel isteminin son eki: LoRA ve seceneklerin olumlu ifadeleri + sabit son ek (portrede secenekler yok)."""
+    parts = [_clean((plan.get('lora') or {}).get('suffix'))]
+    parts += [m['suffix'] for m in MODIFIERS if modifiers and m['id'] in (plan.get('modifiers') or ())]
+    return ', '.join(part for part in parts + [base] if part)
+
+
+def style_prompt(sample, note='', modifiers=()):
+    return STYLE_SYSTEM, STYLE_TASK.format(note=note_text(note, modifiers)) + sample
 
 
 def parse_style(raw):
@@ -206,10 +295,11 @@ def character_lines(characters):
     return '\n'.join(f'- {c["name"]}: {c["look"]}' for c in characters) or '- (none yet)'
 
 
-def scene_prompt(style, characters, sentences, start, stop, count, note='', previous=None, identity=False):
+def scene_prompt(style, characters, sentences, start, stop, count, note='', previous=None, identity=False,
+                 modifiers=()):
     lines = '\n'.join(f'{i}: {_clean(sentences[i])}' for i in range(start, stop))
     before = (f'The previous image showed: {previous}\n\n') if previous else ''
-    task = SCENE_TASK.format(style=style, characters=character_lines(characters), note=note_text(note),
+    task = SCENE_TASK.format(style=style, characters=character_lines(characters), note=note_text(note, modifiers),
                              previous=before, count=count, low=max(1, count - 1), high=count + 1, first=start,
                              cast=CAST_TASK.format(limit=MAX_CAST) if identity else '',
                              cast_shape=', "cast": []' if identity else '')
@@ -333,12 +423,14 @@ def portrait_slug(name):
     return slug[:40] or 'karakter'
 
 
-def new_plan(note='', preset='', density='medium', size=DEFAULT_SIZE, title='', identity=False):
+def new_plan(note='', preset='', density='medium', size=DEFAULT_SIZE, title='', identity=False, modifiers=()):
+    modifiers = clean_modifiers(modifiers)
     return {'version': VERSION, 'created': datetime.now().isoformat(timespec='seconds'), 'title': title,
             'note': _clean(note), 'preset': preset, 'density': density if density in DENSITY else 'medium',
             'size': size if size in SIZES else DEFAULT_SIZE, 'seed': random.randrange(1, 2 ** 31),
             'style': '', 'characters': [], 'scenes': [], 'complete': False, 'next_chunk': 0, 'numbered': True,
-            'identity': bool(identity)}
+            'identity': bool(identity) and not set(modifiers) & set(NO_CAST), 'modifiers': modifiers,
+            'lora': preset_lora(preset)}
 
 
 def renumber(plan, texts):
@@ -371,7 +463,10 @@ def plan_book(sections, ask, plan, cancel=None, progress=None, save=None):
     if progress:
         progress(done, total)
     if not plan.get('style'):
-        plan['style'], plan['characters'] = parse_style(ask(*style_prompt(digest(sections), plan.get('note'))))
+        plan['style'], plan['characters'] = parse_style(ask(*style_prompt(digest(sections), plan.get('note'),
+                                                                          plan.get('modifiers'))))
+        if 'no-people' in (plan.get('modifiers') or ()):
+            plan['characters'] = []
         if save:
             save(plan)
     for number in range(plan.get('next_chunk', 0), len(parts)):
@@ -383,9 +478,11 @@ def plan_book(sections, ask, plan, cancel=None, progress=None, save=None):
         if count:
             previous = plan['scenes'][-1]['prompt'] if plan['scenes'] else None
             scenes, extra = parse_scenes(ask(*scene_prompt(plan['style'], plan['characters'], sentences, start, stop,
-                                                            count, plan.get('note'), previous, plan.get('identity'))),
+                                                            count, plan.get('note'), previous, plan.get('identity'),
+                                                            plan.get('modifiers'))),
                                          start, stop, sentences, plan['style'])
-            plan['characters'] = merge_characters(plan['characters'], extra)
+            if 'no-people' not in (plan.get('modifiers') or ()):
+                plan['characters'] = merge_characters(plan['characters'], extra)
             for scene in scenes:
                 order = len(plan['scenes'])
                 real = sections[section].get('number', section)   # okuyucunun bolum numarasi
@@ -414,8 +511,10 @@ REFINE_TASK = (
     'not work with this model). Keep it English, 40-100 words. Do not mention text or letters.')
 
 
-def refine_prompt(prompt, instruction):
-    return REFINE_SYSTEM, REFINE_TASK.format(prompt=_clean(prompt), instruction=_clean(instruction))
+def refine_prompt(prompt, instruction, modifiers=()):
+    rules = note_text('', modifiers)
+    return REFINE_SYSTEM, REFINE_TASK.format(prompt=_clean(prompt), instruction=_clean(instruction)) + (
+        f'\n{rules}' if rules else '')
 
 
 def parse_refined(raw, fallback):

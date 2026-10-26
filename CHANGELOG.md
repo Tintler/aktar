@@ -2,6 +2,12 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.31.0 — 2026-10-26
+
+### Yeni
+- **Kitap görsellerinde LoRA tarzları (F202, Krea 2):** Hazır tarzların altına sekiz LoRA'lı tarz eklendi: Fever Dream, Pastel neon sis (YFG Fwshn), Grimm yağlıboya, Karanlık fantastik (Dark Fantasy), Eskiz (KreaSketching), Kaotik şekiller (Chaotic Shapes), Fantastik illüstrasyon (DC Dark Fantasy Style 7) ve Devasa gelecek (DC Colossal Future). Tarz seçilince LoRA dosyasının ComfyUI'de olup olmadığı denetlenir; üretimde LoRA iş akışına kendiliğinden eklenir (iş akışını değiştirmek gerekmez) ve tetik kelimesi istemin başına yazılır. LoRA gücü plan ekranında değiştirilebilir. Dosyalar ComfyUI'nin `models/loras` klasöründe olmalı (alt klasörde ya da adı biraz değişmiş olsa da bulunur).
+- **Tarzdan bağımsız seçenekler:** "Karakter olmasın", "Yalnızca manzara" ve "Yüz gösterme" düğmeleri herhangi bir tarzla birlikte seçilebilir (ör. Fever Dream + Yalnızca manzara). Dil modeline kesin kural olarak verilir, görsel istemine de olumlu ifade olarak eklenir; karakter çizilmeyen seçeneklerde karakter kimliği kapanır.
+
 ## 2.30.0 — 2026-10-26
 
 ### Yeni

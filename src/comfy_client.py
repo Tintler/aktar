@@ -10,6 +10,9 @@ Uclar: POST /prompt kuyruga koyar, GET /history/<id> bitti mi, GET /view gorseli
 Karakter kimligi (F201, istege bagli ikinci is akisi, orn. Krea 2 Identity Edit): basligi 'REFERENCE' (ikinci kisi
 icin istege bagli 'REFERENCE-B') olan LoadImage dugumune karakterin portresi konur; portre once POST /upload/image
 ile ComfyUI'nin input klasorune yuklenir.
+
+LoRA'li hazir tarzlar (F202): add_loras model yukleyicisinin arkasina LoraLoaderModelOnly dugumleri ekler (is akisi
+degismez); dosya adi ComfyUI'nin LoRA listesinden (GET /object_info) resolve_lora ile bulunur.
 """
 from __future__ import annotations
 
@@ -202,6 +205,87 @@ def fill(workflow, prompt, style='', suffix='', seed=None, size=None, prefix='Ak
         found['latent']['inputs']['width'], found['latent']['inputs']['height'] = int(size[0]), int(size[1])
     found['save']['inputs']['filename_prefix'] = prefix
     return workflow
+
+
+# ---------------------------------------------------------------- LoRA (F202)
+def _link(value):
+    return isinstance(value, list) and len(value) == 2 and isinstance(value[0], str)
+
+
+def _model_roots(workflow):
+    """Modeli yukleyen dugumler: her 'model' baglantisi yukari dogru izlenir, 'model' girdisi olmayan dugumde durur
+    (UNETLoader, CheckpointLoaderSimple ...). Aradaki LoRA, kimlik yamasi gibi dugumler atlanir."""
+    roots = []
+    for node in workflow.values():
+        value = (node.get('inputs') or {}).get('model')
+        seen = set()
+        while _link(value) and value[0] in workflow and value[0] not in seen:
+            seen.add(value[0])
+            upstream = (workflow[value[0]].get('inputs') or {}).get('model')
+            if not _link(upstream):
+                break
+            value = upstream
+        if _link(value) and value[0] in workflow and value not in roots:
+            roots.append(list(value))
+    return roots
+
+
+def add_loras(workflow, loras):
+    """Is akisinin kopyasi: `loras` [(dosya, guc)] model yukleyicisinin hemen arkasina LoraLoaderModelOnly zinciri
+    olarak eklenir; yukleyicinin modelini kullanan her dugum zincirin sonuna baglanir. Kullanicinin is akisinda
+    degisiklik gerekmez (Power Lora Loader, kimlik LoRA'si oldugu gibi kalir)."""
+    workflow = copy.deepcopy(workflow)
+    if not loras:
+        return workflow
+    roots = _model_roots(workflow)
+    if not roots:
+        raise ComfyError('İş akışında model yükleyici bulunamadı; LoRA eklenemedi.')
+    for number, root in enumerate(roots):
+        last = root
+        for index, (name, strength) in enumerate(loras):
+            node_id = f'aktar-lora-{number}-{index}'
+            workflow[node_id] = {'inputs': {'lora_name': name, 'strength_model': float(strength), 'model': last},
+                                 'class_type': 'LoraLoaderModelOnly', '_meta': {'title': f'Aktar LoRA {index + 1}'}}
+            last = [node_id, 0]
+        for node_id, node in workflow.items():
+            if node_id.startswith(f'aktar-lora-{number}-'):
+                continue
+            inputs = node.get('inputs') or {}
+            for key, value in inputs.items():
+                if value == root:
+                    inputs[key] = list(last)
+    return workflow
+
+
+def lora_names(url):
+    """ComfyUI'nin gordugu LoRA dosyalari (GET /object_info/LoraLoaderModelOnly)."""
+    data = _json(normalize_url(url), '/object_info/LoraLoaderModelOnly', timeout=10)
+    spec = (((data.get('LoraLoaderModelOnly') or {}).get('input') or {}).get('required') or {}).get('lora_name')
+    if isinstance(spec, list) and spec and isinstance(spec[0], list):
+        return [str(name) for name in spec[0]]
+    if isinstance(spec, list) and len(spec) > 1 and isinstance(spec[1], dict):   # yeni bicim: ["COMBO", {options}]
+        return [str(name) for name in spec[1].get('options') or ()]
+    raise ComfyError('ComfyUI LoRA listesini vermedi.')
+
+
+def _lora_key(name):
+    stem = str(name).replace('\\', '/').rsplit('/', 1)[-1]
+    stem = stem[:-len('.safetensors')] if stem.lower().endswith('.safetensors') else stem
+    return ''.join(ch for ch in stem.lower() if ch.isalnum())
+
+
+def resolve_lora(available, wanted):
+    """`wanted` dosyasinin ComfyUI'deki adi (alt klasor dahil); bulunamazsa None. Once birebir, sonra alt klasorsuz,
+    en son buyuk/kucuk harf ve isaretler yok sayilarak (indirirken adi degisen dosya)."""
+    if wanted in available:
+        return wanted
+    key = _lora_key(wanted)
+    for match in (lambda name: name.replace('\\', '/').rsplit('/', 1)[-1] == wanted,
+                  lambda name: _lora_key(name) == key):
+        found = [name for name in available if match(name)]
+        if found:
+            return found[0]
+    return None
 
 
 # ---------------------------------------------------------------- sunucu
