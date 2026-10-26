@@ -353,11 +353,12 @@ class EndToEndTests(unittest.TestCase):
         self.assertTrue(seen and seen[-1] <= 1.0)
         self.assertAlmostEqual(float(stream['duration']), float(info['format']['duration']), delta=0.6)
 
-        raw = subprocess.run([FFMPEG, '-v', 'error', '-i', str(target), '-vf', 'crop=2:2:639:359', '-f', 'rawvideo',
+        # zamana gore 10 kare/sn ornekleme (kare sirasi ffmpeg surumune gore degisebilir)
+        raw = subprocess.run([FFMPEG, '-v', 'error', '-i', str(target), '-vf', 'fps=10,crop=2:2:639:359', '-f', 'rawvideo',
                               '-pix_fmt', 'rgb24', '-'], capture_output=True, check=True).stdout
 
-        def color_at(second):    # ortadaki piksel; kareler FPS_STILL aralikla (2x2 kare = 12 bayt)
-            at = int(second * book_video.FPS_STILL) * 12
+        def color_at(second):    # ortadaki piksel (2x2 kare = 12 bayt)
+            at = int(second * 10) * 12
             return raw[at], raw[at + 1], raw[at + 2]
 
         first = len('Merhaba dünya, uzun bir cümle.') * 0.05
