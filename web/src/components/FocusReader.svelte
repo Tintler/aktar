@@ -14,21 +14,11 @@
   import { call } from '../lib/api.js';
   import { app, saveReaderPrefs, READER_DEFAULTS } from '../lib/state.svelte.js';
   import { player, step } from '../lib/player.svelte.js';
+  import { FOCUS_COLORS } from '../lib/focus.js';
 
   let { sentences, start = 0, title, subtitle, paper, font, ontoggle, onclose, book = '', section = 0 } = $props();
 
-  // paper: okuyucunun sayfa rengi; digerleri uzaktan okumaya uygun sabit ciftler.
-  const COLORS = {
-    paper: null,
-    night: { bg: '#000000', ink: '#f2f2f2', label: 'Gece' },
-    amber: { bg: '#000000', ink: '#ffd34d', label: 'Siyah üstüne sarı' },
-    warm: { bg: '#1b1612', ink: '#f1d9b0', label: 'Sıcak koyu' },
-    navy: { bg: '#0f1b2d', ink: '#e4ecf7', label: 'Lacivert' },
-    green: { bg: '#0d1f17', ink: '#cfeedd', label: 'Yeşil' },
-    sepia: { bg: '#f4ecd8', ink: '#3b2f1e', label: 'Sepya' },
-    light: { bg: '#ffffff', ink: '#111111', label: 'Beyaz' },
-    contrast: { bg: '#ffff00', ink: '#000000', label: 'Sarı üstüne siyah' },
-  };
+  const COLORS = FOCUS_COLORS;
   const SIZES = { min: 24, max: 120, step: 4 };
 
   const colors = $derived(COLORS[app.reader.focus_colors] ?? paper);

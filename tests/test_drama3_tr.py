@@ -288,11 +288,13 @@ class BuiltinEngineTests(unittest.TestCase):
         self.assertTrue(self.engines.say(sentences[2:4], 1.0, book)['cached'])  # okuyucunun istedigi grup
         path = Path(self.temp.name) / 'bolum.wav'
         before = len(self.requests())
-        starts = {}
-        self.assertEqual(self.engines.export(sentences, 1.0, path, book=book, breaks=[1], starts=starts), 4)
+        starts, chunks = {}, []
+        self.assertEqual(self.engines.export(sentences, 1.0, path, book=book, breaks=[1], starts=starts, chunks=chunks), 4)
         self.assertEqual(len(self.requests()), before)                       # kayit da hazir gruplari kullanir
         self.assertEqual(sorted(starts), [0, 1, 2, 3])                       # F207: grup icinde harf oranina gore
         self.assertTrue(starts[0] == 0.0 < starts[1] < starts[2] < starts[3], starts)
+        self.assertEqual([c[:2] for c in chunks], [[0, 1], [2, 3]])         # F208: ekranda birlikte gorunen gruplar
+        self.assertEqual((chunks[0][2], chunks[1][2]), (starts[0], starts[2]))
         # eski hazirlik (cumle cumle) tek basina okunur, gruba katilmaz
         other = ['Beş.', 'Altı.', 'Yedi.']
         self.engines.say('Altı.', 1.0, book)

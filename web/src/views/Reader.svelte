@@ -12,6 +12,7 @@
   import VoicePicker from '../components/VoicePicker.svelte';
   import BookChat from '../components/BookChat.svelte';
   import FocusReader from '../components/FocusReader.svelte';
+  import AudiobookModal from '../components/AudiobookModal.svelte';
   import { findRanges, highlight as markMatches, clearHighlight } from '../lib/booksearch.js';
 
   let { onclose } = $props();
@@ -374,21 +375,17 @@
     return starts.map((s, i) => ({ from: s.section, to: starts[i + 1]?.section ?? sectionCount, title: s.title }));
   }
 
-  async function exportBook(fmt) {
+  // F208: kitabin tamami penceresi (bicim, ses, video gorunumu); bolumleri pencere okur.
+  let showAudiobook = $state(false);
+
+  function openAudiobook() {
     showExport = false;
-    if (app.ttsAudiobook) return;
-    try {
-      await startAudiobook(fmt);
-    } catch (error) {   // takili "hazirlaniyor" kalmasin
-      app.ttsAudiobook = null;
-      toast('Sesli kitap başlatılamadı: ' + (error?.message ?? error), 'error');
-    }
+    if (!app.ttsAudiobook) showAudiobook = true;
   }
 
-  async function startAudiobook(fmt) {
+  async function readChapters() {
     const pauses = resolvePauses(app.ttsPrefs.pauses);
     const chapters = [];
-    app.ttsAudiobook = { book: book.id, title: book.title, done: 0, total: 0, chapter: 0, chapters: 0, reading: true };
     for (const part of bookChapters()) {
       // F186: breaks (paragraph and section ends) let the back end read the reader's groups, so prepared audio is used.
       // F207 sections: [okuyucu bolum no, ilk cumle] -- mp4'te kitap gorsellerinin sahneleri bununla bulunur.
@@ -409,16 +406,38 @@
       }
       if (chapter.sentences.length) chapters.push(chapter);
     }
-    if (!chapters.length) { app.ttsAudiobook = null; toast('Kitapta seslendirilecek metin yok.'); return; }
-    // F207: butun ses hazirlanmissa (Hazirla) motor yuklenmeden yazilir.
-    const ready = await call('tts_audiobook_ready', chapters, app.ttsPrefs.speed, book.id, book.language || 'tr');
-    if (!ready && !(await ensureEngine({ needEngine: true }))) { app.ttsAudiobook = null; return; }
+    return chapters;
+  }
+
+  // voice: tts_audiobook_voices satiri. Hazir olmayan ses kayit suresince okuyucunun sesi yapilir ve motor yuklenir
+  // (eksik cumleler onunla uretilir), kayit bitince onceki ses geri doner; tamami hazirsa motor yuklenmeden yazilir.
+  async function startAudiobook({ fmt, voice, video, chapters }) {
+    let key = voice.current ? null : voice.key;
+    let restore = null;
+    const giveBack = async () => {
+      if (!restore) return;
+      app.ttsPrefs = restore;
+      await saveTtsPrefs();
+      await voiceChanged();
+    };
+    if (voice.count < voice.total) {
+      if (key) {
+        restore = $state.snapshot(app.ttsPrefs);
+        const changed = await act('tts_use_voice', key, book.language || 'tr');
+        if (!changed) return;
+        app.ttsPrefs = { ...app.ttsPrefs, ...changed.tts };
+        await voiceChanged();
+        key = null;
+      }
+      if (!(await ensureEngine({ needEngine: true }))) { await giveBack(); return; }
+    }
     const result = await act('tts_audiobook', book.title, book.author ?? '', chapters, app.ttsPrefs.speed, book.id,
-      book.language || 'tr', fmt);
-    if (result?.started) {
-      const total = chapters.reduce((n, c) => n + c.sentences.length, 0);
-      app.ttsAudiobook = { book: book.id, title: book.title, done: 0, total, chapter: 1, chapters: chapters.length };
-    } else app.ttsAudiobook = null;
+      book.language || 'tr', fmt, true, key, video, restore);
+    if (!result?.started) { await giveBack(); return; }
+    showAudiobook = false;
+    const total = chapters.reduce((n, c) => n + c.sentences.length, 0);
+    app.ttsAudiobook = { book: book.id, title: book.title, done: 0, total, chapter: 1, chapters: chapters.length,
+      format: fmt };
   }
 
   async function exportSection() {
@@ -806,12 +825,8 @@
           {#if showExport}
             <div class="prep-menu">
               <button onclick={exportSection}>Bu bölümü WAV olarak kaydet</button>
-              <button disabled={Boolean(app.ttsAudiobook)} onclick={() => exportBook('m4b')}>Sesli kitap: tek M4B dosyası (bölümlü, kapaklı)</button>
-              <button disabled={Boolean(app.ttsAudiobook)} onclick={() => exportBook('mp3')}>Sesli kitap: bölüm başına MP3 (klasöre)</button>
-              <button disabled={Boolean(app.ttsAudiobook)} onclick={() => exportBook('mp4')}
-                title={app.artBooks[book.id]?.images ? 'Ses + kitap görselleri: her görsel, tam ekran okuyucudaki gibi sahnesinin cümlesinde gelir'
-                  : 'Bu kitabın görseli yok: görüntü kapak olur (Kitaplık → sağ tık → Kitap görselleri)'}>
-                Sesli kitap videosu: MP4 ({app.artBooks[book.id]?.images ? 'kitap görselleriyle' : 'kapakla'})</button>
+              <button disabled={Boolean(app.ttsAudiobook)} onclick={openAudiobook}
+                title="Video (tam ekran okuyucu gibi), M4B ya da MP3; ses ve görünüm seçilir">Kitabın tamamı: sesli kitap ya da video…</button>
             </div>
           {/if}
         </div>
@@ -822,6 +837,10 @@
       <FocusReader {sentences} start={focusStart} title={book.title} subtitle={sectionTitle} {paper} font={fonts[app.reader.font]}
         book={book.id} {section}
         ontoggle={togglePlay} onclose={closeFocus} />
+    {/if}
+    {#if showAudiobook}
+      <AudiobookModal {book} {paper} {section} sample={sentences.find((s) => s.length > 60) ?? sentences[0] ?? ''}
+        collect={readChapters} onsave={startAudiobook} onclose={() => (showAudiobook = false)} />
     {/if}
   </section>
 {/if}

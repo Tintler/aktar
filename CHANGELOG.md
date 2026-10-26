@@ -2,6 +2,14 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.35.0 — 2026-10-26
+
+### Yeni
+- **Sesli kitap videosu tam ekran okuyucu gibi (F208):** Video artık yalnızca görsellerden oluşmuyor; tam ekran okuyucunun görünümü kare kare yazılıyor. Okunan cümle grubu ortada, arkada kitap görselleri (yazı bandı ve yazının çevresindeki parıltıyla) ya da düz renk. Yazı okuyucudaki gibi Kayma ya da Belirme ile değişiyor, görseller yumuşakça geçiyor; bölüm başlarında da geçiş var.
+- **Kaydetme penceresi:** Okuyucuda Kaydet → "Kitabın tamamı: sesli kitap ya da video…" bir pencere açar. Burada biçim (Video MP4, M4B, MP3 klasörü), ses ve video görünümü seçilir: arka plan, yazı açık/kapalı, yazı ve görsel geçişi, yazı boyutu, yazı tipi, renk, yazı bandı ve çözünürlük (1080p/720p). Önizleme, videonun gerçek bir karesidir. Seçimler hatırlanır.
+- **Ses seçimi:** Pencerede okuyucunun sesi ve Hazırla'daki diğer sesler (kayıtlı sesler, yerel/bulut) listelenir; her birinin yanında kitabın ne kadarının o sesle hazır olduğu yazar. Tamamı hazır bir ses, ses motoru yüklenmeden ve okuyucunun sesi değişmeden yazılır. Eksiği olan ses kayıt süresince okuyucunun sesi olur; kayıt bitince, durdurulunca ya da hata olunca önceki ses geri gelir.
+- Bölümlerin görüntüsü ayrı saklanır: durdurulan video kaldığı bölümden sürer, ayar değişmeyen bölüm yeniden çizilmez.
+
 ## 2.34.0 — 2026-10-26
 
 ### Yeni

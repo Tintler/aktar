@@ -314,6 +314,7 @@ export async function init() {
     // F207: mp4'te ses bitince yalnizca {video: 0..1} gelir; bolum sayaclari korunur.
     if (!data.finished) { app.ttsAudiobook = { ...(app.ttsAudiobook ?? {}), ...data, reading: false }; return; }
     app.ttsAudiobook = null;
+    if (data.tts) app.ttsPrefs = { ...app.ttsPrefs, ...data.tts };   // F208: kayit icin degisen ses geri doner
     if (data.cancelled) { toast('Sesli kitap kaydı durduruldu; biten bölümler saklandı, yeniden başlatınca kaldığı yerden sürer.'); return; }
     if (data.error) { toast('Sesli kitap kaydedilemedi: ' + data.error, 'error'); return; }
     const where = data.format === 'mp3' ? 'Klasör' : 'Dosya';

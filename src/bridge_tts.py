@@ -408,14 +408,83 @@ class TtsMixin:
         job = getattr(self, '_audiobook_job', None)
         return job is not None and job.is_alive()
 
-    def tts_audiobook_ready(self, chapters, speed=1.0, book=None, language='tr'):
-        """F207: kitabin tum sesi hazir mi (Hazirla): oyleyse sesli kitap ses motoru yuklenmeden yazilir."""
+    def _audiobook_engines(self, key=None, language='tr', shared=None):
+        """F208: sesli kitabin sesi. key: _voice_variants secimi (ses + kayitli ses + yerel/bulut); None ya da
+        bulunamazsa okuyucunun sesi. Donen (engines, variant): secim icin with_prefs gorunumu (yalnizca onbellek
+        okur; eksik cumle icin secim once okuyucunun sesi yapilip motor yuklenir)."""
         engines = self._engines()
+        variant = next((v for v in self._voice_variants(language or 'tr') if v['key'] == key), None) if key else None
+        return (engines.with_prefs(variant['tts'], shared) if variant else engines), variant
+
+    def _audiobook_count(self, engines, chapters, speed, book, language):
+        clean = audiobook.chapter_list(chapters)
+        return (sum(engines.cached(book, c['sentences'], speed, language, breaks=c['breaks']) for c in clean),
+                sum(len(c['sentences']) for c in clean))
+
+    def tts_audiobook_ready(self, chapters, speed=1.0, book=None, language='tr', voice=None):
+        """F207: kitabin tum sesi hazir mi (Hazirla): oyleyse sesli kitap ses motoru yuklenmeden yazilir.
+        F208 voice: tts_audiobook_voices anahtari (None: okuyucunun sesi)."""
         try:
-            return all(engines.cached(book, c['sentences'], speed, language or 'tr', breaks=c['breaks'])
-                       == len(c['sentences']) for c in audiobook.chapter_list(chapters))
+            engines, _variant = self._audiobook_engines(voice, language)
+            done, total = self._audiobook_count(engines, chapters, speed, book, language or 'tr')
+            return done == total
         except (OSError, ValueError, KeyError):
             return False
+
+    def tts_audiobook_voices(self, chapters, speed=1.0, book=None, language='tr'):
+        """F208: sesli kitap penceresinin ses listesi: okuyucunun sesi ve Hazirla'daki diger secimler, her biriyle
+        kitabin kac cumlesi hazir. [{'key', 'label', 'count', 'total', 'current'}]; key None okuyucunun sesi."""
+        language = language or 'tr'
+        engines = self._engines()
+        current = engines.voice_signature(language)
+        shared = {}
+        count, total = self._audiobook_count(engines.with_prefs(dict(self.ui_prefs().get('tts', {})), shared),
+                                             chapters, speed, book, language)
+        selected = '/'.join(str(part) for part in engines.choice(language) if part)
+        label = 'Okuyucunun sesi'
+        try:
+            variants = self._voice_variants(language)
+        except Exception as error:
+            self._log(f'UYARI: Sesler okunamadı: {error!r}')
+            variants = []
+        result = [{'key': None, 'label': label, 'count': count, 'total': total, 'current': True}]
+        for variant in variants:
+            try:
+                view = engines.with_prefs(variant['tts'], shared)
+                if view.voice_signature(language) == current:
+                    result[0]['label'] = f'{label} ({variant["label"]})'
+                    continue
+                done, _total = self._audiobook_count(view, chapters, speed, book, language)
+            except Exception as error:
+                self._log(f'UYARI: "{variant["label"]}" sesiyle hazırlanan ses okunamadı: {error!r}')
+                continue
+            result.append({'key': variant['key'], 'label': variant['label'], 'count': done, 'total': total,
+                           'current': False})
+        if result[0]['label'] == label and selected:
+            result[0]['label'] = f'{label} ({selected})'
+        return result
+
+    def tts_video_preview(self, book=None, video=None, section=0, text=''):
+        """F208: sesli kitap videosu ayarlarinin onizlemesi: bolumun (yoksa kitabin ilk) sahne gorseli uzerinde
+        ornek parca, data URL (JPEG, 960 piksel genis)."""
+        import base64
+        import book_video
+        path = None
+        try:
+            store, plan = self._art_store(), self._art_load(book) if book else None
+            if plan:
+                here, carry = book_art.section_images(plan, int(section or 0))
+                shown = [s for s in plan['scenes'] if s.get('image') and not s.get('skip')]
+                for scene in here[:1] or ([carry] if carry else []) or shown[:1]:
+                    candidate = store.image_path(book, scene)
+                    path = str(candidate) if candidate and candidate.is_file() else None
+        except (OSError, ValueError, AttributeError, KeyError):
+            path = None
+        try:
+            data = book_video.Renderer(video).preview(text or 'Örnek cümle burada okunur.', path)
+        except Exception as error:
+            return _error(error)
+        return {'image': 'data:image/jpeg;base64,' + base64.b64encode(data).decode('ascii'), 'art': bool(path)}
 
     def _audiobook_images(self, book, chapters):
         """F207 mp4: kitap gorsellerinin sahneleri bolumlere 'images' [[cumle_no, yol]] olarak eklenir. Bolumun
@@ -452,16 +521,28 @@ class TtsMixin:
             chapter['images'] = images
         return first
 
-    def tts_audiobook(self, title, author, chapters, speed=1.0, book=None, language='tr', fmt='m4b', cover=True):
+    def tts_audiobook(self, title, author, chapters, speed=1.0, book=None, language='tr', fmt='m4b', cover=True,
+                      voice=None, video=None, restore=None):
         """Kitabin tamamini sesli kitap olarak yazar: 'm4b' (bolum isaretli tek dosya), 'mp3' (secilen klasore
-        bolum basina bir dosya) ya da 'mp4' (F207: ses + kitap gorselleri). Ilerleme ve sonuc 'tts_audiobook'
-        olayiyla gelir. Butun ses hazirlanmissa (Hazirla) motor yuklu olmasa da yazar."""
+        bolum basina bir dosya) ya da 'mp4' (F207/F208: ses + tam ekran okuyucu goruntusu, `video` ayarlariyla).
+        Ilerleme ve sonuc 'tts_audiobook' olayiyla gelir. Butun ses hazirlanmissa (Hazirla) motor yuklu olmasa da
+        yazar. F208 voice: tts_audiobook_voices anahtari; hazir olmayan ses icin once okuyucunun sesi yapilmali.
+        restore: kayit icin degistirilen okuyucu sesinin onceki ui.json 'tts' tercihleri; is bitince (durdurulunca,
+        hata olunca da) geri yazilir ve bitis olayinda 'tts' olarak doner."""
         if self._audiobook_running():
             return {'error': 'Bir sesli kitap kaydı zaten sürüyor.'}
         fmt = fmt if fmt in audiobook.FORMATS else 'm4b'
-        engines = self._engines()
-        if engines.state != 'ready' and not self.tts_audiobook_ready(chapters, speed, book, language):
-            return {'error': 'Ses motoru hazır değil.'}
+        language = language or 'tr'
+        engines, variant = self._audiobook_engines(voice, language)
+        if voice and variant is None:
+            return {'error': 'Seçilen ses artık yok.'}
+        if not self.tts_audiobook_ready(chapters, speed, book, language, voice):
+            reader = self._engines()
+            if variant is not None and engines.voice_signature(language) != reader.voice_signature(language):
+                return {'error': 'Seçilen sesin bütün cümleleri hazır değil; önce okuyucunun sesi yapılmalı.'}
+            if reader.state != 'ready':
+                return {'error': 'Ses motoru hazır değil.'}
+            engines = reader
         name = audiobook.safe_name(title)
         if fmt == 'mp3':
             target = self._dialog('open_folder', 'Sesli kitabın kaydedileceği klasörü seç')
@@ -482,8 +563,8 @@ class TtsMixin:
             except (ValueError, OSError, KeyError):
                 art = None
         carry = self._audiobook_images(book, chapters) if fmt == 'mp4' and book else None
-        if fmt == 'mp4' and not any(c.get('images') for c in chapters):
-            self._log('Sesli kitap videosu: kitabın görseli yok, görüntü kapak olacak.')
+        if fmt == 'mp4' and not any(c.get('images') for c in chapters) and (video or {}).get('background') != 'plain':
+            self._log('Sesli kitap videosu: kitabın görseli yok, arka plan düz renk olacak.')
         cancel = threading.Event()
         self._audiobook_cancel = cancel
 
@@ -491,20 +572,24 @@ class TtsMixin:
             self._emit('tts_audiobook', {'done': done, 'total': total, 'chapter': chapter, 'chapters': count,
                                          'title': title, 'book': book})
 
-        def video(fraction):
+        def video_progress(fraction):
             self._emit('tts_audiobook', {'video': round(fraction, 3), 'title': title, 'book': book})
 
         def work():
             try:
                 result = audiobook.build(engines, chapters, target, fmt, title, author, art, speed, book,
-                                         language or 'tr', progress, cancel, self._log, video, carry)
+                                         language, progress, cancel, self._log, video_progress, carry, video=video)
                 self._log('Sesli kitap kaydedildi: ' + result['output'])
-                self._emit('tts_audiobook', dict(result, finished=True, format=fmt, title=title))
+                event = dict(result, finished=True, format=fmt, title=title)
             except audiobook.Stopped as error:
-                self._emit('tts_audiobook', {'finished': True, 'cancelled': True, 'error': str(error)})
+                event = {'finished': True, 'cancelled': True, 'error': str(error)}
             except Exception as error:
                 self._log(f'HATA: Sesli kitap kaydedilemedi: {error}')
-                self._emit('tts_audiobook', {'finished': True, 'error': str(error)})
+                event = {'finished': True, 'error': str(error)}
+            if isinstance(restore, dict):   # F208: kayit icin secilen ses okuyucuda kalmaz
+                self.save_ui_prefs({'tts': restore})
+                event['tts'] = restore
+            self._emit('tts_audiobook', event)
 
         self._audiobook_job = threading.Thread(target=work, name='aktar-tts-audiobook', daemon=True)
         self._audiobook_job.start()
