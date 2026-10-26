@@ -13,6 +13,9 @@ ile ComfyUI'nin input klasorune yuklenir.
 
 LoRA'li hazir tarzlar (F202): add_loras model yukleyicisinin arkasina LoraLoaderModelOnly dugumleri ekler (is akisi
 degismez); dosya adi ComfyUI'nin LoRA listesinden (GET /object_info) resolve_lora ile bulunur.
+
+RTX buyutme (F209, istege bagli): uretilen gorsel /upload/image ile geri yuklenir, Aktar'in kurdugu kucuk is akisi
+(LoadImage -> RTXVideoSuperResolution -> SaveImage) buyutur; kullanicinin is akisina dokunulmaz.
 """
 from __future__ import annotations
 
@@ -286,6 +289,38 @@ def resolve_lora(available, wanted):
         if found:
             return found[0]
     return None
+
+
+# ---------------------------------------------------------------- RTX buyutme (F209)
+UPSCALE_NODE = 'RTXVideoSuperResolution'   # Comfy-Org/Nvidia_RTX_Nodes_ComfyUI (yalnizca NVIDIA RTX)
+UPSCALE_MISSING = ('ComfyUI\'de "RTX Video Super Resolution" düğümü yok: ComfyUI Manager\'dan "Nvidia RTX Nodes" '
+                   '(Comfy-Org/Nvidia_RTX_Nodes_ComfyUI) eklentisini kurup ComfyUI\'yi yeniden başlatın. '
+                   'Yalnızca NVIDIA RTX ekran kartlarında çalışır.')
+
+
+def has_node(url, class_type):
+    """ComfyUI'de bu dugum turu var mi (GET /object_info/<tur>; yoksa bos nesne ya da 404)."""
+    try:
+        data = _json(normalize_url(url), '/object_info/' + urllib.parse.quote(class_type), timeout=10)
+    except ComfyError as error:
+        if 'HTTP 404' in str(error):
+            return False
+        raise
+    return isinstance(data, dict) and class_type in data
+
+
+def upscale_workflow(image, scale, prefix='Aktar/buyutme'):
+    """Yuklenmis gorseli RTX Video Super Resolution ile `scale` kat buyuten is akisi (kullanicinin is akisindan
+    bagimsiz; DynamicCombo alt girdisi API'de 'resize_type.scale')."""
+    return {
+        '1': {'inputs': {'image': image}, 'class_type': 'LoadImage', '_meta': {'title': 'Aktar buyutme kaynagi'}},
+        '2': {'inputs': {'images': ['1', 0], 'resize_type': 'scale by multiplier',
+                         'resize_type.scale': round(min(4.0, max(1.0, float(scale))), 2), 'quality': 'ULTRA',
+                         'strength': 1.0, 'image_encoding': '8-bit RGB'},
+              'class_type': UPSCALE_NODE, '_meta': {'title': 'RTX Video Super Resolution'}},
+        '3': {'inputs': {'filename_prefix': prefix, 'images': ['2', 0]}, 'class_type': 'SaveImage',
+              '_meta': {'title': 'Save Image'}},
+    }
 
 
 # ---------------------------------------------------------------- sunucu

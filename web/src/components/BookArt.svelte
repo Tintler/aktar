@@ -5,6 +5,8 @@
   // Isler arka planda surer (sag ustteki is listesi); pencere kapansa da devam eder.
   // F201 Karakter kimligi (kitap basina acilir/kapanir, kapaliyken akis aynen eskisi): karakter portreleri uretilir
   // ya da kullanici kendi gorselini koyar; karakterli sahneler portre referansiyla kimlik is akisinda uretilir.
+  // F209: daha seyrek siklik (onemli anlar), bolum acilis gorseli, mekan kimligi, gorunus degisimi, RTX buyutme ve
+  // "Tarzi degistir" (istemler kalir, stil kilavuzu + LoRA degisir, hepsi yeniden uretilir; Bastan planla'dan ayri).
   import Modal from './Modal.svelte';
   import Toggle from './Toggle.svelte';
   import Icon from '../lib/Icon.svelte';
@@ -15,8 +17,13 @@
 
   let { book, title = '', onclose } = $props();
 
-  const DENSITY = { low: 'Az', medium: 'Orta', high: 'Çok' };
-  const DENSITY_HINT = { low: 'yaklaşık 4 sayfada bir', medium: 'sahne değişiminde, yaklaşık 1,5 sayfada bir', high: 'yarım–bir sayfada bir' };
+  // F209: seyrekleştikçe dil modeli sahne değişimlerini değil önemli anları seçer; Seyrek ve Çok seyrekte kitabın
+  // tamamından en önemlileri (önem puanıyla) seçilir.
+  const DENSITY = { sparse: 'Çok seyrek', rare: 'Seyrek', low: 'Az', medium: 'Orta', high: 'Çok' };
+  const DENSITY_HINT = { sparse: 'yaklaşık 25 sayfada bir: kitabın tamamından en önemli anlar',
+    rare: 'yaklaşık 10 sayfada bir: kitabın tamamından en önemli anlar', low: 'yaklaşık 4 sayfada bir: önemli anlar',
+    medium: 'sahne değişiminde, yaklaşık 1,5 sayfada bir', high: 'yarım–bir sayfada bir' };
+  const UPSCALE_LABEL = (value) => (value ? `${String(value).replace('.', ',')}×` : 'Kapalı');
 
   let options = $state(null);
   let plan = $state(null);
@@ -34,6 +41,20 @@
   let modifiers = $state([]);       // F202 tarzdan bagimsiz secenekler (karakter olmasin, yalnizca manzara ...)
   let loraCheck = $state(null);     // secilen LoRA'li tarzin dosyasi ComfyUI'de var mi
   let loraStrength = $state(1);
+  // F209 plan secenekleri: bolum acilis gorseli, mekan kimligi, gorunus degisimi, RTX buyutme
+  let openers = $state(false);
+  let placeIdentity = $state(false);
+  let lookChanges = $state(false);
+  let upscale = $state(0);
+  let upscaleCheck = $state(null);  // RTX dugumu ComfyUI'de var mi
+  let places = $state('');
+  // F209 toplu stil degisikligi: istemler kalir, stil kilavuzu ve LoRA degisir, gorseller yeniden uretilir
+  let restyling = $state(false);    // panel acik
+  let restyleBusy = $state(false);
+  let restyleNote = $state('');
+  let restylePreset = $state('');
+  let restyleRewrite = $state(true);
+  let restyleCheck = $state(null);
 
   const job = $derived(app.artJob?.book === book ? app.artJob : null);
   const otherJob = $derived(app.artJob && app.artJob.book !== book ? app.artJob : null);
@@ -49,6 +70,9 @@
   const loraPresets = $derived((options?.presets ?? []).filter((p) => p.lora));
   const noCast = $derived(modifiers.some((m) => options?.no_cast?.includes(m)));
   const modifierLabels = $derived((plan?.modifiers ?? []).map((id) => options?.modifiers?.find((m) => m.id === id)?.label ?? id));
+  const noPeople = $derived(modifiers.includes('no-people'));
+  const unscaled = $derived(plan?.upscale ? shown.filter((s) => s.url && s.upscaled !== plan.upscale).length : 0);
+  const placeNames = $derived((plan?.places ?? []).map((p) => p.name));
 
   async function load() {
     const [opts, result] = await Promise.all([call('art_options'), call('art_plan_get', book)]);
@@ -61,13 +85,46 @@
     plan = value;
     if (!value) return;
     style = value.style ?? '';
-    characters = (value.characters ?? []).map((c) => `${c.name}: ${c.look}`).join('\n');
+    characters = characterText(value.characters ?? []);
+    places = (value.places ?? []).map((p) => `${p.name}: ${p.look}`).join('\n');
     note = value.note ?? note;           // baştan planlarken önceki not ve seçimler hazır gelsin
     preset = value.preset ?? preset;
     density = value.density ?? density;
     identity = Boolean(value.identity);
     modifiers = value.modifiers ?? modifiers;
     loraStrength = value.lora?.strength ?? 1;
+    openers = Boolean(value.openers);
+    placeIdentity = Boolean(value.place_identity);
+    lookChanges = Boolean(value.look_changes);
+    upscale = value.upscale ?? 0;
+  }
+
+  // Karakterler kutusu: "Ad: görünüş"; F209 görünüm değişimi "Ad [5. bölüm]: yeni görünüş" (o bölümden sonra).
+  const PHASE = /^(.+?)\s*\[\s*(\d+)\.?\s*bölüm\s*\]$/i;
+  function characterText(list) {
+    return list.flatMap((c) => [`${c.name}: ${c.look}`,
+      ...(c.changes ?? []).map((change) => `${c.name} [${change.section + 1}. bölüm]: ${change.look}`)]).join('\n');
+  }
+  function parseCharacters(text) {
+    const old = Object.fromEntries((plan?.characters ?? []).map((c) => [c.name.toLowerCase(), c]));
+    const list = [];
+    const phases = [];
+    for (const line of text.split('\n')) {
+      const [head, ...rest] = line.split(':');
+      const look = rest.join(':').trim();
+      if (!head.trim() || !look) continue;
+      const phase = head.trim().match(PHASE);
+      if (phase) phases.push({ name: phase[1].trim(), section: Number(phase[2]) - 1, look });
+      else list.push({ name: head.trim(), look, changes: [] });
+    }
+    for (const phase of phases) {
+      const character = list.find((c) => c.name.toLowerCase() === phase.name.toLowerCase());
+      if (!character) continue;
+      // ayni bolumdeki eski degisimin cumlesi korunur (kutuda yalnizca bolum yazar)
+      const before = (old[character.name.toLowerCase()]?.changes ?? []).find((c) => c.section === phase.section);
+      character.changes.push({ section: phase.section, start: before?.start ?? 0, look: phase.look });
+    }
+    return list;
   }
 
   load();
@@ -86,19 +143,78 @@
   $effect(() => stop);
 
   // Hazir tarz notun basina yazilir; baska tarza gecince yalnizca onceki tarzin metni degisir, kullanicinin eki kalir.
-  async function pickPreset(entry) {
-    let rest = note;
+  // `restyle`: toplu stil degisikligi panelinin kendi notu ve tarzi.
+  async function pickPreset(entry, restyle = false) {
+    let rest = restyle ? restyleNote : note;
     for (const p of options.presets) rest = rest.replace(p.note, '');
     rest = rest.trim();
-    loraCheck = null;
-    if (preset === entry.id) { preset = ''; note = rest; return; }
-    preset = entry.id;
-    note = entry.note + (rest ? ' ' + rest : '');
-    if (entry.lora) {
-      loraCheck = { pending: true, message: 'LoRA dosyası ComfyUI\'de aranıyor…' };
-      const result = await call('art_lora_check', entry.id);
-      if (preset === entry.id) loraCheck = result;
+    const current = restyle ? restylePreset : preset;
+    const [id, text] = current === entry.id ? ['', rest] : [entry.id, entry.note + (rest ? ' ' + rest : '')];
+    if (restyle) { restylePreset = id; restyleNote = text; restyleCheck = null; }
+    else { preset = id; note = text; loraCheck = null; }
+    if (!id || !entry.lora) return;
+    const pending = { pending: true, message: 'LoRA dosyası ComfyUI\'de aranıyor…' };
+    if (restyle) restyleCheck = pending; else loraCheck = pending;
+    const result = await call('art_lora_check', entry.id);
+    if (restyle && restylePreset === entry.id) restyleCheck = result;
+    if (!restyle && preset === entry.id) loraCheck = result;
+  }
+
+  // F209 RTX buyutme: secilince dugum ComfyUI'de aranir; inceleme ekraninda plana kaydedilir.
+  async function pickUpscale(value, save = false) {
+    upscale = value;
+    upscaleCheck = null;
+    if (save) {
+      const result = await act('art_plan_save', book, { upscale: value });
+      if (result) applyPlan(result.plan);
     }
+    if (!value) return;
+    upscaleCheck = { pending: true, message: 'RTX Video Super Resolution düğümü ComfyUI\'de aranıyor…' };
+    const result = await call('art_upscale_check');
+    if (upscale === value) upscaleCheck = result;
+  }
+
+  async function upscaleExisting() {
+    if (otherJob) { toast('Başka bir kitabın görselleri için iş sürüyor.'); return; }
+    const result = await act('art_generate', book, null, title, false, null, true);
+    if (result?.started) app.artJob = { book, title, stage: 'generate', done: 0, total: result.total, current: '' };
+  }
+
+  async function savePlaces() {
+    const list = places.split('\n').map((line) => line.split(':')).filter((p) => p.length > 1 && p[0].trim())
+      .map(([name, ...look]) => ({ name: name.trim(), look: look.join(':').trim() }));
+    const result = await act('art_plan_save', book, { places: list });
+    if (result) applyPlan(result.plan);
+  }
+
+  async function setPlaceIdentity(value) {
+    const result = await act('art_plan_save', book, { place_identity: value });
+    if (result) applyPlan(result.plan);
+  }
+
+  function openRestyle() {
+    restyleNote = plan?.note ?? '';
+    restylePreset = plan?.preset ?? '';
+    restyleRewrite = true;
+    restyleCheck = null;
+    restyling = true;
+  }
+
+  // Tarzi uygular (stil kilavuzunu dil modeli yeni yone gore yazar) ve butun gorselleri ayni seed'lerle yeniden
+  // uretir; kimlik aciksa kullanicinin kendi koymadigi portreler de yeni tarzla yenilenir.
+  async function applyRestyle() {
+    if (otherJob) { toast('Başka bir kitabın görselleri için iş sürüyor.'); return; }
+    const yes = await confirm({ title: 'Tarzı değiştir', message: `Sahneler aynı kalır; ${shown.length} görselin hepsi yeni tarzla yeniden üretilir.`,
+      ok: 'Uygula ve yeniden üret', cancel: 'Vazgeç' });
+    if (!yes) return;
+    restyleBusy = true;
+    const result = await act('art_restyle', book, restylePreset, restyleNote, restyleRewrite);
+    restyleBusy = false;
+    if (!result) return;
+    applyPlan(result.plan);
+    restyling = false;
+    const portraits = plan.identity ? plan.characters.filter((c) => c.portrait_url && !c.portrait_own).map((c) => c.name) : null;
+    generate(null, true, portraits?.length ? portraits : null);
   }
 
   function toggleModifier(id) {
@@ -133,7 +249,8 @@
       return;
     }
     if (app.artJob?.reading !== reading) return;   // bolumler okunurken durduruldu
-    const result = await act('art_plan_create', book, sections, note, preset, density, title, resume, identity && !noCast, modifiers);
+    const result = await act('art_plan_create', book, sections, note, preset, density, title, resume, identity && !noCast, modifiers,
+      { openers, places: placeIdentity, changes: lookChanges && !noPeople, upscale });
     if (!result?.started) { if (app.artJob?.reading === reading) app.artJob = null; return; }
     if (app.artJob?.reading === reading) app.artJob = { book, title, stage: 'plan', done: 0, total: result.total };
     replanning = false;
@@ -165,9 +282,7 @@
   }
 
   async function saveCharacters() {
-    const list = characters.split('\n').map((line) => line.split(':')).filter((p) => p.length > 1 && p[0].trim())
-      .map(([name, ...look]) => ({ name: name.trim(), look: look.join(':').trim() }));
-    const result = await act('art_plan_save', book, { characters: list });
+    const result = await act('art_plan_save', book, { characters: parseCharacters(characters) });
     if (result) applyPlan(result.plan);
   }
 
@@ -299,6 +414,34 @@
           <span class="dim">{DENSITY_HINT[density]}</span>
         </div>
         <div class="row">
+          <Toggle bind:checked={openers} label="Bölüm açılış görseli" />
+          <span class="dim">Her bölümün başında, ilk satırlar okunurken bölümün genel görünümü (mekânı ve havası).</span>
+        </div>
+        <div class="row">
+          <Toggle bind:checked={placeIdentity} label="Mekân kimliği" />
+          <span class="dim">Sık geçen mekânlara sabit bir tarif yazılır; o mekândaki her görsel aynı tarifle çizilir.</span>
+        </div>
+        <div class="row">
+          {#if noPeople}<Toggle checked={false} disabled label="Görünüm değişimi" />
+          {:else}<Toggle bind:checked={lookChanges} label="Görünüm değişimi" />{/if}
+          <span class="dim">{noPeople ? 'Karakter çizilmediği için kapalı.'
+            : 'Karakter yaşlanır, kıyafeti ya da saçı değişirse sonraki görseller yeni görünüşle çizilir.'}</span>
+        </div>
+        <div class="row">
+          <span class="dim lead">RTX büyütme</span>
+          <div class="seg">
+            {#each [0, ...(options?.upscales ?? [])] as value (value)}
+              <button class:on={upscale === value} onclick={() => pickUpscale(value)}>{UPSCALE_LABEL(value)}</button>
+            {/each}
+          </div>
+          <span class="dim">Üretilen görsel ComfyUI'de RTX Video Super Resolution ile büyütülür (NVIDIA RTX).</span>
+        </div>
+        {#if upscaleCheck}
+          <div class="lora-note" class:bad={upscaleCheck.ok === false}>
+            <Icon name={upscaleCheck.ok === false ? 'alert' : 'check'} size={14} /><span>{upscaleCheck.message}</span>
+          </div>
+        {/if}
+        <div class="row">
           {#if noCast}<Toggle checked={false} disabled label="Karakter kimliği" />
           {:else}<Toggle bind:checked={identity} label="Karakter kimliği" />{/if}
           <span class="dim">{noCast ? 'Seçilen seçenekle karakter çizilmediği için kapalı.'
@@ -323,6 +466,8 @@
         {:else}
           <button class="btn ghost" disabled={Boolean(app.artJob)} onclick={() => (replanning = true)}>Baştan planla</button>
           <button class="btn ghost" onclick={remove}><Icon name="trash" size={15} />Sil</button>
+          <button class="btn" disabled={Boolean(app.artJob) || !shown.length} title="Sahneler aynı kalır, görseller yeni tarzla yeniden üretilir"
+            onclick={() => (restyling ? (restyling = false) : openRestyle())}><Icon name="sparkles" size={15} />Tarzı değiştir</button>
           <button class="btn" disabled={Boolean(app.artJob) || !shown.length} onclick={regenerateAll}><Icon name="refresh" size={15} />Hepsini yeniden üret</button>
           <button class="btn primary" disabled={Boolean(app.artJob) || !missing || !options?.workflow.ok} onclick={() => generate()}>
             <Icon name="image" size={15} />{!missing ? 'Hepsi üretildi' : missing === shown.length ? 'Görselleri üret' : `Eksikleri üret (${missing})`}</button>
@@ -330,12 +475,79 @@
       </div>
       {#if generating}<div class="track"><i style:width="{pct(job.done, job.total)}%"></i></div>{/if}
 
+      {#if restyling}
+        <div class="look restyle">
+          <b>Tarzı değiştir</b>
+          <p class="dim">Plan ve sahne istemleri aynen kalır; yalnızca her görselin başına eklenen stil kılavuzu ve tarzın LoRA'sı değişir.
+            Görseller aynı seed'lerle yeni tarzda yeniden üretilir (karakter kimliği açıksa portreler de).</p>
+          <div class="row">
+            <span class="dim lead">Hazır tarz</span>
+            {#each plainPresets as entry (entry.id)}
+              <button class="chip" class:on={restylePreset === entry.id} title={entry.note} onclick={() => pickPreset(entry, true)}>{entry.label}</button>
+            {/each}
+          </div>
+          {#if loraPresets.length}
+            <div class="row">
+              <span class="dim lead">LoRA tarzı</span>
+              {#each loraPresets as entry (entry.id)}
+                <button class="chip" class:on={restylePreset === entry.id} title={`${entry.note}\nLoRA: ${entry.lora}`}
+                  onclick={() => pickPreset(entry, true)}>{entry.label}</button>
+              {/each}
+            </div>
+            {#if restyleCheck}
+              <div class="lora-note" class:bad={restyleCheck.ok === false}>
+                <Icon name={restyleCheck.ok === false ? 'alert' : 'check'} size={14} /><span>{restyleCheck.message}</span>
+              </div>
+            {/if}
+          {/if}
+          <label class="l" for="art-restyle-note">Yeni tarz <small>Dil modeli stil kılavuzunu bu yöne göre yeniden yazar.</small></label>
+          <textarea id="art-restyle-note" class="field" rows="2" bind:value={restyleNote}
+            placeholder="Örn. kara kalem eskiz, soluk renkler, daha karanlık ışık"></textarea>
+          <div class="row">
+            <Toggle bind:checked={restyleRewrite} label="Stil kılavuzunu dil modeli yeniden yazsın" />
+            <span class="dim">{restyleRewrite ? '' : 'Kapalıyken stil kılavuzu olduğu gibi kalır; yalnızca tarz ve LoRA değişir.'}</span>
+          </div>
+          <div class="row end">
+            <button class="btn ghost" onclick={() => (restyling = false)}>Vazgeç</button>
+            <button class="btn primary" disabled={restyleBusy || Boolean(app.artJob) || !options?.workflow.ok || (!restyleNote.trim() && !restylePreset)}
+              onclick={applyRestyle}><Icon name="refresh" size={15} />{restyleBusy ? 'Stil yazılıyor…' : 'Uygula ve hepsini yeniden üret'}</button>
+          </div>
+        </div>
+      {/if}
+
       <details class="look" open={!scenes.some((s) => s.url)}>
         <summary>Stil ve karakterler</summary>
         <label class="l" for="art-style">Stil kılavuzu <small>Her görselin başına aynen eklenir. Değiştirmek planı yeniden yaptırmaz; kaydedip "Hepsini yeniden üret" deyin.</small></label>
         <textarea id="art-style" class="field" rows="4" bind:value={style} onchange={saveStyle}></textarea>
-        <label class="l" for="art-chars">Karakterler <small>Satır başına "Ad: görünüş". Sahne istemlerine dil modeli kopyalar; yeni sahnelere yansır, var olan istemler değişmez.</small></label>
+        <label class="l" for="art-chars">Karakterler <small>Satır başına "Ad: görünüş"; görünüm değişimi "Ad [5. bölüm]: yeni görünüş". Sahne istemlerine dil modeli kopyalar; yeni sahnelere yansır, var olan istemler değişmez.</small></label>
         <textarea id="art-chars" class="field" rows="3" bind:value={characters} onchange={saveCharacters}></textarea>
+        <div class="row">
+          <Toggle checked={Boolean(plan.place_identity)} disabled={Boolean(app.artJob)} label="Mekân kimliği" onchange={setPlaceIdentity} />
+          <span class="dim">Sahnenin mekânının tarifi her görselin istemine eklenir.</span>
+        </div>
+        {#if plan.place_identity}
+          <label class="l" for="art-places">Mekânlar <small>Satır başına "Ad: kalıcı görünüş". Tarifi değiştirmek o mekândaki görsellere yeniden üretince yansır.</small></label>
+          <textarea id="art-places" class="field" rows="3" bind:value={places} onchange={savePlaces}></textarea>
+        {/if}
+        <div class="row">
+          <span class="dim">RTX büyütme</span>
+          <div class="seg">
+            {#each [0, ...(options?.upscales ?? [])] as value (value)}
+              <button class:on={(plan.upscale ?? 0) === value} disabled={Boolean(app.artJob)} onclick={() => pickUpscale(value, true)}>{UPSCALE_LABEL(value)}</button>
+            {/each}
+          </div>
+          {#if unscaled}
+            <button class="btn sm" disabled={Boolean(app.artJob)} onclick={upscaleExisting}><Icon name="image" size={13} />Var olanları büyüt ({unscaled})</button>
+          {/if}
+        </div>
+        {#if upscaleCheck}
+          <div class="lora-note left" class:bad={upscaleCheck.ok === false}>
+            <Icon name={upscaleCheck.ok === false ? 'alert' : 'check'} size={14} /><span>{upscaleCheck.message}</span>
+          </div>
+        {/if}
+        {#if plan.openers || plan.look_changes}
+          <div class="dim">{[plan.openers && 'Bölüm açılış görseli', plan.look_changes && 'görünüm değişimi'].filter(Boolean).join(' · ')} açık</div>
+        {/if}
         {#if plan.lora}
           <div class="row lora">
             <span><b>LoRA:</b> {plan.lora.label}{#if plan.lora.trigger} · tetik <code>{plan.lora.trigger}</code>{/if}</span>
@@ -388,8 +600,17 @@
             </div>
             <div class="meta">
               <b class="ellipsis" title={scene.title}>{scene.title}</b>
-              <span class="dim">Bölüm {scene.section + 1} · cümle {scene.start + 1}</span>
+              <span class="dim">{[scene.opening ? `Bölüm ${scene.section + 1} açılışı` : `Bölüm ${scene.section + 1} · cümle ${scene.start + 1}`,
+                scene.importance && `önem ${scene.importance}/10`, scene.upscaled && `${UPSCALE_LABEL(scene.upscaled)} büyük`].filter(Boolean).join(' · ')}</span>
             </div>
+            {#if plan.place_identity && placeNames.length}
+              <select class="field place" value={scene.place ?? ''} disabled={Boolean(app.artJob)} title="Sahnenin mekânı: kalıcı tarifi isteme eklenir"
+                onchange={(e) => updateScene(scene, { place: e.currentTarget.value })}>
+                <option value="">Mekân: yok</option>
+                {#each placeNames as name (name)}<option value={name}>Mekân: {name}</option>{/each}
+                {#if scene.place && !placeNames.includes(scene.place)}<option value={scene.place}>Mekân: {scene.place} (listede yok)</option>{/if}
+              </select>
+            {/if}
             {#if plan.identity && faces.length}
               <div class="cast" title="Görselde kimliği korunacak karakterler (en fazla iki referans kullanılır)">
                 {#each faces as character (character.name)}
@@ -443,6 +664,10 @@
   .row .lead { min-width: 78px; }
   .lora-note { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--secondary); padding-left: 86px; }
   .lora-note.bad { color: var(--warning); }
+  .lora-note.left { padding-left: 0; }
+  .restyle { gap: 10px; padding: 12px; }
+  .restyle p { margin: 0; font-size: 12px; line-height: 1.5; }
+  .place { height: 28px; font-size: 12px; padding: 0 8px; }
   .row.lora { margin-top: 6px; justify-content: space-between; }
   .row.lora code { font-size: 12px; }
   .num { width: 70px; height: 28px; font-size: 12px; margin-left: 6px; }

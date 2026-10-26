@@ -50,6 +50,7 @@ class FakeComfy:
 
     def __init__(self, fail=None):
         self.prompts, self.calls, self.fail, self.uploads, self.loras = [], [], fail, [], []
+        self.rtx = False   # F209 RTX Video Super Resolution dugumu kurulu mu
         owner = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -77,6 +78,8 @@ class FakeComfy:
                                                                                  'type': 'output'}]}}}})
                 if self.path.startswith('/view?'):
                     return self._send(200, PNG, raw=True)
+                if self.path == '/object_info/RTXVideoSuperResolution':
+                    return self._send(200, {'RTXVideoSuperResolution': {'input': {}}} if owner.rtx else {})
                 if self.path == '/object_info/LoraLoaderModelOnly':
                     return self._send(200, {'LoraLoaderModelOnly': {'input': {'required': {
                         'model': ['MODEL'], 'lora_name': ['COMBO', {'options': owner.loras}]}}}})
@@ -407,6 +410,173 @@ class PlanTest(unittest.TestCase):
         self.assertIn('kişiyi çıkar', book_art.refine_prompt('a man in a hall', 'kişiyi çıkar')[1])
 
 
+class OptionsTest(unittest.TestCase):
+    """F209: seyrek siklik ve onemli anlar, bolum acilis gorseli, mekan kimligi, gorunus degisimi, tarz degisikligi."""
+
+    @staticmethod
+    def style_reply(user, **extra):
+        return json.dumps(dict({'style': 'muted watercolour', 'characters': [{'name': 'Ana', 'look': 'red coat'}]},
+                               **extra))
+
+    def test_density_levels(self):
+        self.assertEqual(list(book_art.DENSITY), ['sparse', 'rare', 'low', 'medium', 'high'])
+        self.assertEqual([book_art.focused(d) for d in book_art.DENSITY], [True, True, True, False, False])
+        self.assertEqual([book_art.selective(d) for d in book_art.DENSITY], [True, True, False, False, False])
+        self.assertEqual(book_art.scene_count(14000, 'rare'), 3)     # adaylar: 14000 * 3 / 20000 yukari
+        self.assertEqual(book_art.scene_count(14000, 'sparse'), 1)
+        self.assertEqual(book_art.scene_count(200, 'sparse'), 0)
+        system, user = book_art.scene_prompt('s', [], ['a', 'b', 'c'], 0, 3, 2, focus=True)
+        self.assertIn('moments of it that matter most', user)
+        self.assertIn('"importance"', user)
+        self.assertNotIn('Split it at', user)
+
+    def test_focused_scene_not_pulled_to_chunk_start(self):
+        raw = json.dumps({'scenes': [{'start': 5, 'title': 'T', 'prompt': 'p', 'importance': '8.6'},
+                                     {'start': 7, 'title': 'U', 'prompt': 'q', 'importance': 'çok'}]})
+        sentences = [f's{i}' for i in range(10)]
+        scenes = book_art.parse_scenes(raw, 2, 10, sentences, first=False)[0]
+        self.assertEqual([(s['start'], s['importance']) for s in scenes], [(5, 9), (7, 5)])
+        self.assertEqual(book_art.parse_scenes(raw, 2, 10, sentences)[0][0]['start'], 2)
+
+    def test_select_moments(self):
+        candidates = [{'pos': 0, 'importance': 3}, {'pos': 100, 'importance': 9}, {'pos': 120, 'importance': 8},
+                      {'pos': 900, 'importance': 7}]
+        self.assertEqual([c['pos'] for c in book_art.select_moments(candidates, 2, 300)], [100, 900])
+        # aralik birakan aday kalmazsa aralik gozetilmeden, yine onem sirasiyla tamamlanir
+        self.assertEqual([c['pos'] for c in book_art.select_moments(candidates, 3, 300)], [100, 120, 900])
+        self.assertEqual(len(book_art.select_moments(candidates, 9, 300)), 4)
+        # esit puanda secilmislere en uzak olan: gorseller kitabin basina yigilmaz
+        flat = [{'pos': pos, 'importance': 9} for pos in range(0, 1100, 100)]
+        self.assertEqual([c['pos'] for c in book_art.select_moments(flat, 3, 0)], [0, 500, 1000])
+
+    def test_sparse_plan_picks_most_important(self):
+        sections = book(400)   # ~40 bin karakter, 3 parca
+        prompts = []
+
+        def ask(system, user):
+            prompts.append(user)
+            if 'JSON shape: {"style"' in user:
+                return self.style_reply(user)
+            first = int(user.split('number of the sentence where the moment begins (')[1].split(' ')[0])
+            # her parcada iki aday: ikinci parcanin ortasindaki an en onemlisi
+            return json.dumps({'scenes': [{'start': first + 3, 'title': 'A', 'prompt': f'a{first}', 'importance': 4},
+                                          {'start': first + 60, 'title': 'B', 'prompt': f'b{first}',
+                                           'importance': 9 if first else 6}]})
+
+        saved = []
+        plan = book_art.new_plan(density='rare')
+        result = book_art.plan_book(sections, ask, plan, save=lambda p: saved.append(json.loads(json.dumps(p))))
+        self.assertTrue(result['complete'])
+        self.assertTrue(all('moments of it that matter most' in p for p in prompts[1:]))
+        self.assertEqual(len(result['scenes']), 2)   # 40 bin / 20 bin
+        self.assertTrue(all(s['importance'] == 9 for s in result['scenes']), result['scenes'])
+        self.assertNotIn('candidates', result)
+        self.assertTrue(all('pos' not in s and s['seed'] and s['start'] > 0 for s in result['scenes']))
+        self.assertEqual([s['start'] for s in result['scenes']], sorted(s['start'] for s in result['scenes']))
+        # yarim plan adaylari saklar, kaldigi yerden surer
+        half = next(p for p in saved if p['next_chunk'] == 1)
+        self.assertEqual(len(half['candidates']), 2)
+        prompts.clear()
+        again = book_art.plan_book(sections, ask, half)
+        self.assertEqual(len(prompts), 2)
+        self.assertEqual(len(again['scenes']), 2)
+
+    def test_chapter_openers(self):
+        sections = book(3, 60, 60)
+        prompts = []
+
+        def ask(system, user):
+            prompts.append(user)
+            if 'JSON shape: {"style"' in user:
+                return self.style_reply(user)
+            first = int(user.split('the first scene starts at ')[1].split(')')[0])
+            return json.dumps({'scenes': [{'start': first, 'title': 'T', 'prompt': f'scene {first}'}],
+                               'opening': {'title': 'Açılış', 'prompt': 'A wide valley at dawn.'}})
+
+        result = book_art.plan_book(sections, ask, book_art.new_plan(options={'openers': True}))
+        self.assertTrue(all('"opening" (once' in p for p in prompts[1:]))
+        scenes = [(s['id'], s['start'], bool(s.get('opening'))) for s in result['scenes']]
+        self.assertEqual(scenes, [('1-open', 0, True), ('1-1', 1, False), ('2-open', 0, True), ('2-1', 1, False)])
+        here, _carry = book_art.section_images(
+            {'scenes': [dict(s, image='x.png') for s in reversed(result['scenes'])]}, 1)
+        self.assertTrue(here[0]['opening'])
+        # kapaliyken istemde yok
+        prompts.clear()
+        book_art.plan_book(sections, ask, book_art.new_plan())
+        self.assertFalse(any('"opening"' in p for p in prompts))
+
+    def test_place_identity(self):
+        prompts = []
+
+        def ask(system, user):
+            prompts.append(user)
+            if 'JSON shape: {"style"' in user:
+                return self.style_reply(user, places=[{'name': 'Maden', 'look': 'rusty steel shaft with hazard lamps'}])
+            return json.dumps({'scenes': [{'start': 0, 'title': 'T', 'prompt': 'Two miners wait.', 'place': 'Maden',
+                                           'places': [{'name': 'Köy', 'look': 'stone houses on a hill'}]}]})
+
+        plan = book_art.plan_book(book(60), ask, book_art.new_plan(options={'places': True}))
+        self.assertIn('3. "places"', prompts[0])
+        self.assertIn('- Maden: rusty steel shaft', prompts[1])
+        self.assertEqual([p['name'] for p in plan['places']], ['Maden', 'Köy'])
+        scene = plan['scenes'][0]
+        self.assertEqual(scene['place'], 'Maden')
+        self.assertEqual(book_art.scene_text(plan, scene),
+                         'Two miners wait. Setting: rusty steel shaft with hazard lamps.')
+        self.assertEqual(book_art.scene_text(dict(plan, place_identity=False), scene), 'Two miners wait.')
+        prompts.clear()
+        book_art.plan_book(book(60), ask, book_art.new_plan())
+        self.assertFalse(any('"place"' in p or '"places"' in p for p in prompts))
+
+    def test_look_changes(self):
+        sections = book(150, 150)
+        prompts = []
+
+        def ask(system, user):
+            prompts.append(user)
+            if 'JSON shape: {"style"' in user:
+                return self.style_reply(user)
+            first = int(user.split('the first scene starts at ')[1].split(')')[0])
+            reply = {'scenes': [{'start': first, 'title': 'T', 'prompt': 'p'}]}
+            if first == 0 and '- Ana: red coat' in user:
+                reply['changes'] = [{'name': 'Ana', 'start': 2, 'look': 'grey-haired woman in a black uniform'},
+                                    {'name': 'Yok', 'start': 2, 'look': 'x'}, {'name': 'Ana', 'start': 9999, 'look': 'y'}]
+            return json.dumps(reply)
+
+        plan = book_art.plan_book(sections, ask, book_art.new_plan(options={'changes': True}))
+        self.assertIn('"changes"', prompts[1])
+        ana = plan['characters'][0]
+        self.assertEqual(ana['changes'], [{'section': 0, 'start': 2, 'look': 'grey-haired woman in a black uniform'}])
+        self.assertIn('- Ana: grey-haired woman in a black uniform', prompts[-1])   # sonraki bolumde yeni gorunus
+        self.assertEqual(book_art.look_at(ana, 0, 1), 'red coat')
+        self.assertEqual(book_art.look_at(ana, 1, 0), 'grey-haired woman in a black uniform')
+        scene = {'section': 1, 'start': 0, 'prompt': 'A grey-haired woman in a black uniform walks.'}
+        self.assertEqual(book_art.scene_people(scene, plan['characters'])[0]['look'], ana['changes'][0]['look'])
+        # kutudan duzenleme degisimleri korur, karakter olmasin secenegiyle kapali
+        self.assertEqual(book_art.clean_characters([dict(ana)])[0]['changes'], ana['changes'])
+        self.assertFalse(book_art.new_plan(modifiers=['no-people'], options={'changes': True})['look_changes'])
+
+    def test_restyle_and_upscale_values(self):
+        system, user = book_art.restyle_prompt('Oil painting, warm light.', 'kara kalem eskiz', ['no-faces'])
+        self.assertIn('ignore its medium, technique, colour palette and lighting):\nOil painting, warm light.', user)
+        # dunya cumlesi kodda eklenir (model eski teknigi karistirmasin); zaten varsa iki kez yazilmaz
+        raw = json.dumps({'world': 'Near-future mining colony.', 'style': 'Pencil sketch on rough paper.'})
+        self.assertEqual(book_art.parse_restyle(raw), 'Pencil sketch on rough paper. Near-future mining colony.')
+        raw = json.dumps({'world': 'Mining colony', 'style': 'Pencil sketch of a mining colony.'})
+        self.assertEqual(book_art.parse_restyle(raw), 'Pencil sketch of a mining colony.')
+        self.assertRaises(ValueError, book_art.parse_restyle, '{"world": "x"}')
+        self.assertIn('"kara kalem eskiz"', user)
+        self.assertIn('Hard rule: Faces', user)
+        plan = book_art.restyle(book_art.new_plan('eski', 'watercolor'), 'dark-fantasy', 'karanlık')
+        self.assertEqual((plan['preset'], plan['note'], plan['lora']['trigger']),
+                         ('dark-fantasy', 'karanlık', 'Dark Fantasy Art Style,'))
+        self.assertEqual([book_art.clean_upscale(v) for v in (2, '3', 5, None, 'x')], [2.0, 3.0, 0, 0, 0])
+        workflow = comfy_client.upscale_workflow('aktar-x.png', 2)
+        self.assertEqual(workflow['2']['class_type'], 'RTXVideoSuperResolution')
+        self.assertEqual(workflow['2']['inputs']['resize_type.scale'], 2.0)
+        self.assertEqual(workflow['3']['inputs']['images'], ['2', 0])
+
+
 class StoreTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -662,6 +832,73 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(shown['scenes'], [])
         self.assertEqual(read.call_count, 1)
         self.assertTrue(json.loads((store.folder('ab12cd34ef') / 'plan.json').read_text(encoding='utf-8'))['numbered'])
+
+    def test_restyle_keeps_prompts(self):
+        """F209: tarz degisince istemler ve seed'ler kalir; stil kilavuzu dil modeliyle yeniden yazilir, LoRA plana."""
+        from unittest.mock import patch
+        store = self.identity_plan(identity=False)
+        asked = []
+
+        class FakeClient:
+            def __init__(self, cfg, log=None):
+                self.cfg = {'model': 'sohbet'}
+
+            def chat(self, messages, temperature=None, max_tokens=None):
+                asked.append(messages[1]['content'])
+                return '{"style": "Pencil sketch, cross-hatching, sepia paper."}'
+
+        before = store.load('ab12cd34ef')
+        self.assertIn('error', self.bridge.art_restyle('ab12cd34ef', '', ''))
+        with patch('app_core.Client', FakeClient), patch('app_core.load_config', return_value={}), \
+                patch('app_core.keep_loaded', return_value=['sohbet:1']), patch('app_core.unload_models'):
+            plan = self.bridge.art_restyle('ab12cd34ef', 'krea-sketching', 'kara kalem')['plan']
+            self.assertIn('Rusty mine, fog', asked[0])   # eski stil kilavuzu dil modeline gider
+            self.assertEqual(plan['style'], 'Pencil sketch, cross-hatching, sepia paper.')
+            self.assertEqual(plan['lora']['trigger'], 'Bradhamel art style.')
+            self.assertEqual([(s['prompt'], s['seed']) for s in plan['scenes']],
+                             [(s['prompt'], s['seed']) for s in before['scenes']])
+            # yeniden yazmadan: stil aynen kalir, yalnizca tarz degisir
+            plain = self.bridge.art_restyle('ab12cd34ef', 'watercolor', 'suluboya', False)['plan']
+        self.assertEqual(len(asked), 1)
+        self.assertEqual((plain['style'], plain['preset'], plain['lora']), (plan['style'], 'watercolor', None))
+
+    def test_upscale_after_generation(self):
+        """F209: buyutme aciksa uretilen gorsel geri yuklenip RTX is akisiyla buyutulur; dugum yoksa baslamaz."""
+        store = self.identity_plan(identity=False)
+        self.assertEqual(self.bridge.art_plan_save('ab12cd34ef', {'upscale': 2})['plan']['upscale'], 2.0)
+        self.assertIn('Nvidia RTX Nodes', self.bridge.art_generate('ab12cd34ef')['error'])
+        self.assertFalse(self.bridge.art_upscale_check()['ok'])
+        self.fake.rtx = True
+        self.assertTrue(self.bridge.art_upscale_check()['ok'])
+        self.assertTrue(self.bridge.art_generate('ab12cd34ef')['started'])
+        self.assertEqual(self.finish()['done'], 2)
+        kinds = [next(iter({n['class_type'] for n in sent.values()} & {'KSampler', 'RTXVideoSuperResolution'}))
+                 for sent in self.fake.prompts]
+        self.assertEqual(kinds, ['KSampler', 'RTXVideoSuperResolution'] * 2)
+        self.assertEqual(self.fake.prompts[1]['2']['inputs']['resize_type.scale'], 2.0)
+        self.assertEqual(len(self.fake.uploads), 2)
+        self.assertTrue(all(s['upscaled'] == 2.0 for s in store.load('ab12cd34ef')['scenes']))
+        self.assertEqual(book_art.not_upscaled(store.load('ab12cd34ef')), [])
+        # katsayi degisince var olanlar yeniden uretilmeden aradaki fark kadar buyur
+        self.bridge.art_plan_save('ab12cd34ef', {'upscale': 3})
+        self.fake.prompts.clear()
+        self.assertTrue(self.bridge.art_generate('ab12cd34ef', upscale_only=True)['started'])
+        self.assertEqual(self.finish()['done'], 2)
+        self.assertEqual([sent['2']['inputs']['resize_type.scale'] for sent in self.fake.prompts], [1.5, 1.5])
+        self.assertTrue(all(s['upscaled'] == 3.0 for s in store.load('ab12cd34ef')['scenes']))
+        self.bridge.art_plan_save('ab12cd34ef', {'upscale': 0})
+        self.assertIn('kapalı', self.bridge.art_generate('ab12cd34ef', upscale_only=True)['error'])
+
+    def test_place_text_sent_to_comfy(self):
+        store = self.identity_plan(identity=False)
+        store.update('ab12cd34ef', lambda p: p.update(place_identity=True,
+                                                      places=[{'name': 'Maden', 'look': 'rusty shaft'}]))
+        self.bridge.art_scene_update('ab12cd34ef', '1-9', {'place': 'Maden'})
+        self.assertTrue(self.bridge.art_generate('ab12cd34ef', ['1-9'])['started'])
+        self.finish()
+        self.assertEqual(self.fake.prompts[0]['97']['inputs']['positive'], 'An empty mine shaft. Setting: rusty shaft.')
+        cleared = self.bridge.art_scene_update('ab12cd34ef', '1-9', {'place': ''})['plan']['scenes'][1]
+        self.assertNotIn('place', cleared)
 
 
 if __name__ == '__main__':

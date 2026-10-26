@@ -2,6 +2,16 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.36.0 — 2026-10-26
+
+### Yeni
+- **Kitap görsellerinde daha seyrek sıklık (F209):** Sıklık seçeneklerine "Seyrek" (yaklaşık 10 sayfada bir) ve "Çok seyrek" (yaklaşık 25 sayfada bir) eklendi. Az ve daha seyrek sıklıkta dil modeli kitabı sahne değişimlerinden bölmüyor; dönüm noktaları, doruk anlar, güçlü ya da çarpıcı sahneler ve önemli karakterlerin ilk göründüğü yerler gibi önemli anları seçiyor. Seyrek ve Çok seyrekte her bölümden önem puanlı aday anlar toplanıyor, plan bitince kitabın tamamından en önemlileri birbirine çok yakın düşmeyecek şekilde seçiliyor; eşit önemde kitaba yayılanlar öne geçiyor. Sahne kartında önem puanı görünüyor.
+- **Tarzı değiştir:** İnceleme ekranında "Baştan planla"dan ayrı bir düğme. Plan ve sahne istemleri aynen kalıyor; yeni hazır tarz, LoRA tarzı ya da notla dil modeli yalnızca stil kılavuzunu yeniden yazıyor (istenirse kılavuz olduğu gibi kalır, yalnızca tarz ve LoRA değişir). Ardından bütün görseller aynı seed'lerle yeni tarzda yeniden üretiliyor; karakter kimliği açıksa kullanıcının kendi koymadığı portreler de yenileniyor.
+- **Bölüm açılış görseli (seçenek):** Her bölümün başında, ilk satırlar okunurken bölümün mekânını ve havasını gösteren geniş bir görsel. Tam ekran okuyucuda ve sesli kitap videosunda bölümün ilk cümlesinde görünüyor. Kısa bölümler ve hikâye dışı ön kısım (yazarın hayatı, künye) açılış görseli almıyor.
+- **Mekân kimliği (seçenek):** Sık geçen mekânlara sabit bir tarif yazılıyor; sahne yalnızca mekânın adını taşıyor, kalıcı tarif üretimde isteme ekleniyor. Mekân tarifleri inceleme ekranında düzenlenebiliyor ve yeniden üretilen görsellere yansıyor; her sahnenin mekânı karttan değiştirilebiliyor.
+- **Görünüm değişimi (seçenek):** Karakter yaşlanır, kıyafeti, saçı değişir ya da yara izi kalırsa sonraki sahneler yeni görünüşle yazılıyor. Karakterler kutusunda "Ad [5. bölüm]: yeni görünüş" satırıyla düzenlenebiliyor; karakter kimliği açıkken de sahnenin yerindeki görünüş kullanılıyor (portre aynı yüz olarak kalıyor).
+- **RTX büyütme (seçenek):** Üretilen her görsel ComfyUI'de NVIDIA RTX Video Super Resolution ile 1,5×, 2×, 3× ya da 4× büyütülüyor. Kullanıcının iş akışına dokunulmuyor; Aktar görseli geri yükleyip kendi küçük iş akışıyla büyütüyor. Var olan görseller yeniden üretilmeden büyütülebiliyor; katsayı değişince yalnızca aradaki fark kadar büyütülüyor. ComfyUI'de "Nvidia RTX Nodes" eklentisi ve RTX ekran kartı gerekiyor.
+
 ## 2.35.0 — 2026-10-26
 
 ### Yeni

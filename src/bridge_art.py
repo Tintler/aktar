@@ -8,6 +8,7 @@ Ayarlar ui.json 'art' altinda: comfy_url, size. Is akisi APP_DIR/kitap-gorseller
 Karakter kimligi (F201, plan['identity'] acikken): ikinci is akisi kimlik-is-akisi.json; art_generate once eksik ya da
 istenen portreleri ana is akisiyla uretir, sonra karakterli sahneyi portre(ler) yuklenerek kimlik is akisiyla.
 LoRA'li tarz (F202, plan['lora']): uretim basinda dosya ComfyUI'nin LoRA listesinde aranir, iki is akisina eklenir.
+F209: art_restyle tarzi degistirir (istemler kalir), plan['upscale'] aciksa her gorsel RTX ile buyutulur.
 """
 from __future__ import annotations
 
@@ -114,6 +115,7 @@ class ArtMixin:
         prefs = self._art_prefs()
         return {'presets': list(book_art.PRESETS), 'modifiers': list(book_art.MODIFIERS),
                 'no_cast': list(book_art.NO_CAST), 'densities': list(book_art.DENSITY), 'sizes': list(book_art.SIZES),
+                'upscales': list(book_art.UPSCALES),
                 'url': self._art_url(), 'size': prefs.get('size') if prefs.get('size') in book_art.SIZES
                 else book_art.DEFAULT_SIZE, 'workflow': self.art_workflow_info(),
                 'identity_workflow': self.art_identity_workflow_info()}
@@ -180,6 +182,14 @@ class ArtMixin:
             return {'ok': False, 'message': str(error)}
         return {'ok': True, 'message': f'LoRA hazır: {name}'}
 
+    def art_upscale_check(self):
+        """F209: RTX buyutme dugumu ComfyUI'de var mi: {'ok', 'message'}."""
+        try:
+            found = comfy_client.has_node(self._art_url(), comfy_client.UPSCALE_NODE)
+        except comfy_client.ComfyError as error:
+            return {'ok': False, 'message': str(error)}
+        return {'ok': found, 'message': 'RTX Video Super Resolution hazır.' if found else comfy_client.UPSCALE_MISSING}
+
     def art_check(self, url=None):
         """ComfyUI'nin saglik denetimi ve is akisi (Ayarlar'daki "Bağlantıyı dene")."""
         try:
@@ -207,11 +217,11 @@ class ArtMixin:
             return _error(error)
 
     def art_plan_create(self, book, sections, note='', preset='', density='medium', title='', resume=False,
-                        identity=False, modifiers=None):
+                        identity=False, modifiers=None, options=None):
         """Dil modeliyle sahne planini arka planda cikarir. `sections`: [{'sentences', 'breaks'}] okuyucunun
         bolmesiyle. `resume`: yarim kalan plan kaldigi yerden (not ve siklik onunki). `identity`: karakter kimligi
         (sahnelere gorunen karakterler yazilir). `modifiers`: tarzdan bagimsiz secenekler (book_art.MODIFIERS).
-        Olay 'art' (stage 'plan')."""
+        `options` (F209): openers, places, changes, upscale (book_art.new_plan). Olay 'art' (stage 'plan')."""
         try:
             store = self._art_store()
             store.folder(book)
@@ -229,7 +239,7 @@ class ArtMixin:
             plan = old
         else:
             size = self._art_prefs().get('size') or book_art.DEFAULT_SIZE
-            plan = book_art.new_plan(note, preset, density, size, title, identity, modifiers or ())
+            plan = book_art.new_plan(note, preset, density, size, title, identity, modifiers or (), options)
         if not hasattr(self, '_art_lock'):
             self._art_lock = threading.Lock()
         with self._art_lock:
@@ -284,8 +294,8 @@ class ArtMixin:
         return {'started': True, 'total': total}
 
     def art_plan_save(self, book, values):
-        """Gozden gecirmede degisen stil, karakterler (portreler ada gore korunur) ve karakter kimligi anahtari
-        (gorseller kendiliginden yeniden uretilmez)."""
+        """Gozden gecirmede degisen stil, karakterler (portreler ada gore korunur), karakter kimligi anahtari; F209
+        mekanlar, mekan kimligi ve buyutme katsayisi (gorseller kendiliginden yeniden uretilmez)."""
         values = values or {}
 
         def change(plan):
@@ -301,6 +311,12 @@ class ArtMixin:
                 plan['identity'] = bool(values['identity'])
             if 'lora_strength' in values and plan.get('lora'):   # LoRA'nin gucu (0-2)
                 plan['lora']['strength'] = round(min(2.0, max(0.0, float(values['lora_strength']))), 2)
+            if 'places' in values:
+                plan['places'] = book_art.clean_places(values['places'])
+            if 'place_identity' in values:
+                plan['place_identity'] = bool(values['place_identity'])
+            if 'upscale' in values:
+                plan['upscale'] = book_art.clean_upscale(values['upscale'])
 
         try:
             return {'plan': self._art_view(book, self._art_store().update(book, change))}
@@ -327,6 +343,12 @@ class ArtMixin:
                     scene.pop('cast', None)
                 else:
                     scene['cast'] = book_art.clean_cast(values['cast'])
+            if 'place' in values:   # F209 mekan kimligi: sahnenin mekani ('' yok)
+                place = ' '.join(str(values['place'] or '').split())[:60]
+                if place:
+                    scene['place'] = place
+                else:
+                    scene.pop('place', None)
             if values.get('reseed'):
                 scene['seed'] = random.randrange(1, 2 ** 31)
 
@@ -343,44 +365,87 @@ class ArtMixin:
             return _error('Ne değişsin? Kısa bir not yazın: "daha karanlık", "kişiyi çıkar" gibi.')
         if self._art_running():
             return _error('Görseller üretilirken düzeltme yapılamaz; önce durdurun.')
-        from app_core import Client, keep_loaded, load_config, unload_models
-        client, loaded = None, []
         try:
             store = self._art_store()
             plan = store.load(book)
             if not plan:
                 return _error('Bu kitabın görsel planı yok.')
             scene = store.scene(plan, scene_id)
-            comfy_client.free(self._art_url())
-            client = Client(load_config(), log=self._log)
-            loaded = keep_loaded(client, [client.cfg.get('model')], self._log)
-            system, user = book_art.refine_prompt(scene['prompt'], instruction, plan.get('modifiers'))
-            raw = client.chat([{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
-                              temperature=0.2, max_tokens=book_art.MAX_TOKENS)
+            raw = self._art_ask(*book_art.refine_prompt(scene['prompt'], instruction, plan.get('modifiers')),
+                                temperature=0.2)
             prompt = book_art.parse_refined(raw, scene['prompt'])
         except (OSError, ValueError, RuntimeError) as error:
             return _error(error)
+        return self.art_scene_update(book, scene_id, {'prompt': prompt})
+
+    def _art_ask(self, system, user, temperature=0.4):
+        """Tek dil modeli istegi (bloklar): ComfyUI modeli once bosaltilir, dil modeli sonra."""
+        from app_core import Client, keep_loaded, load_config, unload_models
+        client, loaded = None, []
+        try:
+            comfy_client.free(self._art_url())
+            client = Client(load_config(), log=self._log)
+            loaded = keep_loaded(client, [client.cfg.get('model')], self._log)
+            return client.chat([{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
+                               temperature=temperature, max_tokens=book_art.MAX_TOKENS)
         finally:
             if loaded:
                 unload_models(client, loaded)
-        return self.art_scene_update(book, scene_id, {'prompt': prompt})
+
+    def art_restyle(self, book, preset='', note='', rewrite=True):
+        """F209 toplu stil degisikligi: sahne istemleri ve plan aynen kalir; not, hazir tarz ve LoRA'si degisir, stil
+        kilavuzu (`rewrite`) dil modeliyle yeni yone gore yeniden yazilir. Gorselleri arayuz sonra yeniden uretir
+        (art_generate all_scenes). Bloklar. Donen: guncel plan."""
+        note = ' '.join(str(note or '').split())
+        if not note and not preset:
+            return _error('Yeni tarzı seçin ya da kitap notuna yazın.')
+        if self._art_running():
+            return _error('Kitap görselleri için bir iş sürüyor; önce durdurun.')
+        try:
+            store = self._art_store()
+            plan = store.load(book)
+            if not plan:
+                return _error('Bu kitabın görsel planı yok.')
+            style = plan['style']
+            if rewrite:
+                raw = self._art_ask(*book_art.restyle_prompt(style, note, plan.get('modifiers')))
+                style = book_art.parse_restyle(raw)
+
+            def change(current):
+                book_art.restyle(current, preset, note)
+                current['style'] = style
+
+            plan = store.update(book, change)
+        except (OSError, ValueError, RuntimeError) as error:
+            return _error(error)
+        self._log(f'Kitap görselleri: tarz değişti ({preset or "not"}).')
+        return {'plan': self._art_view(book, plan)}
 
     # ------------------------------------------------------------------ uretim
-    def art_generate(self, book, scene_ids=None, title='', all_scenes=False, portraits=None):
+    def art_generate(self, book, scene_ids=None, title='', all_scenes=False, portraits=None, upscale_only=False):
         """Gorselleri ComfyUI ile arka planda uretir: `scene_ids` verilirse yalnizca onlar (varsa gorseli yenilenir),
         `all_scenes` butun sahneler (stil degisince), yoksa gorseli olmayanlar. `portraits`: yeniden uretilecek karakter
         portreleri (yeni seed; yalnizca portre istenirse sahne uretilmez). Karakter kimligi aciksa sahnelerdeki portresi
-        olmayan karakterlerin portresi once uretilir. Olay 'art' (stage 'generate')."""
+        olmayan karakterlerin portresi once uretilir. F209: planda buyutme aciksa her gorsel uretimden sonra RTX ile
+        buyutulur; `upscale_only` var olan gorselleri yeniden uretmeden buyutur (`scene_ids` yoksa buyutulmemis
+        olanlar). Olay 'art' (stage 'generate')."""
         try:
             store = self._art_store()
             plan = store.load(book)
             if not plan:
                 return _error('Bu kitabın görsel planı yok; önce planlayın.')
-            workflow = self._art_workflow()
+            workflow = None if upscale_only else self._art_workflow()
         except (OSError, ValueError, comfy_client.ComfyError) as error:
             return _error(error)
+        factor = plan.get('upscale') or 0
         ordered = sorted(plan['scenes'], key=lambda s: (s['section'], s['start']))
-        if scene_ids:
+        if upscale_only:
+            if not factor:
+                return _error('Bu kitapta büyütme kapalı.')
+            wanted = set(scene_ids or [s['id'] for s in book_art.not_upscaled(plan)])
+            targets = [s['id'] for s in ordered if s['id'] in wanted and s.get('image') and not s.get('skip')]
+            portraits = []
+        elif scene_ids:
             wanted = set(scene_ids)
             targets = [scene['id'] for scene in ordered if scene['id'] in wanted]
         elif portraits is not None and not all_scenes:
@@ -389,7 +454,7 @@ class ArtMixin:
             targets = [scene['id'] for scene in ordered if not scene.get('skip')]
         else:
             targets = [scene['id'] for scene in book_art.pending(plan)]
-        identity = bool(plan.get('identity'))
+        identity = bool(plan.get('identity')) and not upscale_only
         known = {c['name'].lower(): c['name'] for c in plan['characters']}
         faces = [known[name.lower()] for name in portraits or () if name.lower() in known] if identity else []
         renew = set(faces)
@@ -410,10 +475,13 @@ class ArtMixin:
         url = self._art_url()
         try:
             comfy_client.health(url)
-            loras = self._art_loras(url, plan.get('lora'))   # tarzin LoRA'si iki is akisina da
-            workflow = comfy_client.add_loras(workflow, loras)
-            if identity_workflow is not None:
-                identity_workflow = comfy_client.add_loras(identity_workflow, loras)
+            if factor and targets and not comfy_client.has_node(url, comfy_client.UPSCALE_NODE):
+                raise comfy_client.ComfyError(comfy_client.UPSCALE_MISSING)
+            if workflow is not None:
+                loras = self._art_loras(url, plan.get('lora'))   # tarzin LoRA'si iki is akisina da
+                workflow = comfy_client.add_loras(workflow, loras)
+                if identity_workflow is not None:
+                    identity_workflow = comfy_client.add_loras(identity_workflow, loras)
         except comfy_client.ComfyError as error:
             return _error(error)
         if not hasattr(self, '_art_lock'):
@@ -435,6 +503,24 @@ class ArtMixin:
                     uploaded[path.name] = comfy_client.upload_image(url, path.read_bytes(),
                                                                     f'aktar-{book[:12]}-{path.name}')
                 return uploaded[path.name]
+
+            def enlarge(scene_id, data, before):
+                """F209: gorseli planin buyutme katsayisina getirir (`before`: simdiki katsayisi, 0 ozgun boyut);
+                buyutulmus gorselde katsayi farki kadar, kuculecekse Pillow ile."""
+                scale = factor / (before or 1)
+                if abs(scale - 1) < 0.01:
+                    return data
+                if scale < 1:
+                    from io import BytesIO
+                    from PIL import Image
+                    with Image.open(BytesIO(data)) as image:
+                        buffer = BytesIO()
+                        image.resize((round(image.width * scale), round(image.height * scale)),
+                                     Image.LANCZOS).save(buffer, 'PNG')
+                    return buffer.getvalue()
+                name = comfy_client.upload_image(url, data, f'aktar-{book[:12]}-{scene_id}-kaynak.png')
+                return comfy_client.generate(url, comfy_client.upscale_workflow(
+                    name, scale, f'Aktar/{book[:12]}/{scene_id}-buyuk'), cancel)
 
             def work():
                 done = 0
@@ -465,22 +551,36 @@ class ArtMixin:
                         scene = store.scene(current, scene_id)
                         self._emit('art', {'book': book, 'title': title, 'stage': 'generate', 'done': done,
                                            'total': total, 'current': scene['title']})
+                        if upscale_only:
+                            data = store.image_path(book, scene).read_bytes()
+                            updated = store.write_image(book, scene_id, enlarge(scene_id, data, scene.get('upscaled')),
+                                                        upscaled=factor)
+                            done += 1
+                            shown = next(s for s in self._art_view(book, updated)['scenes'] if s['id'] == scene_id)
+                            self._emit('art', {'book': book, 'title': title, 'stage': 'generate', 'done': done,
+                                               'total': total, 'scene': shown})
+                            continue
                         prefix = f'Aktar/{book[:12]}/{scene_id}'
                         people = []
                         if identity_workflow is not None and current.get('identity'):
-                            people = [c for c in book_art.cast_of(scene, current['characters'])
+                            people = [c for c in book_art.scene_people(scene, current['characters'])
                                       if (store.portrait_path(book, c) or Path()).is_file()]
                             people = people[:len(comfy_client.references(identity_workflow))]
+                        text = dict(scene, prompt=book_art.scene_text(current, scene))   # F209 mekanin tarifiyle
                         if people:
                             filled = comfy_client.fill(identity_workflow, book_art.image_style(
-                                                           current, book_art.identity_prompt(scene, people, current['style'])),
+                                                           current, book_art.identity_prompt(text, people, current['style'])),
                                                        '', book_art.image_suffix(current), scene['seed'], size, prefix,
                                                        images=[upload(c) for c in people])
                         else:
-                            filled = comfy_client.fill(workflow, scene['prompt'], book_art.image_style(current, current['style']),
+                            filled = comfy_client.fill(workflow, text['prompt'], book_art.image_style(current, current['style']),
                                                        book_art.image_suffix(current), scene['seed'], size, prefix)
                         data = comfy_client.generate(url, filled, cancel)
-                        updated = store.write_image(book, scene_id, data)
+                        if factor:
+                            self._emit('art', {'book': book, 'title': title, 'stage': 'generate', 'done': done,
+                                               'total': total, 'current': f'{scene["title"]} · büyütülüyor'})
+                            data = enlarge(scene_id, data, 0)
+                        updated = store.write_image(book, scene_id, data, upscaled=factor)
                         done += 1
                         shown = next(s for s in self._art_view(book, updated)['scenes'] if s['id'] == scene_id)
                         self._emit('art', {'book': book, 'title': title, 'stage': 'generate', 'done': done,
