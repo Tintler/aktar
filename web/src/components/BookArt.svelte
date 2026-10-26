@@ -112,6 +112,7 @@
     if (result) { applyPlan(result.plan); toast('LoRA gücü kaydedildi. Görsellere yansıması için yeniden üretin.'); }
   }
 
+  let readingRun = 0;
   async function startPlan(resume = false) {
     if (otherJob) { toast('Başka bir kitabın görselleri için iş sürüyor.'); return; }
     if (app.emotionJob) { toast('Duygu etiketleri oluşturulurken görsel planı çıkarılamaz.'); return; }
@@ -120,20 +121,21 @@
         ok: 'Baştan planla', cancel: 'Vazgeç', danger: true });
       if (!yes) return;
     }
-    const reading = { book, title, stage: 'plan', done: 0, total: 0, reading: true };
-    app.artJob = reading;
+    // app.artJob $state vekiline sarilir (=== tutmaz): baslatma kendi numarasiyla taninir
+    const reading = ++readingRun;
+    app.artJob = { book, title, stage: 'plan', done: 0, total: 0, reading };
     let sections;
     try {
       sections = await bookSections(book, app.ttsPrefs.split ?? {});
     } catch (error) {
-      if (app.artJob === reading) app.artJob = null;
+      if (app.artJob?.reading === reading) app.artJob = null;
       toast(String(error?.message ?? error), 'error');
       return;
     }
-    if (app.artJob !== reading) return;   // bolumler okunurken durduruldu
+    if (app.artJob?.reading !== reading) return;   // bolumler okunurken durduruldu
     const result = await act('art_plan_create', book, sections, note, preset, density, title, resume, identity && !noCast, modifiers);
-    if (!result?.started) { if (app.artJob === reading) app.artJob = null; return; }
-    if (app.artJob?.reading) app.artJob = { book, title, stage: 'plan', done: 0, total: result.total };
+    if (!result?.started) { if (app.artJob?.reading === reading) app.artJob = null; return; }
+    if (app.artJob?.reading === reading) app.artJob = { book, title, stage: 'plan', done: 0, total: result.total };
     replanning = false;
     plan = null;
   }

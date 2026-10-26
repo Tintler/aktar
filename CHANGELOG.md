@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.32.1 — 2026-10-26
+
+### Düzeltme
+- **Kitap görselleri planı hiç başlamıyordu (2.32.0):** "Durdur" için eklenen denetim, işin durdurulduğunu yanlış anlayıp planı dil modeline hiç göndermiyordu; pencere "bölümler okunuyor"da kalıyordu. Başlatma artık kendi numarasıyla tanınır.
+
 ## 2.32.0 — 2026-10-26
 
 ### Yeni
