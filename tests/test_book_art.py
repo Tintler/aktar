@@ -203,6 +203,32 @@ class PlanTest(unittest.TestCase):
         book_art.plan_book(sections, ask, half)
         self.assertFalse(any('JSON shape: {"style"' in p for p in prompts))
 
+    def test_scene_keeps_reader_section_number(self):
+        # bos bolumler (kapak, gorsel sayfasi) okuyucuda sayilir ama plana gelmez: sahne okuyucunun numarasini almali
+        sections = book(60)
+        sections[0]['number'] = 4
+        ask = lambda system, user: (json.dumps({'style': 's', 'characters': []}) if 'JSON shape: {"style"' in user
+                                    else json.dumps({'scenes': [{'start': 0, 'title': 'T', 'prompt': 'p'}]}))
+        result = book_art.plan_book(sections, ask, book_art.new_plan())
+        self.assertEqual((result['scenes'][0]['section'], result['scenes'][0]['id']), (4, '4-0'))
+        self.assertTrue(result['numbered'])
+
+    def test_renumber_old_plan(self):
+        plan = book_art.new_plan()
+        del plan['numbered']
+        plan['scenes'] = [{'id': '0-0', 'section': 0, 'start': 0, 'anchor': 'Önsöz başlar.'},
+                          {'id': '1-5', 'section': 1, 'start': 5, 'anchor': 'Ben  o gece, uyumadım.'}]
+        texts = ['', 'Önsöz\nbaşlar. Devam.', '   ', 'Bölüm\nBen o gece,\nuyumadım. Sonra...']
+        self.assertTrue(book_art.renumber(plan, texts))
+        self.assertEqual([s['section'] for s in plan['scenes']], [1, 3])
+        self.assertFalse(book_art.renumber(plan, texts))   # bir kez
+        # baska kitabin metni: dokunulmaz
+        other = book_art.new_plan()
+        del other['numbered']
+        other['scenes'] = [{'id': '0-0', 'section': 0, 'start': 0, 'anchor': 'Yok böyle cümle.'}]
+        self.assertFalse(book_art.renumber(other, texts))
+        self.assertEqual(other['scenes'][0]['section'], 0)
+
     def test_cancel(self):
         import threading as _t
         cancel = _t.Event()
@@ -341,6 +367,30 @@ class BridgeTest(unittest.TestCase):
         updated = self.bridge.art_scene_update('ab12cd34ef', scene['id'], {'reseed': True, 'skip': True})
         self.assertTrue(updated['plan']['scenes'][0]['skip'])
         self.assertEqual(self.bridge.art_section('ab12cd34ef', 1)['scenes'], [])
+
+    def test_old_plan_renumbered_on_read(self):
+        from unittest.mock import patch
+        store = self.bridge._art_store()
+        plan = book_art.new_plan()
+        del plan['numbered']
+        plan['complete'] = True
+        plan['scenes'] = [{'id': '1-0', 'section': 1, 'start': 0, 'anchor': 'Gece başladı.', 'image': '1-0-1.png',
+                           'skip': False, 'version': 1}]
+        store.save('ab12cd34ef', plan)
+        (store.folder('ab12cd34ef') / '1-0-1.png').write_bytes(b'png')
+
+        class Shelf:
+            def _book(self, book_id):
+                return {}, object()
+
+        self.bridge._shelf = lambda: Shelf()
+        texts = ['', 'Kapak', '', 'Gece başladı. Sonra...']   # eski sira 1 -> okuyucunun 3. bolumu
+        with patch('book_search.section_texts', return_value=iter(texts)) as read:
+            shown = self.bridge.art_section('ab12cd34ef', 2)
+            self.assertEqual(self.bridge.art_section('ab12cd34ef', 3)['scenes'][0]['start'], 0)
+        self.assertEqual(shown['scenes'], [])
+        self.assertEqual(read.call_count, 1)
+        self.assertTrue(json.loads((store.folder('ab12cd34ef') / 'plan.json').read_text(encoding='utf-8'))['numbered'])
 
 
 if __name__ == '__main__':

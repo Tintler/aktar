@@ -241,7 +241,28 @@ def new_plan(note='', preset='', density='medium', size=DEFAULT_SIZE, title=''):
     return {'version': VERSION, 'created': datetime.now().isoformat(timespec='seconds'), 'title': title,
             'note': _clean(note), 'preset': preset, 'density': density if density in DENSITY else 'medium',
             'size': size if size in SIZES else DEFAULT_SIZE, 'seed': random.randrange(1, 2 ** 31),
-            'style': '', 'characters': [], 'scenes': [], 'complete': False, 'next_chunk': 0}
+            'style': '', 'characters': [], 'scenes': [], 'complete': False, 'next_chunk': 0, 'numbered': True}
+
+
+def renumber(plan, texts):
+    """Eski plan onarimi: 'numbered' olmayan planda sahnenin bolumu metni olan bolumler arasindaki siraydi (bos
+    bolumler atlaniyordu), okuyucu ise kitabin bolum numarasini sorar. `texts`: kitabin bolumlerinin duz metni.
+    Her sahnenin baslangic cumlesi (anchor) yeni bolumunde bulunursa plan duzeltilir; donen: duzeltildi mi."""
+    if plan.get('numbered'):
+        return False
+    squash = lambda text: ''.join(str(text or '').split())
+    texts = [squash(text) for text in texts]
+    mapping = [number for number, text in enumerate(texts) if text]
+    moved = []
+    for scene in plan['scenes']:
+        index = int(scene['section'])
+        if not 0 <= index < len(mapping) or squash(scene.get('anchor')) not in texts[mapping[index]]:
+            return False
+        moved.append(mapping[index])
+    for scene, number in zip(plan['scenes'], moved):
+        scene['section'] = number
+    plan['numbered'] = True
+    return True
 
 
 def plan_book(sections, ask, plan, cancel=None, progress=None, save=None):
@@ -270,7 +291,8 @@ def plan_book(sections, ask, plan, cancel=None, progress=None, save=None):
             plan['characters'] = merge_characters(plan['characters'], extra)
             for scene in scenes:
                 order = len(plan['scenes'])
-                plan['scenes'].append({'id': f'{section}-{scene["start"]}', 'section': section, 'start': scene['start'],
+                real = sections[section].get('number', section)   # okuyucunun bolum numarasi
+                plan['scenes'].append({'id': f'{real}-{scene["start"]}', 'section': real, 'start': scene['start'],
                                        'anchor': _clean(sentences[scene['start']]), 'title': scene['title'],
                                        'prompt': scene['prompt'], 'seed': plan['seed'] + order, 'image': '',
                                        'skip': False})

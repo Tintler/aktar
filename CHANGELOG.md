@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.29.2 — 2026-10-26
+
+### Düzeltme
+- **Kitap görselleri, tam ekranda görsel geçişi (F199):** Kapak gibi içi boş bölümü olan kitaplarda sahneler bir önceki bölüme bağlanıyordu; tam ekran okuyucu görselli kipte okunan bölümün sahnelerini bulamıyor, tek görselde takılıyordu. Plan artık okuyucunun bölüm numarasını saklar. Eski planlar kitap ilk açıldığında kitabın metniyle bir kez onarılır (her sahnenin başlangıç cümlesi yeni bölümünde aranır, eşleşmezse plana dokunulmaz); görselleri yeniden üretmek gerekmez.
+
 ## 2.29.1 — 2026-10-25
 
 ### Düzeltme

@@ -14,7 +14,8 @@ export async function bookSections(bookId, split = {}) {
     const holder = document.createElement('div');
     holder.innerHTML = result.html;
     const cut = segment(holder, { ...QUOTE_DEFAULTS, ...split });
-    if (cut.sentences.length) sections.push({ sentences: cut.sentences, breaks: [...cut.breaks] });
+    // number: okuyucunun bolum numarasi (bos bolumler atlandigi icin dizideki sira onunla ayni degil)
+    if (cut.sentences.length) sections.push({ number, sentences: cut.sentences, breaks: [...cut.breaks] });
   }
   return sections;
 }

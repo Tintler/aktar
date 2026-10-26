@@ -52,6 +52,27 @@ class ArtMixin:
         """Dil modeli plan cikariyor mu (ses motoru bu sirada yuklenmez)."""
         return self._art_running() and getattr(self, '_art_stage', '') == 'plan'
 
+    def _art_load(self, book):
+        """Plan; eski (bolumleri bos bolumler atlanarak numaralanmis) plan kitabin metniyle bir kez onarilir."""
+        store = self._art_store()
+        plan = store.load(book)
+        tried = self.__dict__.setdefault('_art_renumber_tried', set())
+        if not plan or plan.get('numbered') or book in tried:
+            return plan
+        tried.add(book)
+        import book_search
+        try:
+            _entry, epub = self._shelf()._book(book)
+            texts = list(book_search.section_texts(epub))
+        except Exception as error:   # kitap kitapliktan kalkmis ya da okunamiyor: plan oldugu gibi kalir
+            self._log(f'UYARI: Görsel planının bölümleri onarılamadı: {error}')
+            return plan
+        fixed = []
+        plan = store.update(book, lambda p: fixed.append(book_art.renumber(p, texts)))
+        self._log('Kitap görselleri: eski planın bölüm numaraları düzeltildi.' if fixed[0]
+                  else 'UYARI: Görsel planının bölümleri kitapla eşleşmedi; planı yeniden oluşturun.')
+        return plan
+
     def _art_view(self, book, plan):
         """Arayuze giden plan: her sahnenin gorsel adresi (media_server)."""
         if not plan:
@@ -118,7 +139,7 @@ class ArtMixin:
 
     def art_plan_get(self, book):
         try:
-            return {'plan': self._art_view(book, self._art_store().load(book))}
+            return {'plan': self._art_view(book, self._art_load(book))}
         except (OSError, ValueError) as error:
             return _error(error)
 
@@ -130,12 +151,14 @@ class ArtMixin:
             store.folder(book)
         except ValueError as error:
             return _error(error)
-        sections = [{'sentences': [' '.join(str(s).split()) for s in (part or {}).get('sentences') or ()],
-                     'breaks': [int(b) for b in (part or {}).get('breaks') or ()]} for part in sections or ()]
+        sections = [{'number': int((part or {}).get('number', index)),
+                     'sentences': [' '.join(str(s).split()) for s in (part or {}).get('sentences') or ()],
+                     'breaks': [int(b) for b in (part or {}).get('breaks') or ()]}
+                    for index, part in enumerate(sections or ())]
         total = sum(len(part['sentences']) for part in sections)
         if not total:
             return _error('Kitapta metin bulunamadı.')
-        old = store.load(book)
+        old = self._art_load(book)
         if resume and old and not old.get('complete'):
             plan = old
         else:
@@ -353,7 +376,7 @@ class ArtMixin:
         sahneye kadar gosterilecek onceki gorsel (carry)."""
         try:
             store = self._art_store()
-            plan = store.load(book)
+            plan = self._art_load(book)
         except (OSError, ValueError):
             return {'scenes': [], 'carry': ''}
         if not plan:
