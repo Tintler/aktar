@@ -242,12 +242,17 @@ def bisect(text, limit):
 
 
 _SHORT_TAIL = re.compile(r'[?!]+(["”’»)]*)\s+(?=[^\W\d_]{1,10}[.…!?]*$)')
+_PARENS = re.compile(r'\s*\)(?=[.,;:!?…])|[()]')   # ')' before a mark leaves no space ('(ah!).' -> 'ah!.')
 
 
 def model_text(piece):
     """Sunucuya giden metin: soru/unlem isaretinden sonra tek kisa kelimeyle biten parcada ('degil mi? iste…') isaret
     virgule cevrilir (F166: model soruda bitirip son kelimeyi atliyordu, 24 denemede 16 -> virgulle 22; Whisper soru
-    tonlamasini yine duyuyor). Kelime kucuk harfle baslamali (devam eden cumle); okuyucuda gorunen metin degismez."""
+    tonlamasini yine duyuyor). Kelime kucuk harfle baslamali (devam eden cumle); okuyucuda gorunen metin degismez.
+    F206: parantezler cikarilir: model '(...)' ile baslayan cumleyi yonerge sayip okumuyor, yerine klon kaydinin
+    metnini okuyordu (OpenRouter'da 4/4 deneme; cumle ortasindaki '(ah!)' sorunsuzdu ama parantezsiz de ayni)."""
+    piece = ' '.join(_PARENS.sub(lambda m: '' if m.end() < len(piece) and piece[m.end()] in '.,;:!?…' else ' ',
+                                 piece).split())
     match = _SHORT_TAIL.search(piece)
     if not match or not piece[match.end()].islower():
         return piece

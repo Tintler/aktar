@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.33.1 — 2026-10-26
+
+### Düzeltme
+- **Drama 3 parantezli cümleyi okumuyordu (F206):** "(Eğlence akışındaki hayali insanlar…)" gibi parantezle başlayan cümleyi model yönerge sanıp okumuyor, yerine klon kaydının metnini okuyordu (OpenRouter'da 4/4 deneme). Modele giden metinden parantezler çıkarılır; okuyucuda görünen metin değişmez. Daha önce yanlış kaydedilmiş cümleler kendiliğinden yenilenmez (ödenmiş sesler korunur): sağ tık → "Bu cümle öbeğini yeniden seslendir".
+
 ## 2.33.0 — 2026-10-26
 
 ### Yeni

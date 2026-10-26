@@ -159,6 +159,15 @@ class SplitTests(unittest.TestCase):
         self.assertEqual([p for p, _ in drama3.split_text(text, limit=36)],
                          ["Çöküşü'nün 44. bölümünü izliyordum.", '"Gelir misin?" diye sordu.', 'Sonra gitti.'])
 
+    def test_model_text_drops_parentheses(self):
+        """F206: '(...)' ile baslayan cumleyi model okumuyor, klon kaydinin metnini okuyordu."""
+        self.assertEqual(drama3.model_text('(Eğlence akışındaki insanlar çok daha nazik.)'),
+                         'Eğlence akışındaki insanlar çok daha nazik.')
+        self.assertEqual(drama3.model_text('Bu çok kötüydü. (Hayali insanlar daha nazik.)'),
+                         'Bu çok kötüydü. Hayali insanlar daha nazik.')
+        self.assertEqual(drama3.model_text('Duvara çarptı (ah!) ve takıldı (bıçağa).'), 'Duvara çarptı ah! ve takıldı bıçağa.')
+        self.assertEqual(drama3.model_text('[öfkeyle] (Git buradan!) Sonra döndü.'), '[öfkeyle] Git buradan! Sonra döndü.')
+
     def test_model_text_keeps_short_tail_after_question(self):
         self.assertEqual(drama3.model_text('– “Fethün karib” değil mi? işte…'), '– “Fethün karib” değil mi, işte…')
         self.assertEqual(drama3.model_text('Gelmeyecek misin?” sahi.'), 'Gelmeyecek misin,” sahi.')
