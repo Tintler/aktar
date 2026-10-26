@@ -2,6 +2,14 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.32.0 — 2026-10-26
+
+### Yeni
+- **Okurken hazırlanmış ses önerisi (F203):** Oynat düğmesine basıldığında bölüm başka bir sesle (kayıtlı ses, motor sesi, yerel/bulut) seçili sesten daha çok hazırlanmışsa, en çok hazırlanan ses kaç cümlesinin hazır olduğuyla birlikte önerilir; seçilirse o sese geçip okur. Seçili ses zaten en çok hazırlanan ise sorulmaz.
+
+### Düzeltme
+- **Kitap görselleri planı:** Bölümler okunurken "Durdur" artık bekleyen başlatmayı bırakır (önceden pencere "bölümler okunuyor"da kalabiliyordu). Planın her adımı (ses motorunu durdurma, ComfyUI belleğini boşaltma, dil modeline ilk istek) Konsol'a yazılır; dil modeline istek gitmezse nerede beklediği görülür.
+
 ## 2.31.0 — 2026-10-26
 
 ### Yeni

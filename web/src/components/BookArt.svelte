@@ -120,20 +120,28 @@
         ok: 'Baştan planla', cancel: 'Vazgeç', danger: true });
       if (!yes) return;
     }
-    app.artJob = { book, title, stage: 'plan', done: 0, total: 0, reading: true };
+    const reading = { book, title, stage: 'plan', done: 0, total: 0, reading: true };
+    app.artJob = reading;
     let sections;
     try {
       sections = await bookSections(book, app.ttsPrefs.split ?? {});
     } catch (error) {
-      app.artJob = null;
+      if (app.artJob === reading) app.artJob = null;
       toast(String(error?.message ?? error), 'error');
       return;
     }
+    if (app.artJob !== reading) return;   // bolumler okunurken durduruldu
     const result = await act('art_plan_create', book, sections, note, preset, density, title, resume, identity && !noCast, modifiers);
-    if (!result?.started) { app.artJob = null; return; }
+    if (!result?.started) { if (app.artJob === reading) app.artJob = null; return; }
     if (app.artJob?.reading) app.artJob = { book, title, stage: 'plan', done: 0, total: result.total };
     replanning = false;
     plan = null;
+  }
+
+  // Bolumler okunurken is henuz arka uca gitmedi: durdurmak yalnizca bekleyen baslatmayi birakir.
+  function stopPlan() {
+    if (job?.reading) { app.artJob = null; return; }
+    act('art_cancel');
   }
 
   async function generate(ids = null, all = false, portraits = null) {
@@ -243,7 +251,7 @@
         <div class="track"><i style:width="{pct(job.done, job.total)}%"></i></div>
         <p class="dim">Önce bütün kitap için tek bir stil kılavuzu ve karakter tarifleri yazılır, sonra kitap parça parça okunur.
           Bu sırada ses motoru durur; bitince dil modeli bellekten boşaltılır. Pencereyi kapatabilirsiniz, iş sürer.</p>
-        <div><button class="btn" onclick={() => act('art_cancel')}><Icon name="stop" size={15} />Durdur</button></div>
+        <div><button class="btn" onclick={stopPlan}><Icon name="stop" size={15} />Durdur</button></div>
       </div>
     {:else if setup}
       <div class="setup">

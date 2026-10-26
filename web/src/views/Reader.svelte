@@ -4,7 +4,7 @@
   import Icon from '../lib/Icon.svelte';
   import { app, act, toast, saveReaderPrefs, saveTtsPrefs, READER_DEFAULTS } from '../lib/state.svelte.js';
   import { call } from '../lib/api.js';
-  import { confirm } from '../lib/confirm.svelte.js';
+  import { confirm, choose } from '../lib/confirm.svelte.js';
   import { segment, QUOTE_DEFAULTS } from '../lib/sentences.js';
   import { player, play, pause, resume, stop, step, setSpeed, setSentences, setHooks, setPauses } from '../lib/player.svelte.js';
   import { resolvePauses, pauseAfter } from '../lib/pauses.js';
@@ -152,7 +152,12 @@
   // listelenir, tiklayinca o sese gecilir (yeniden hazirlamaya gerek kalmaz).
   let otherVoices = $state([]);
   let otherSearching = $state(false);
-  async function refreshOtherVoices(report = false) {
+  let otherSearch = null;   // suren arama: oynatmadan once sonucu beklenir
+  function refreshOtherVoices(report = false) {
+    otherSearch = searchOtherVoices(report);
+    return otherSearch;
+  }
+  async function searchOtherVoices(report) {
     const list = sentences;
     otherSearching = true;
     const result = list.length && book
@@ -204,9 +209,31 @@
     if (player.playing) { pause(); return; }
     if (player.active) { resume(); return; }
     if (!sentences.length) { toast('Bu bölümde okunacak metin yok.'); return; }
+    if (!(await offerPreparedVoice())) return;
     if (!(await ensureEngine())) return;
     setSpeed(app.ttsPrefs.speed);
     play(focus ? focusStart : firstVisibleSentence());
+  }
+
+  // F203: bolum baska bir sesle (kayitli ses, motor, yerel/bulut) secili sesten daha cok hazirlanmissa oynatmadan once
+  // o ses onerilir; secili ses zaten en cok hazirlanan ise sorulmaz. false: vazgecildi.
+  async function offerPreparedVoice() {
+    const list = sentences;
+    await Promise.all([refreshCached(), otherSearch]);
+    const best = otherVoices[0];
+    if (list !== sentences || !best || best.count <= cachedCount) return true;
+    const choice = await choose({
+      title: 'Hazırlanmış ses var',
+      message: 'Bu bölümün sesi başka bir sesle daha çok hazırlanmış; o sesle hazır cümleler motor yüklenmeden okunur.',
+      options: [
+        { value: best.key, label: best.label, hint: `${best.count}/${best.total} cümle hazır` },
+        { value: '', label: 'Seçili sesle devam et', hint: `${cachedCount}/${sentences.length} cümle hazır` },
+      ],
+      ok: 'Oku',
+    });
+    if (choice === null) return false;
+    if (choice) await useVoice(best);
+    return true;
   }
 
   // F189: tam ekran okuma; okuma yokken ekranin ustundeki cumleden baslar.

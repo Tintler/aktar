@@ -250,13 +250,17 @@ class ArtMixin:
                 from app_core import Client, keep_loaded, load_config, unload_models
                 client, loaded = None, []
                 try:
+                    self._log(f'Kitap görselleri: plan başlıyor ({total} cümle, {title or book}).')
                     engines = getattr(self, '_engines_cache', None)
                     if engines is not None and engines.state != 'idle' and not engines._exporting:
+                        self._log('Kitap görselleri: ses motoru durduruluyor…')
                         engines.stop_worker()   # ses motoru bellegi bosalsin
                         engines._set('idle', '')
+                    self._log('Kitap görselleri: ComfyUI belleği boşaltılıyor…')
                     comfy_client.free(self._art_url())   # ComfyUI ayni GPU'daki modelini birakir
                     client = Client(load_config(), log=self._log)
                     loaded = keep_loaded(client, [client.cfg.get('model')], self._log)
+                    self._log(f'Kitap görselleri: dil modeline ilk istek gönderiliyor ({client.cfg.get("model") or "seçili model"}).')
                     ask = lambda system, user: client.chat([{'role': 'system', 'content': system},
                                                             {'role': 'user', 'content': user}],
                                                            temperature=0.4, max_tokens=book_art.MAX_TOKENS)
