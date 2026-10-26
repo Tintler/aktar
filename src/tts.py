@@ -31,6 +31,7 @@ PROTOCOL = 1
 SNAPSHOT_SECONDS = 2.0        # F188: how long the motor.json files read are reused (Engines._manifests)
 AUDIO_RATE = 48000     # requested from engines (those that cannot choose return their own rate)
 CACHE_DIR = 'ses-onbellegi'   # rendered sentences per book: ses-onbellegi/<book id>/<key>.wav
+PREVIOUS_SUFFIX = '.onceki.wav'   # F205: the take a re-render replaced (<key>.onceki.wav)
 SENTENCE_GAP = 0.35    # seconds of silence between sentences in an exported file
 DEFAULT_ENGINE = {'tr': 'ema-lightning'}
 MAX_PATH = 259
@@ -700,6 +701,60 @@ class Engines:
                 if progress:
                     progress(done, total)
         return done
+
+    def _group_at(self, book, sentences, index, speed, language='tr', breaks=None):
+        """F205: the reader's group holding sentence `index` (plan): (start, end, text, cache path)."""
+        index = int(index)
+        if not 0 <= index < len(sentences):
+            raise ValueError('Cümle bulunamadı.')
+        start, end, _ready = next(g for g in self.plan(book, sentences, speed, language, breaks) if g[0] <= index <= g[1])
+        text = sentences[start] if end == start else list(sentences[start:end + 1])
+        request, tag = self._request_text(text, book, language)
+        return start, end, text, self._cache_path(book, request, speed, language, None, tag)
+
+    @staticmethod
+    def _previous(path):
+        """F205: the take a re-render replaced, kept next to the cache entry (paid cloud audio is not thrown away)."""
+        return path.with_name(path.stem + PREVIOUS_SUFFIX)
+
+    def redo(self, book, sentences, index, speed, language='tr', breaks=None):
+        """F205: renders the group holding sentence `index` again (blocking) without touching the rest of the book;
+        the replaced take is kept as <key>.onceki.wav for undo_redo. Returns say()'s result with 'start'/'end'."""
+        start, end, text, path = self._group_at(book, sentences, index, speed, language, breaks)
+        if path is None:
+            raise ValueError('Bu kitabın sesi saklanmıyor.')
+        self._ready_worker()
+        kept = None
+        if path.exists():
+            kept = path.with_suffix('.redo')
+            os.replace(path, kept)
+        try:
+            result = self.say(text, speed, book, language)
+        except BaseException:
+            if kept is not None and not path.exists():
+                os.replace(kept, path)
+            raise
+        if kept is not None:   # F200: say() may have written under the newer key; the old take sits beside it
+            now = self._group_at(book, sentences, start, speed, language, breaks)[3]
+            os.replace(kept, self._previous(now))
+        return dict(result, start=start, end=end, previous=kept is not None)
+
+    def has_previous(self, book, sentences, index, speed, language='tr', breaks=None):
+        """F205: whether the group holding sentence `index` has a take to go back to."""
+        path = self._group_at(book, sentences, index, speed, language, breaks)[3]
+        return bool(path is not None and path.exists() and self._previous(path).exists())
+
+    def undo_redo(self, book, sentences, index, speed, language='tr', breaks=None):
+        """F205: swaps the group's take with the one redo replaced (calling it again swaps back)."""
+        start, end, _text, path = self._group_at(book, sentences, index, speed, language, breaks)
+        previous = self._previous(path) if path is not None else None
+        if previous is None or not previous.exists() or not path.exists():
+            raise ValueError('Bu cümle öbeğinin önceki sesi yok.')
+        swap = path.with_suffix('.swap')
+        os.replace(path, swap)
+        os.replace(previous, path)
+        os.replace(swap, previous)
+        return dict(self._clip(path.read_bytes()), start=start, end=end, cached=True)
 
     def cache_info(self):
         root = self.app_dir / CACHE_DIR

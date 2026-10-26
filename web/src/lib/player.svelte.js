@@ -194,6 +194,14 @@ export async function play(index = player.index) {
   await playIndex(index < 0 ? 0 : index);
 }
 
+// F205: a group was rendered again: prefetched audio is old, reading starts at that group.
+export async function replay(index) {
+  generation++;
+  stopSource();
+  cache.clear();
+  return play(index);
+}
+
 export function pause() {
   player.playing = false;
   context?.suspend();

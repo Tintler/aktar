@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import shutil
 import sys
 import threading
 import time
@@ -551,6 +552,44 @@ class TtsMixin:
             return {'groups': self._engines().plan(book, sentences, speed, language or 'tr', breaks)}
         except Exception as error:
             return _error(error)
+
+    def tts_redo(self, book, sentences, index, speed=1.0, language='tr', breaks=None):
+        """F205: `index` cumlesinin okuyucudaki obegini (tts_plan grubu) yeniden seslendirir (bloklar); kitabin
+        geri kalani degismez. Eski ses <anahtar>.onceki.wav olarak saklanir (tts_redo_undo). Donen: tts_say gibi
+        ses + {'start', 'end'}."""
+        if self._audiobook_running():
+            return _error('Sesli kitap kaydedilirken yeniden seslendirilemez.')
+        try:
+            result = self._engines().redo(book, sentences, index, speed, language or 'tr', breaks)
+        except Exception as error:
+            return _error(error)
+        self._drop_audiobook_parts(book)
+        self._log(f'Cümle {result["start"] + 1}–{result["end"] + 1} yeniden seslendirildi.')
+        return result
+
+    def tts_redo_info(self, book, sentences, index, speed=1.0, language='tr', breaks=None):
+        """F205: obegin geri donulecek onceki sesi var mi: {'previous': bool}."""
+        try:
+            return {'previous': self._engines().has_previous(book, sentences, index, speed, language or 'tr', breaks)}
+        except Exception as error:
+            return _error(error)
+
+    def tts_redo_undo(self, book, sentences, index, speed=1.0, language='tr', breaks=None):
+        """F205: obegin sesini yeniden seslendirmeden onceki sesle degistirir (bir daha cagrilinca geri alir)."""
+        if self._audiobook_running():
+            return _error('Sesli kitap kaydedilirken ses değiştirilemez.')
+        try:
+            result = self._engines().undo_redo(book, sentences, index, speed, language or 'tr', breaks)
+        except Exception as error:
+            return _error(error)
+        self._drop_audiobook_parts(book)
+        return result
+
+    def _drop_audiobook_parts(self, book):
+        """F205: yarida kalan sesli kitabin saklanan bolum parcalari eski sesi tasir; cumle onbellegi kalir."""
+        if book:
+            shutil.rmtree(Path(self._engines().app_dir) / audiobook.WORK_DIR / audiobook.safe_name(book, 'kitap', 40),
+                          ignore_errors=True)
 
     def tts_prepare(self, book, sentences, speed=1.0, language='tr', breaks=None):
         """Cumleleri arka planda kitabin onbellegine uretir (ayni anda tek is)."""

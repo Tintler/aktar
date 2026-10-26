@@ -6,7 +6,8 @@
   import { call } from '../lib/api.js';
   import { confirm, choose } from '../lib/confirm.svelte.js';
   import { segment, QUOTE_DEFAULTS } from '../lib/sentences.js';
-  import { player, play, pause, resume, stop, step, setSpeed, setSentences, setHooks, setPauses } from '../lib/player.svelte.js';
+  import { player, play, pause, resume, stop, step, setSpeed, setSentences, setHooks, setPauses, replay } from '../lib/player.svelte.js';
+  import { openMenu } from '../lib/menu.svelte.js';
   import { resolvePauses, pauseAfter } from '../lib/pauses.js';
   import VoicePicker from '../components/VoicePicker.svelte';
   import BookChat from '../components/BookChat.svelte';
@@ -297,6 +298,64 @@
 
   function cancelPrepare() {
     call('tts_prepare_cancel');
+  }
+
+  // F205: yanlis okunan bir cumle obegini (okuyucunun birlikte istedigi cumleler) kitabin geri kalanina dokunmadan
+  // yeniden seslendirir; onceki ses saklanir, menuden geri donulebilir.
+  let redoing = $state(-1);
+
+  function markGroup(start, end, on) {
+    for (let i = start; i <= end; i++) for (const el of article?.querySelectorAll(`.s[data-i="${i}"]`) ?? []) el.classList.toggle('redo', on);
+  }
+
+  async function onPageMenu(event) {
+    const sentence = event.target.closest('.s');
+    if (!sentence || !book || window.getSelection()?.toString()) return;   // secili metinde normal menu (kopyala)
+    event.preventDefault();
+    const index = Number(sentence.dataset.i);
+    const args = [book.id, sentences, index, app.ttsPrefs.speed, book.language || 'tr', [...breaks]];
+    const info = await call('tts_redo_info', ...args).catch(() => null);
+    const busy = redoing >= 0 || Boolean(app.ttsAudiobook);
+    openMenu(event, [
+      { label: 'Bu cümle öbeğini yeniden seslendir', icon: 'refresh', disabled: busy, action: () => redo(index) },
+      { label: 'Önceki sesine dön', icon: 'history', disabled: busy || !info?.previous, action: () => redoUndo(index) },
+      'sep',
+      { label: 'Buradan oku', icon: 'play', action: () => readFrom(index) },
+    ]);
+  }
+
+  async function readFrom(index) {
+    if (!player.active && !(await ensureEngine())) return;
+    setSpeed(app.ttsPrefs.speed);
+    replay(index);
+  }
+
+  async function redo(index) {
+    if (player.active) pause();
+    if (!(await ensureEngine({ needEngine: true }))) return;
+    redoing = index;
+    markGroup(index, index, true);
+    const list = sentences;
+    const result = await act('tts_redo', book.id, list, index, app.ttsPrefs.speed, book.language || 'tr', [...breaks]);
+    markGroup(index, index, false);
+    redoing = -1;
+    if (!result || list !== sentences) return;
+    toast(result.start === result.end ? `Cümle ${result.start + 1} yeniden seslendirildi.`
+      : `Cümle ${result.start + 1}–${result.end + 1} yeniden seslendirildi.`, 'ok');
+    refreshCached();
+    setSpeed(app.ttsPrefs.speed);
+    replay(result.start);
+  }
+
+  async function redoUndo(index) {
+    if (player.active) pause();
+    const list = sentences;
+    const result = await act('tts_redo_undo', book.id, list, index, app.ttsPrefs.speed, book.language || 'tr', [...breaks]);
+    if (!result || list !== sentences) return;
+    toast('Önceki ses geri getirildi (bir daha seçince yeni sese döner).', 'ok');
+    if (!player.active && !(await ensureEngine())) return;
+    setSpeed(app.ttsPrefs.speed);
+    replay(result.start);
   }
 
   let showExport = $state(false);
@@ -649,7 +708,7 @@
             <Icon name="back" size={16} /> Önceki bölüm</button>
         {/if}
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-        <article class="page selectable" class:faded={loading} class:listening={player.active} bind:this={article} onclick={onPageClick}
+        <article class="page selectable" class:faded={loading} class:listening={player.active} bind:this={article} onclick={onPageClick} oncontextmenu={onPageMenu}
           style:font-size="{app.reader.size}px" style:line-height={app.reader.leading}
           style:font-family={fonts[app.reader.font]} style:max-width="{app.reader.width}px">
           {@html html}
@@ -827,6 +886,8 @@
 
   .page.listening :global(.s) { cursor: pointer; border-radius: 3px; }
   .page.listening :global(.s:hover) { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .page :global(.s.redo) { background: color-mix(in srgb, var(--warning) 22%, transparent); animation: redo-pulse 1.2s ease-in-out infinite; }
+  @keyframes redo-pulse { 50% { opacity: .55; } }
   .page :global(.s.now) { background: color-mix(in srgb, var(--accent) 26%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent); }
 
   .player { position: relative; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; padding: 10px 16px; border-top: 1px solid var(--outline); background: var(--panel); }

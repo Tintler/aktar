@@ -209,6 +209,58 @@ class EnginesTests(unittest.TestCase):
         self.assertIsNone(self.engines._cache_path('../kaçak', 'x', 1.0, 'tr'))
         self.assertEqual(self.engines.clear_cache(book)['files'], 0)
 
+    def test_redo_renders_one_group_again_and_keeps_the_old_take(self):
+        """F205: yanlis okunan obek yeniden seslendirilir, onceki ses geri getirilebilir; digerleri degismez."""
+        make_engine(self.root, 'ema-lightning', ('tr',))
+        book = 'abcdef0123456789'
+        sentences = ['Bir.', 'İki.', 'Üç.']
+        self.load('tr')
+        self.engines.prepare(book, sentences, 1.0)
+        paths = [self.engines._cache_path(book, s, 1.0, 'tr') for s in sentences]
+        paths[1].write_bytes(paths[1].read_bytes() + b'eski')        # the wrongly read take
+        others = [paths[0].read_bytes(), paths[2].read_bytes()]
+        self.assertFalse(self.engines.has_previous(book, sentences, 1, 1.0))
+        result = self.engines.redo(book, sentences, 1, 1.0)
+        self.assertEqual((result['start'], result['end'], result['cached'], result['previous']), (1, 1, False, True))
+        self.assertFalse(paths[1].read_bytes().endswith(b'eski'))
+        previous = paths[1].with_name(paths[1].stem + '.onceki.wav')
+        self.assertTrue(previous.read_bytes().endswith(b'eski'))
+        self.assertEqual([paths[0].read_bytes(), paths[2].read_bytes()], others)
+        self.assertTrue(self.engines.has_previous(book, sentences, 1, 1.0))
+        self.assertEqual(self.engines.plan(book, sentences, 1.0, 'tr', []), [[0, 0, True], [1, 1, True], [2, 2, True]])
+        self.engines.undo_redo(book, sentences, 1, 1.0)               # back to the old take ...
+        self.assertTrue(paths[1].read_bytes().endswith(b'eski'))
+        self.engines.undo_redo(book, sentences, 1, 1.0)               # ... and to the new one again
+        self.assertTrue(previous.read_bytes().endswith(b'eski'))
+        with self.assertRaises(ValueError):
+            self.engines.undo_redo(book, sentences, 0, 1.0)            # never re-rendered
+        with self.assertRaises(ValueError):
+            self.engines.redo(book, sentences, 9, 1.0)
+        # A failed render puts the old take back.
+        with patch.object(self.engines._worker, 'request', side_effect=RuntimeError('motor düştü')):
+            with self.assertRaises(RuntimeError):
+                self.engines.redo(book, sentences, 2, 1.0)
+        self.assertEqual(paths[2].read_bytes(), others[1])
+        self.engines.shutdown()
+        with self.assertRaises(RuntimeError):
+            self.engines.redo(book, sentences, 0, 1.0)               # needs the engine
+        self.assertTrue(paths[0].exists())
+
+    def test_redo_takes_the_whole_group_the_reader_asks_for(self):
+        """F205: grup okuyan motorda (Drama 3 TR) tiklanan cumlenin tum obegi birlikte yeniden seslendirilir."""
+        manifest = make_engine(self.root, 'ema-lightning', ('tr',))
+        manifest.update(group_sentences=True, settings=[{'key': 'max_chars', 'default': 40}])
+        (self.root / 'engines' / 'ema_lightning' / 'motor.json').write_text(json.dumps(manifest), encoding='utf-8')
+        book = 'abcdef0123456789'
+        sentences = ['Bir iki.', 'Üç dört.', 'Beş altı.', 'Yedi.']
+        self.load('tr')
+        self.engines.prepare(book, sentences, 1.0, breaks=[2])
+        self.assertEqual(self.engines.plan(book, sentences, 1.0, 'tr', [2]), [[0, 2, True], [3, 3, True]])
+        result = self.engines.redo(book, sentences, 1, 1.0, breaks=[2])
+        self.assertEqual((result['start'], result['end'], result['previous']), (0, 2, True))
+        self.assertTrue(self.engines.has_previous(book, sentences, 2, 1.0, breaks=[2]))
+        self.assertFalse(self.engines.has_previous(book, sentences, 3, 1.0, breaks=[2]))
+
     def test_worker_crash_is_reported(self):
         make_engine(self.root, 'ema-lightning', ('tr',))
         self.load('tr')

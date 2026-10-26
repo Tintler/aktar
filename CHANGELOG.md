@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.33.0 — 2026-10-26
+
+### Yeni
+- **Cümle öbeğini yeniden seslendirme (F205):** Okuyucuda bir cümleye sağ tıklayıp "Bu cümle öbeğini yeniden seslendir" seçilince yalnızca o cümle (grup okuyan motorlarda birlikte okunan cümleler) yeniden üretilir; kitabın geri kalanı ve hazırlanmış sesler değişmez, yeni ses hemen çalınır. Eski ses silinmez: "Önceki sesine dön" ile geri alınabilir (bir daha seçince yeni sese döner). Sesli kitap kaydı ve bölüm WAV'ı yeni sesi kullanır. Menüde ayrıca "Buradan oku" var.
+
 ## 2.32.1 — 2026-10-26
 
 ### Düzeltme
