@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.29.3 — 2026-10-26
+
+### Düzeltme
+- **Önceden kaydedilmiş sesler yeniden kayıtsız görünüyordu (F200):** 2.29.1'deki sayı okuma düzeltmesi, sıra sayısı ya da Romen rakamı içeren cümlelerin (ve okuyucu cümleleri gruplayarak okuduğu için o cümlenin bulunduğu bütün grubun) ses önbelleği anahtarını değiştirmişti; tarih kitaplarında bölümlerin bir kısmı "hazır değil" görünüyor, OpenRouter'da parası ödenmiş sesler yeniden istenecekti. Artık bu cümlelerin eski kaydı varsa o kullanılır; yalnızca hiç kaydedilmemiş cümleler sayılar yazıyla okunarak üretilir.
+
 ## 2.29.2 — 2026-10-26
 
 ### Düzeltme

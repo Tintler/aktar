@@ -562,6 +562,24 @@ class BuiltinEngineTests(unittest.TestCase):
                                                                               'voices': [{'id': 'clone', 'language': 'tr'}]}}):
             self.assertNotEqual(self.engines._cache_path('0123456789abcdef', 'Bir.', 1.0, 'tr'), path)
 
+    def test_audio_recorded_before_spoken_numbers_is_kept(self):
+        # F200: F198'den once kaydedilmis 'II. Mahmud' cumlesi yeniden okunmaz; hic kaydedilmemis olan yeni anahtarla
+        book, text = '0123456789abcdef', 'II. Mahmud geldi.'
+        manifest = {'drama3': {'id': 'drama3', 'builtin': 'drama3', 'voices': [{'id': 'clone', 'language': 'tr'}]}}
+        with patch.object(self.engines, '_manifests', return_value=manifest):
+            old = self.engines._cache_path(book, text, 1.0, 'tr')
+            plain = self.engines._cache_path(book, 'Mahmud geldi.', 1.0, 'tr')
+        manifest['drama3']['spoken_numbers'] = True
+        with patch.object(self.engines, '_manifests', return_value=manifest):
+            new = self.engines._cache_path(book, text, 1.0, 'tr')
+            self.assertNotEqual(new, old)
+            self.assertEqual(self.engines._cache_path(book, 'Mahmud geldi.', 1.0, 'tr'), plain)
+            old.parent.mkdir(parents=True)
+            old.write_bytes(b'RIFF')
+            self.assertEqual(self.engines._cache_path(book, text, 1.0, 'tr'), old)
+            new.write_bytes(b'RIFF')   # sonradan yeni anahtarla da okunduysa o
+            self.assertEqual(self.engines._cache_path(book, text, 1.0, 'tr'), new)
+
     def test_never_chosen_by_itself(self):
         self.prefs.pop('voices')
         self.assertEqual(self.engines.choice('en'), (None, None))

@@ -483,16 +483,26 @@ class Engines:
         pref_tags = self._pref_tags(engine_id)
         if pref_tags:
             parts.append({'prefs': pref_tags})
+        numbers = None
         if self._manifests().get(engine_id, {}).get('spoken_numbers'):   # F198: only sentences it rewrites re-render
             import tr_numbers
             joined = ' '.join(text) if isinstance(text, (list, tuple)) else str(text)
             if tr_numbers.spoken(joined) != joined:
-                parts.append({'numbers': tr_numbers.VERSION})
+                numbers = {'numbers': tr_numbers.VERSION}
         if emotion:   # motor.json "emotion_cache_tags": bump to re-render only sentences with that tag (F169)
             renew = (self._manifests().get(engine_id, {}).get('emotion_cache_tags') or {}).get(emotion)
             parts.append({'emotion': emotion, 'tag': renew} if renew else {'emotion': emotion})
-        key = json.dumps(parts, sort_keys=True, ensure_ascii=False)
-        return self.app_dir / CACHE_DIR / book / (hashlib.sha1(key.encode('utf-8')).hexdigest() + '.wav')
+
+        def path(parts):
+            key = json.dumps(parts, sort_keys=True, ensure_ascii=False)
+            return self.app_dir / CACHE_DIR / book / (hashlib.sha1(key.encode('utf-8')).hexdigest() + '.wav')
+
+        if numbers is None:
+            return path(parts)
+        # F200: a sentence recorded before F198 keeps its audio (paid cloud renders are not thrown away); only a
+        # sentence never recorded is read with the spoken numbers
+        new, old = path(parts[:-1] + [numbers] + parts[-1:] if emotion else parts + [numbers]), path(parts)
+        return old if not self._cached_file(new) and self._cached_file(old) else new
 
     def _request_text(self, text, book, language='tr', override=None, tag=None):
         """(text, tag) sent to the engine for one sentence or a list of consecutive sentences (F177): in a list
