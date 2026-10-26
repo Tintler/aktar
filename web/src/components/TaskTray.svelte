@@ -57,8 +57,13 @@
     }
     const a = app.ttsAudiobook;
     if (a) {
-      list.push({ id: 'audiobook', icon: 'headphones', title: 'Sesli kitap kaydediliyor', detail: [a.title, a.chapters ? `Bölüm ${a.chapter} / ${a.chapters}` : 'bölümler okunuyor'].filter(Boolean).join(' · '),
-        percent: a.total ? pct(a.done, a.total) : null, count: a.total ? `${a.done} / ${a.total} cümle` : '', go: () => go('reading') });
+      if (a.video != null) {
+        list.push({ id: 'audiobook', icon: 'headphones', title: 'Sesli kitap videosu yazılıyor', detail: [a.title, 'görüntü'].filter(Boolean).join(' · '),
+          percent: pct(a.video * 1000, 1000), count: '', go: () => go('reading') });
+      } else {
+        list.push({ id: 'audiobook', icon: 'headphones', title: 'Sesli kitap kaydediliyor', detail: [a.title, a.chapters ? `Bölüm ${a.chapter} / ${a.chapters}` : 'bölümler okunuyor'].filter(Boolean).join(' · '),
+          percent: a.total ? pct(a.done, a.total) : null, count: a.total ? `${a.done} / ${a.total} cümle` : '', go: () => go('reading') });
+      }
     }
     const sp = app.speech.job;
     if (sp) {

@@ -311,12 +311,13 @@ export async function init() {
   });
   // F141: sesli kitap kaydi (okuyucu); bitince dosya/klasor gosterilir.
   on('tts_audiobook', async (data) => {
-    if (!data.finished) { app.ttsAudiobook = { ...data, chapters: data.chapters, chapter: data.chapter }; return; }
+    // F207: mp4'te ses bitince yalnizca {video: 0..1} gelir; bolum sayaclari korunur.
+    if (!data.finished) { app.ttsAudiobook = { ...(app.ttsAudiobook ?? {}), ...data, reading: false }; return; }
     app.ttsAudiobook = null;
     if (data.cancelled) { toast('Sesli kitap kaydı durduruldu; biten bölümler saklandı, yeniden başlatınca kaldığı yerden sürer.'); return; }
     if (data.error) { toast('Sesli kitap kaydedilemedi: ' + data.error, 'error'); return; }
     const where = data.format === 'mp3' ? 'Klasör' : 'Dosya';
-    if (await confirm({ title: 'Sesli kitap hazır', message: `${data.title} · ${data.chapters} bölüm\n${where}: ${data.output}`, ok: 'Konumu aç', cancel: 'Kapat' })) {
+    if (await confirm({ title: data.format === 'mp4' ? 'Sesli kitap videosu hazır' : 'Sesli kitap hazır', message: `${data.title} · ${data.chapters} bölüm\n${where}: ${data.output}`, ok: 'Konumu aç', cancel: 'Kapat' })) {
       act('reveal', data.output);
     }
   });

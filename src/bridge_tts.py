@@ -19,6 +19,7 @@ from pathlib import Path
 
 import audio_trim
 import audiobook
+import book_art
 import drama3_tags
 import emotion_tags
 import keep_awake
@@ -407,18 +408,67 @@ class TtsMixin:
         job = getattr(self, '_audiobook_job', None)
         return job is not None and job.is_alive()
 
+    def tts_audiobook_ready(self, chapters, speed=1.0, book=None, language='tr'):
+        """F207: kitabin tum sesi hazir mi (Hazirla): oyleyse sesli kitap ses motoru yuklenmeden yazilir."""
+        engines = self._engines()
+        try:
+            return all(engines.cached(book, c['sentences'], speed, language or 'tr', breaks=c['breaks'])
+                       == len(c['sentences']) for c in audiobook.chapter_list(chapters))
+        except (OSError, ValueError, KeyError):
+            return False
+
+    def _audiobook_images(self, book, chapters):
+        """F207 mp4: kitap gorsellerinin sahneleri bolumlere 'images' [[cumle_no, yol]] olarak eklenir. Bolumun
+        'sections' [[okuyucu_bolum_no, ilk_cumle], ...] sahneyi bulur; baslangic cumlesi (anchor) kaymissa bolum
+        icinde metniyle aranir (tam ekran okuyucu gibi). Donen: ilk sahneden onceki gorsel (yoksa None)."""
+        try:
+            store, plan = self._art_store(), self._art_load(book)
+        except (OSError, ValueError, AttributeError):
+            return None
+        if not plan:
+            return None
+        norm = lambda text: ' '.join(str(text or '').split())
+        first = None
+        for chapter in chapters:
+            sections = sorted((int(n), int(i)) for n, i in chapter.get('sections') or [])
+            sentences = [norm(s) for s in chapter.get('sentences') or []]
+            images = []
+            for k, (number, offset) in enumerate(sections):
+                end = sections[k + 1][1] if k + 1 < len(sections) else len(sentences)
+                here, carry = book_art.section_images(plan, number)
+                if first is None and not images and k == 0 and carry:
+                    path = store.image_path(book, carry)
+                    first = str(path) if path and path.is_file() else None
+                for scene in here:
+                    path = store.image_path(book, scene)
+                    if not (path and path.is_file()):
+                        continue
+                    index = offset + int(scene.get('start', 0))
+                    anchor = norm(scene.get('anchor'))
+                    if anchor and not (offset <= index < end and sentences[index] == anchor):
+                        found = next((i for i in range(offset, end) if sentences[i] == anchor), None)
+                        index = found if found is not None else index
+                    images.append([min(max(index, offset), max(offset, end - 1)), str(path)])
+            chapter['images'] = images
+        return first
+
     def tts_audiobook(self, title, author, chapters, speed=1.0, book=None, language='tr', fmt='m4b', cover=True):
-        """Kitabin tamamini sesli kitap olarak yazar: 'm4b' (bolum isaretli tek dosya) ya da 'mp3'
-        (secilen klasore bolum basina bir dosya). Ilerleme ve sonuc 'tts_audiobook' olayiyla gelir."""
+        """Kitabin tamamini sesli kitap olarak yazar: 'm4b' (bolum isaretli tek dosya), 'mp3' (secilen klasore
+        bolum basina bir dosya) ya da 'mp4' (F207: ses + kitap gorselleri). Ilerleme ve sonuc 'tts_audiobook'
+        olayiyla gelir. Butun ses hazirlanmissa (Hazirla) motor yuklu olmasa da yazar."""
         if self._audiobook_running():
             return {'error': 'Bir sesli kitap kaydı zaten sürüyor.'}
         fmt = fmt if fmt in audiobook.FORMATS else 'm4b'
         engines = self._engines()
-        if engines.state != 'ready':
+        if engines.state != 'ready' and not self.tts_audiobook_ready(chapters, speed, book, language):
             return {'error': 'Ses motoru hazır değil.'}
         name = audiobook.safe_name(title)
         if fmt == 'mp3':
             target = self._dialog('open_folder', 'Sesli kitabın kaydedileceği klasörü seç')
+        elif fmt == 'mp4':
+            target = self._dialog('save_file', 'Sesli kitap videosunu kaydet', name + '.mp4', ('Video (*.mp4)',))
+            if target and not str(target).lower().endswith('.mp4'):
+                target = str(target) + '.mp4'
         else:
             target = self._dialog('save_file', 'Sesli kitabı kaydet', name + '.m4b', ('Sesli kitap (*.m4b)',))
             if target and not str(target).lower().endswith('.m4b'):
@@ -431,6 +481,9 @@ class TtsMixin:
                 art = self._shelf().cover(book)
             except (ValueError, OSError, KeyError):
                 art = None
+        carry = self._audiobook_images(book, chapters) if fmt == 'mp4' and book else None
+        if fmt == 'mp4' and not any(c.get('images') for c in chapters):
+            self._log('Sesli kitap videosu: kitabın görseli yok, görüntü kapak olacak.')
         cancel = threading.Event()
         self._audiobook_cancel = cancel
 
@@ -438,10 +491,13 @@ class TtsMixin:
             self._emit('tts_audiobook', {'done': done, 'total': total, 'chapter': chapter, 'chapters': count,
                                          'title': title, 'book': book})
 
+        def video(fraction):
+            self._emit('tts_audiobook', {'video': round(fraction, 3), 'title': title, 'book': book})
+
         def work():
             try:
                 result = audiobook.build(engines, chapters, target, fmt, title, author, art, speed, book,
-                                         language or 'tr', progress, cancel, self._log)
+                                         language or 'tr', progress, cancel, self._log, video, carry)
                 self._log('Sesli kitap kaydedildi: ' + result['output'])
                 self._emit('tts_audiobook', dict(result, finished=True, format=fmt, title=title))
             except audiobook.Stopped as error:

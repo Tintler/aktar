@@ -377,20 +377,29 @@
   async function exportBook(fmt) {
     showExport = false;
     if (app.ttsAudiobook) return;
-    if (!(await ensureEngine({ needEngine: true }))) return;
+    try {
+      await startAudiobook(fmt);
+    } catch (error) {   // takili "hazirlaniyor" kalmasin
+      app.ttsAudiobook = null;
+      toast('Sesli kitap başlatılamadı: ' + (error?.message ?? error), 'error');
+    }
+  }
+
+  async function startAudiobook(fmt) {
     const pauses = resolvePauses(app.ttsPrefs.pauses);
     const chapters = [];
     app.ttsAudiobook = { book: book.id, title: book.title, done: 0, total: 0, chapter: 0, chapters: 0, reading: true };
     for (const part of bookChapters()) {
       // F186: breaks (paragraph and section ends) let the back end read the reader's groups, so prepared audio is used.
-      const chapter = { title: part.title, sentences: [], gaps: [], breaks: [] };
+      // F207 sections: [okuyucu bolum no, ilk cumle] -- mp4'te kitap gorsellerinin sahneleri bununla bulunur.
+      const chapter = { title: part.title, sentences: [], gaps: [], breaks: [], sections: [] };
       for (let number = part.from; number < part.to; number++) {
         const result = await call('reader_section', book.id, number);
         if (!result || result.error) continue;
+        chapter.sections.push([number, chapter.sentences.length]);
         const holder = document.createElement('div');
         holder.innerHTML = result.html;
         const cut = segment(holder, splitOptions());
-        await tagEmotions(cut.sentences, cut.breaks);
         if (chapter.sentences.length) chapter.breaks.push(chapter.sentences.length - 1);
         cut.sentences.forEach((text, i) => {
           if (cut.breaks.has(i)) chapter.breaks.push(chapter.sentences.length);
@@ -401,6 +410,9 @@
       if (chapter.sentences.length) chapters.push(chapter);
     }
     if (!chapters.length) { app.ttsAudiobook = null; toast('Kitapta seslendirilecek metin yok.'); return; }
+    // F207: butun ses hazirlanmissa (Hazirla) motor yuklenmeden yazilir.
+    const ready = await call('tts_audiobook_ready', chapters, app.ttsPrefs.speed, book.id, book.language || 'tr');
+    if (!ready && !(await ensureEngine({ needEngine: true }))) { app.ttsAudiobook = null; return; }
     const result = await act('tts_audiobook', book.title, book.author ?? '', chapters, app.ttsPrefs.speed, book.id,
       book.language || 'tr', fmt);
     if (result?.started) {
@@ -783,6 +795,7 @@
           <button class="chip acc" title={app.ttsAudiobook.reading ? 'Bölümler okunuyor…' : 'Sesli kitap kaydını durdur (biten bölümler saklanır, sonra kaldığı yerden sürer)'}
             disabled={app.ttsAudiobook.reading} onclick={() => call('tts_audiobook_cancel')}>
             <Icon name="headphones" size={14} />{app.ttsAudiobook.reading ? 'Sesli kitap hazırlanıyor…'
+              : app.ttsAudiobook.video != null ? `Video yazılıyor · %${Math.floor(app.ttsAudiobook.video * 100)}`
               : `Sesli kitap ${app.ttsAudiobook.chapter}/${app.ttsAudiobook.chapters} · %${app.ttsAudiobook.total ? Math.floor((app.ttsAudiobook.done * 100) / app.ttsAudiobook.total) : 0}`}
             {#if !app.ttsAudiobook.reading}<Icon name="x" size={12} />{/if}</button>
         {/if}
@@ -795,6 +808,10 @@
               <button onclick={exportSection}>Bu bölümü WAV olarak kaydet</button>
               <button disabled={Boolean(app.ttsAudiobook)} onclick={() => exportBook('m4b')}>Sesli kitap: tek M4B dosyası (bölümlü, kapaklı)</button>
               <button disabled={Boolean(app.ttsAudiobook)} onclick={() => exportBook('mp3')}>Sesli kitap: bölüm başına MP3 (klasöre)</button>
+              <button disabled={Boolean(app.ttsAudiobook)} onclick={() => exportBook('mp4')}
+                title={app.artBooks[book.id]?.images ? 'Ses + kitap görselleri: her görsel, tam ekran okuyucudaki gibi sahnesinin cümlesinde gelir'
+                  : 'Bu kitabın görseli yok: görüntü kapak olur (Kitaplık → sağ tık → Kitap görselleri)'}>
+                Sesli kitap videosu: MP4 ({app.artBooks[book.id]?.images ? 'kitap görselleriyle' : 'kapakla'})</button>
             </div>
           {/if}
         </div>

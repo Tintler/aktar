@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.34.0 — 2026-10-26
+
+### Yeni
+- **Sesli kitap videosu (F207):** Okuyucuda Kaydet → "Sesli kitap videosu: MP4" kitabın tamamını tek bir MP4 olarak yazar: ses sesli kitabınki (bölüm işaretli), görüntü kitap görselleri. Her görsel, tam ekran okuyucunun Görselli arka planındaki gibi sahnesinin ilk cümlesi okunurken gelir; ilk sahneye kadar kapak görünür. Görsel 1920×1080 kareye sığdırılır, boş kalan yer aynı görselin bulanık hâliyle dolar. Kitabın bütün sesi hazırlanmışsa (Hazırla) ses motoru yüklenmeden yazılır; bu M4B ve MP3 için de geçerli.
+
 ## 2.33.1 — 2026-10-26
 
 ### Düzeltme

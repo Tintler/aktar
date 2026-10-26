@@ -67,7 +67,7 @@ class FakeEngines:
         return {'audio': base64.b64encode(data).decode('ascii'), 'duration': len(text) * 0.05 / speed}
 
     def export(self, sentences, speed, path, progress=None, book=None, language='tr', gaps=None,
-               override=None, cancel=None, breaks=None):
+               override=None, cancel=None, breaks=None, starts=None):
         with wave.open(str(path), 'wb') as out:
             out.setnchannels(1)
             out.setsampwidth(2)
@@ -75,6 +75,8 @@ class FakeEngines:
             for index, text in enumerate(sentences):
                 if cancel is not None and cancel.is_set():
                     raise Cancelled('Ses kaydı durduruldu.')
+                if starts is not None:
+                    starts[index] = out.getnframes() / RATE
                 with wave.open(io.BytesIO(base64.b64decode(self.say(text, speed)['audio']))) as clip:
                     out.writeframes(clip.readframes(clip.getnframes()))
                 if progress:
@@ -112,9 +114,50 @@ class AudiobookPureTests(unittest.TestCase):
         line = audiobook.concat_list([Path("C:/a/it's.m4a")])
         self.assertIn("it'\\''s.m4a", line)
 
+    def test_chapter_list_maps_images_past_empty_sentences(self):
+        chapters = audiobook.chapter_list([{'sentences': ['A.', ' ', 'B.', 'C.'],
+                                            'images': [[3, 'c.png'], [1, 'b.png'], ['x', 'y'], [9, 'z.png']]}])
+        self.assertEqual(chapters[0]['images'], [(1, 'b.png'), (2, 'c.png')])
+
+    def test_image_timeline_starts_with_cover_and_merges_repeats(self):
+        timeline = audiobook.image_timeline([(0.0, 10.0, {0: 0.0, 1: 4.0}, [(1, 'a.png')]),
+                                             (10.0, 5.0, {0: 0.0, 2: 3.0}, [(0, 'a.png'), (2, 'b.png')])], 'kapak.png')
+        self.assertEqual([(p, round(s, 3)) for p, s in timeline], [('kapak.png', 4.0), ('a.png', 9.0), ('b.png', 2.0)])
+        self.assertEqual(audiobook.image_timeline([(0.0, 3.0, {}, [])]), [(None, 3.0)])
+        # Bolum basindaki sahne kapagi hic gostermez.
+        self.assertEqual(audiobook.image_timeline([(0.0, 2.0, {0: 0.0}, [(0, 'a.png')])], 'kapak.png'), [('a.png', 2.0)])
+
+    def test_slideshow_list_repeats_last_frame(self):
+        text = audiobook.slideshow_list([('a.png', 1.5), ('b.png', 2.0)])
+        self.assertEqual(text.count("b.png'"), 2)
+        self.assertIn('duration 1.500', text)
+
     def test_safe_name(self):
         self.assertEqual(audiobook.safe_name('Ana: Bir/İki?'), 'Ana Bir İki')
         self.assertEqual(audiobook.safe_name(' .. '), 'kitap')
+
+
+class AudiobookImagesTests(unittest.TestCase):
+    """F207: bridge_tts._audiobook_images kitap gorsellerinin sahnelerini sesli kitap bolumlerine baglar."""
+
+    def test_scenes_follow_sections_and_anchor(self):
+        import bridge_tts
+        folder = Path(tempfile.mkdtemp(prefix='aktar-test-gorsel-'))
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        for name in ('a.png', 'b.png', 'c.png'):
+            (folder / name).write_bytes(b'x')
+        plan = {'scenes': [{'section': 1, 'start': 0, 'anchor': 'Önce.', 'image': 'a.png'},
+                           {'section': 2, 'start': 0, 'anchor': 'Kaydı.', 'image': 'b.png'},     # bolme degismis
+                           {'section': 3, 'start': 0, 'anchor': 'Son.', 'image': 'c.png', 'skip': True},
+                           {'section': 3, 'start': 0, 'anchor': 'Yok.', 'image': 'yok.png'}]}
+        store = mock.Mock(image_path=lambda book, scene: folder / scene['image'])
+        host = mock.Mock(_art_store=lambda: store, _art_load=lambda book: plan)
+        chapters = [{'sentences': ['Bir.', 'İki.', 'Kaydı.', 'Üç.'], 'sections': [[2, 0]]},
+                    {'sentences': ['Son.'], 'sections': [[3, 0]]}]
+        first = bridge_tts.TtsMixin._audiobook_images(host, 'kitap', chapters)
+        self.assertEqual(first, str(folder / 'a.png'))                     # bolum 1 okunmadi: basta gosterilir
+        self.assertEqual(chapters[0]['images'], [[2, str(folder / 'b.png')]])
+        self.assertEqual(chapters[1]['images'], [])
 
 
 class DubPureTests(unittest.TestCase):
@@ -232,6 +275,43 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(names, ['01 - Bir başlangıç.mp3', '02 - İki.mp3'])
         tags = probe(Path(result['output']) / names[1])['format']['tags']
         self.assertEqual((tags.get('track'), tags.get('album')), ('2/2', 'Kitap/Adı'))
+
+    def _picture(self, name, color, size='320x240'):
+        path = self.folder / name
+        subprocess.run([FFMPEG, '-v', 'error', '-y', '-f', 'lavfi', '-i', f'color=c={color}:s={size}', '-frames:v', '1',
+                        str(path)], check=True)
+        return path
+
+    def test_mp4_shows_scene_images_with_chapters(self):
+        red, blue = self._picture('k.png', 'red'), self._picture('m.png', 'blue', '200x400')
+        chapters = [{'title': 'Giriş', 'sentences': ['Merhaba dünya, uzun bir cümle.', 'İkinci cümle burada.'],
+                     'images': [[1, str(red)]]},
+                    {'title': 'Son', 'sentences': ['Bitti artık, hepsi bu.'], 'images': [[0, str(blue)]]}]
+        target = self.folder / 'kitap.mp4'
+        seen = []
+        audiobook.build(self.engines, chapters, target, 'mp4', 'Kitap', 'Yazar', None, 1.0, 'abcdef12',
+                        video_progress=seen.append)
+        info = probe(target)
+        kinds = sorted(s['codec_type'] for s in info['streams'] if s['codec_type'] != 'data')   # data: bolum izi
+        self.assertEqual(kinds, ['audio', 'video'])
+        video = next(s for s in info['streams'] if s['codec_type'] == 'video')
+        self.assertEqual((video['width'], video['height']), audiobook.VIDEO_SIZE)
+        self.assertEqual([c['tags']['title'] for c in info['chapters']], ['Giriş', 'Son'])
+        self.assertTrue(seen and seen[-1] <= 1.0)
+
+        raw = subprocess.run([FFMPEG, '-v', 'error', '-i', str(target), '-vf', 'crop=2:2:959:539', '-f', 'rawvideo',
+                              '-pix_fmt', 'rgb24', '-'], capture_output=True, check=True).stdout
+
+        def color_at(second):    # ortadaki piksel; kareler VIDEO_FPS aralikla (2x2 kare = 12 bayt)
+            at = int(second * audiobook.VIDEO_FPS) * 12
+            return raw[at], raw[at + 1], raw[at + 2]
+
+        first = len('Merhaba dünya, uzun bir cümle.') * 0.05
+        self.assertLess(max(color_at(first / 2)), 30)                    # kapak yok: siyah
+        r, g, b = color_at(first + 0.6)
+        self.assertTrue(r > 150 and b < 80, (r, g, b))                    # ikinci cumlede kirmizi
+        r, g, b = color_at(float(info['format']['duration']) - 0.3)
+        self.assertTrue(b > 150 and r < 80, (r, g, b))                    # son bolumde mavi
 
     def _video(self, seconds=6):
         video = self.folder / 'film.mkv'

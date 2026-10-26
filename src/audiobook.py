@@ -4,6 +4,10 @@ Bicimler:
   - 'm4b': tek dosya, AAC; bolum isaretleri (ffmetadata) ve kapak resmi ile. Telefon ve sesli kitap
     uygulamalari bolumleri ayri gosterir.
   - 'mp3': secilen klasore bolum basina bir MP3 (ID3 etiketleri: baslik, albüm, yazar, parca no, kapak).
+  - 'mp4' (F207): M4B'nin sesi + kitap gorselleri (book_art) goruntu olarak; her gorsel sahnesinin baslangic
+    cumlesi okunurken gelir (tam ekran okuyucunun Gorselli arka plani gibi), bolum isaretleri de vardir.
+    Gorsel 1920x1080 kareye sigdirilir, bos kalan yer ayni gorselin bulanik buyutulmus hali; ilk sahneye kadar
+    kapak (yoksa siyah).
 
 Cumleler tts.Engines.export ile uretilir: kitabin ses onbellegi (Hazirla) kullanilir ve doldurulur.
 M4B'de her bolum once APP_DIR/sesli-kitap/<kitap>/ altinda .m4a olarak saklanir; is durdurulur ya da
@@ -27,9 +31,13 @@ import media
 from tts import Cancelled
 
 WORK_DIR = 'sesli-kitap'
-FORMATS = ('m4b', 'mp3')
+FORMATS = ('m4b', 'mp3', 'mp4')
 AAC_BITRATE = '64k'
 MP3_BITRATE = '96k'
+VIDEO_SIZE = (1920, 1080)
+VIDEO_FPS = 2          # duragan gorseller: saniyede iki kare gorsel degisimine yeter, dosya ve sure kucuk kalir
+VIDEO_GOP = 240        # 2 dakikada bir anahtar kare (gorsel degisince x264 kendisi koyar): 10 sn'de birde 10 dakikalik
+                       # video 9 kat buyuktu (26,7 MB / 3 MB); duragan karede ileri sarma yine aninda
 _UNSAFE = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
 
 
@@ -44,7 +52,9 @@ def safe_name(text, fallback='kitap', limit=100):
 
 def chapter_list(chapters):
     """Gelen bolumleri temizler: [{'title', 'sentences', 'gaps', 'breaks'}]; metni olmayanlar atlanir.
-    F186 'breaks': paragraf sonu cumleler (okuyucunun gruplari); verilmediyse None (cumle cumle)."""
+    F186 'breaks': paragraf sonu cumleler (okuyucunun gruplari); verilmediyse None (cumle cumle).
+    F207 'images': [[cumle_no, gorsel_yolu], ...] (mp4); cumle numarasi temizlenmis listeye cevrilir, bos cumlede
+    bir sonraki cumleye kayar."""
     result = []
     for number, chapter in enumerate(chapters or [], 1):
         sentences = [' '.join(str(s).split()) for s in (chapter or {}).get('sentences') or []]
@@ -58,9 +68,96 @@ def chapter_list(chapters):
         if raw_breaks is not None:
             ends = {int(b) for b in raw_breaks}
             breaks = [n for n, pair in enumerate(pairs) if pair[2] in ends]
+        images = []
+        for item in (chapter or {}).get('images') or []:
+            try:
+                index, path = int(item[0]), str(item[1])
+            except (TypeError, ValueError, IndexError):
+                continue
+            n = next((n for n, pair in enumerate(pairs) if pair[2] >= index), None)
+            if n is not None and path:
+                images.append((n, path))
         result.append({'title': title[:200], 'sentences': [p[0] for p in pairs], 'gaps': [p[1] for p in pairs],
-                       'breaks': breaks})
+                       'breaks': breaks, 'images': sorted(images, key=lambda item: item[0])})
     return result
+
+
+def image_timeline(chapters, first=None):
+    """[(bolum_baslangici_sn, bolum_suresi_sn, {cumle_no: sn}, [(cumle_no, gorsel)])] -> [(gorsel ya da None, sure)]
+    ardisik; ayni gorsel tekrar edince birlesir. `first`: ilk sahneye kadar gosterilen (kapak), None siyah."""
+    events, total = [(0.0, first)], 0.0
+    for begin, seconds, starts, images in chapters:
+        for index, path in images:
+            at = begin + float(starts.get(index, starts.get(str(index), 0.0)))
+            events.append((min(max(at, begin), begin + seconds), path))
+        total = begin + seconds
+    events.sort(key=lambda event: event[0])
+    timeline = []
+    for n, (at, path) in enumerate(events):
+        end = events[n + 1][0] if n + 1 < len(events) else total
+        if end - at <= 0.0005:
+            continue
+        if timeline and timeline[-1][0] == path:
+            timeline[-1] = (path, timeline[-1][1] + end - at)
+        else:
+            timeline.append((path, end - at))
+    return timeline or [(first, max(total, 0.001))]
+
+
+def frame_command(source, target, size=VIDEO_SIZE):
+    """Gorseli kareye sigdirir; bos kalan yer ayni gorselin bulanik, koyulastirilmis buyutulmus hali.
+    source None: siyah kare."""
+    width, height = size
+    command = [media.ffmpeg_path(), '-hide_banner', '-nostdin', '-v', 'error', '-y']
+    if source is None:
+        return command + ['-f', 'lavfi', '-i', f'color=c=black:s={width}x{height}', '-frames:v', '1', str(target)]
+    graph = (f'[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},'
+             f'boxblur=40:2,eq=brightness=-0.18[bg];'
+             f'[0:v]scale={width}:{height}:force_original_aspect_ratio=decrease[fg];'
+             f'[bg][fg]overlay=(W-w)/2:(H-h)/2,format=rgb24')
+    return command + ['-i', str(source), '-filter_complex', graph, '-frames:v', '1', str(target)]
+
+
+def slideshow_list(timeline):
+    """[(kare_yolu, sure)] -> ffmpeg concat listesi (son kare tekrar yazilir: concat son sureyi yoksaymasin)."""
+    lines = []
+    for path, seconds in timeline:
+        lines.append(concat_list([path]) + f'duration {max(seconds, 0.001):.3f}\n')
+    return ''.join(lines) + concat_list([timeline[-1][0]])
+
+
+def video_command(frames, listing, metadata, target, seconds):
+    """Kare listesi + bolum m4a'lari (kopya) + bolum isaretleri -> MP4 (H.264 duragan gorsel)."""
+    return [media.ffmpeg_path(), '-hide_banner', '-nostdin', '-v', 'error', '-y', '-progress', 'pipe:1', '-nostats',
+            '-f', 'concat', '-safe', '0', '-i', str(frames),
+            '-f', 'concat', '-safe', '0', '-i', str(listing), '-i', str(metadata),
+            '-map', '0:v', '-map', '1:a', '-map_metadata', '2', '-map_chapters', '2',
+            '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'stillimage', '-crf', '24', '-pix_fmt', 'yuv420p',
+            '-vf', f'fps={VIDEO_FPS}', '-g', str(VIDEO_GOP), '-c:a', 'copy', '-t', f'{seconds:.3f}',
+            '-movflags', '+faststart', '-f', 'mp4', str(target)]
+
+
+def _run_progress(command, seconds, report):
+    """FFmpeg'i -progress ciktisini okuyarak calistirir: report(0..1). cancel icin report Stopped atabilir."""
+    kwargs = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
+    with tempfile.TemporaryFile() as errors:
+        process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=errors,
+                                   text=True, encoding='utf-8', errors='replace', **kwargs)
+        try:
+            with process.stdout:
+                for line in process.stdout:
+                    key, _, value = line.strip().partition('=')
+                    if key == 'out_time_us' and value.isdigit() and seconds > 0:
+                        report(min(1.0, int(value) / 1e6 / seconds))
+        except BaseException:
+            process.kill()
+            process.wait()
+            raise
+        code = process.wait()
+        if code != 0:
+            errors.seek(0)
+            text = errors.read().decode('utf-8', 'replace').strip()
+            raise RuntimeError('FFmpeg videoyu yazamadı: ' + (text[-500:] or f'çıkış kodu {code}'))
 
 
 def _escape_meta(value):
@@ -143,6 +240,41 @@ def _run(command):
         raise RuntimeError('FFmpeg sesi yazamadı: ' + ((done.stderr or '').strip()[-500:] or f'çıkış kodu {done.returncode}'))
 
 
+def _write_video(parts, listing, metadata, target, first, scratch, check, report=None, log=None):
+    """F207: bolum parcalarinin sesi + sahne gorselleri -> MP4. Her farkli gorsel bir kez kareye cevrilir."""
+    chapters, begin = [], 0.0
+    for _path, _title, seconds, starts, images in parts:
+        chapters.append((begin, seconds, starts, images))
+        begin += seconds
+    timeline = image_timeline(chapters, str(first) if first else None)
+    frames = {}
+    for path, _seconds in timeline:
+        if path in frames:
+            continue
+        check()
+        frame = scratch / f'kare-{len(frames):04d}.png'
+        try:
+            _run(frame_command(path, frame))
+        except RuntimeError as error:
+            if path is None:
+                raise
+            if log:
+                log(f'Sesli kitap videosu: görsel okunamadı, siyah kare kullanılıyor ({Path(path).name}): {error}')
+            _run(frame_command(None, frame))
+        frames[path] = frame
+    listing_frames = scratch / 'kareler.txt'
+    listing_frames.write_text(slideshow_list([(frames[p], s) for p, s in timeline]), encoding='utf-8')
+    if log:
+        log(f'Sesli kitap videosu: {len(frames)} görsel, görüntü yazılıyor.')
+
+    def step(fraction):
+        check()
+        if report:
+            report(fraction)
+
+    _run_progress(video_command(listing_frames, listing, metadata, target, begin), begin, step)
+
+
 def chapter_key(engines, chapter, speed, language, override=None, book=None):
     """Bolumun sesini belirleyen her sey (ses, ayarlar, hiz, metin, duraklar): saklanan parca gecerli mi."""
     engine_id, voice_id = engines.choice(language, override)
@@ -159,9 +291,11 @@ def chapter_key(engines, chapter, speed, language, override=None, book=None):
 
 
 def build(engines, chapters, target, fmt='m4b', title='', author='', cover=None, speed=1.0, book=None,
-          language='tr', progress=None, cancel=None, log=None):
+          language='tr', progress=None, cancel=None, log=None, video_progress=None, carry=None):
     """Sesli kitabi yazar (bloklar). progress(done_sentences, total_sentences, chapter_no, chapter_count).
-    m4b: `target` dosya yolu; mp3: `target` klasor (icine '<kitap>' klasoru acilir). Donen: {'output', 'chapters'}."""
+    m4b/mp4: `target` dosya yolu; mp3: `target` klasor (icine '<kitap>' klasoru acilir). Donen: {'output', 'chapters'}.
+    F207 mp4: bolumlerin 'images' sahneleri goruntu olur; `carry` ilk sahneden onceki gorsel (yoksa kapak, o da
+    yoksa siyah); ses bittikten sonra goruntu yazilirken video_progress(0..1)."""
     fmt = fmt if fmt in FORMATS else 'm4b'
     chapters = chapter_list(chapters)
     if not chapters:
@@ -191,8 +325,12 @@ def build(engines, chapters, target, fmt='m4b', title='', author='', cover=None,
             key = chapter_key(engines, chapter, speed, language, book=book)
             stored = work / f'{number:04d}-{key}.m4a'
             seconds_file = stored.with_suffix('.sure')
-            if fmt == 'm4b' and stored.exists() and seconds_file.exists():
-                parts.append((stored, chapter['title'], float(seconds_file.read_text(encoding='utf-8'))))
+            times_file = stored.with_suffix('.zaman')    # F207: cumle baslangiclari (mp4 gorselleri icin)
+            if (fmt != 'mp3' and stored.exists() and seconds_file.exists()
+                    and (fmt == 'm4b' or times_file.exists())):
+                starts = json.loads(times_file.read_text(encoding='utf-8')) if times_file.exists() else {}
+                parts.append((stored, chapter['title'], float(seconds_file.read_text(encoding='utf-8')),
+                              {int(k): v for k, v in starts.items()}, chapter['images']))
                 done_before += count
                 if progress:
                     progress(done_before, total, number, len(chapters))
@@ -203,9 +341,10 @@ def build(engines, chapters, target, fmt='m4b', title='', author='', cover=None,
                 if progress:
                     progress(base + done, total, no, len(chapters))
 
+            starts = {}
             try:
                 engines.export(chapter['sentences'], speed, wav, step, book, language, chapter['gaps'], cancel=cancel,
-                               breaks=chapter.get('breaks'))
+                               breaks=chapter.get('breaks'), starts=starts)
             except Cancelled as error:
                 raise Stopped(str(error)) from error
             check()
@@ -222,7 +361,8 @@ def build(engines, chapters, target, fmt='m4b', title='', author='', cover=None,
                 _run(encode_command(wav, partial, 'm4a'))
                 os.replace(partial, stored)
                 seconds_file.write_text(f'{seconds:.3f}', encoding='utf-8')
-                parts.append((stored, chapter['title'], seconds))
+                times_file.write_text(json.dumps(starts), encoding='utf-8')
+                parts.append((stored, chapter['title'], seconds, starts, chapter['images']))
             wav.unlink()
             done_before += count
             log(f'Sesli kitap: {number}/{len(chapters)} bölüm hazır ({chapter["title"]}).')
@@ -235,6 +375,11 @@ def build(engines, chapters, target, fmt='m4b', title='', author='', cover=None,
         metadata.write_text(ffmetadata(title, author, [(p[1], p[2]) for p in parts]), encoding='utf-8')
         target = Path(target)
         partial = target.with_name(target.name + '.part')
+        if fmt == 'mp4':
+            _write_video(parts, listing, metadata, partial, carry or art, scratch, check, video_progress, log)
+            os.replace(partial, target)
+            shutil.rmtree(work, ignore_errors=True)
+            return {'output': str(target), 'chapters': len(chapters)}
         try:
             _run(join_command(listing, metadata, partial, art))
         except RuntimeError:

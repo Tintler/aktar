@@ -768,11 +768,13 @@ class Engines:
         return self.cache_info()
 
     def export(self, sentences, speed, path, progress=None, book=None, language='tr', gaps=None,
-               override=None, cancel=None, breaks=None):
+               override=None, cancel=None, breaks=None, starts=None):
         """Writes all sentences into one WAV file, reusing (and filling) the book's cache; blocking.
         `gaps` gives the seconds of silence after each sentence (default SENTENCE_GAP).
         F186: with `breaks` (paragraph ends) sentences are read in the reader's groups (plan), so prepared
         audio is used; a group is followed by its last sentence's gap.
+        F207: a `starts` dict is filled with {sentence index: second it starts in the file}; inside a group the
+        time is shared by character count, like the reader's highlight.
         A set `cancel` event stops it with Cancelled (the partial file is left to the caller)."""
         gaps = list(gaps or ())
         kept = [i for i, s in enumerate(sentences) if str(s).strip()]
@@ -796,6 +798,14 @@ class Engines:
                         stream.setnchannels(1)
                         stream.setsampwidth(2)
                         stream.setframerate(rate)
+                    if starts is not None:
+                        begin = stream.getnframes() / float(rate)
+                        length = clip.getnframes() / float(clip.getframerate())
+                        sizes = [max(1, len(texts[n])) for n in range(start, end + 1)]
+                        done = 0
+                        for n, size in zip(range(start, end + 1), sizes):
+                            starts[kept[n]] = round(begin + length * done / sum(sizes), 3)
+                            done += size
                     stream.writeframes(clip.readframes(clip.getnframes()))
                     stream.writeframes(b'\x00\x00' * int(rate * gap))
                 if progress:
