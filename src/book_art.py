@@ -29,7 +29,8 @@ gorsel istemine olumlu son ek olarak gider.
 F209 secenekleri (hepsi kapaliyken istemler ve akis eskisi gibi):
   - Siklik: 'rare' / 'sparse' parcadan seyrek; dil modeli onem puanli adaylar verir, plan sonunda kitabin tamamindan
     en onemlileri secilir (select_moments). 'low' ve seyreklerde parca bolunmez, onemli anlar secilir (focused).
-  - Bolum acilis gorseli (plan['openers']): bolumun ilk parcasinda ayrica genel gorunum; bolumun ilk cumlesinde.
+  - Bolum acilis gorseli (plan['openers']): siklik ne olursa olsun her bolumun ilk cumlesinde; ayri istekle ve
+    yalnizca bolumun ilk sayfasindan yazilir (spoiler olmaz), hikaye disi sayfayi (kunye, ithaf) model atlar.
   - Mekan kimligi (plan['place_identity'], plan['places']): sahnenin mekaninin adi; kalici tarifi uretimde eklenir.
   - Gorunus degisimi (plan['look_changes']): karakterin 'changes' listesi; sahneler o yerdeki gorunusle.
   - RTX buyutme (plan['upscale'] katsayi): uretilen gorsel ComfyUI'de RTX Video Super Resolution ile buyutulur.
@@ -367,6 +368,13 @@ def scene_count(chars, density='medium'):
 
 
 SCENE_SYSTEM = STYLE_SYSTEM
+PROMPT_RULE = (
+    'English image prompt, 40-90 words, describing only what is visible: setting, subjects, action, '
+    'framing. Start directly with the scene; never restate the medium, art style or palette (the style guide is '
+    'already added). Describe characters by their look (the image model does not know names). Every character appears at '
+    'most once in the image; say how many people are visible. Describe what IS '
+    'there; never write "no ...", never ask for text, letters, signs or screens with writing. For non-fiction or '
+    'reflective passages prefer places, objects, period details or symbolic imagery.')
 SCENE_TASK = (
     'Style guide of the edition (it is added to every prompt automatically, do not repeat it):\n{style}\n\n'
     'Recurring characters (when one appears, copy its look into the prompt word for word):\n{characters}\n\n'
@@ -376,20 +384,14 @@ SCENE_TASK = (
     'Below is the next part of the book as numbered sentences. {choose} For each scene give:\n'
     '- "start": {start_rule}\n'
     '- "title": short title in the language of the book\n'
-    '- "prompt": English image prompt, 40-90 words, describing only what is visible: setting, subjects, action, '
-    'framing. Start directly with the scene; never restate the medium, art style or palette (the style guide is '
-    'already added). Describe characters by their look (the image model does not know names). Every character appears at '
-    'most once in the image; say how many people are visible. Describe what IS '
-    'there; never write "no ...", never ask for text, letters, signs or screens with writing. For non-fiction or '
-    'reflective passages prefer places, objects, period details or symbolic imagery.\n'
+    '- "prompt": ' + PROMPT_RULE + '\n'
     '{importance}'
     '- "characters": optional, new recurring characters introduced here with a fixed look '
     '[{{"name": "...", "look": "..."}}]\n'
     '{extra}'
     '{cast}'
     '{opening}'
-    'JSON shape: {{"scenes": [{{"start": {first}, "title": "...", "prompt": "...", "characters": []{cast_shape}}}]'
-    '{opening_shape}}}\n\n')
+    'JSON shape: {{"scenes": [{{"start": {first}, "title": "...", "prompt": "...", "characters": []{cast_shape}}}]}}\n\n')
 SPLIT_TASK = ('Split it at meaningful scene, location or mood changes into about {count} scenes (between {low} and '
               '{high}).')
 SPLIT_START = 'number of the first sentence the image belongs to (the first scene starts at {first})'
@@ -413,14 +415,28 @@ PLACE_TASK = ('- "place": name of the recurring place where the scene happens (e
 CHANGES_TASK = ('- "changes": optional, only when a recurring character\'s lasting appearance changes in this part '
                 '(grows older, new clothes or uniform, a scar, new hair): [{{"name": "...", "start": sentence number, '
                 '"look": "the full new look, 15-35 words"}}]; later images use the new look\n')
-# bolum acilis gorseli (F209): bolumun ilk satirlari okunurken gosterilen genel gorunum
-OPENING_TASK = ('- "opening" (once, next to "scenes"): the image that opens this chapter, shown while its first lines '
-                'are read: a wide establishing view of the chapter\'s main place and mood, {{"title": "...", '
-                '"prompt": "..."}} with the same prompt rules. The scenes then start at sentence {second} or later. '
-                'Leave "opening" out when this part is not the story itself (author biography, title or copyright '
-                'page, contents, notes about the edition).\n')
-MIN_OPENING_CHARS = 3000   # daha kisa bolum (kunye, ithaf, kisa onsoz) acilis gorseli almaz
-OPENING_SHAPE = ', "opening": {{"title": "...", "prompt": "..."}}'
+# bolum acilis gorseli (F209): bolumun ilk sayfasi kendi gorselini aldiysa sahneler sonrasindan baslar
+OPENED_TASK = ('The first page of this chapter already has its own image, so the scenes start at sentence {second} '
+               'or later.\n')
+# Acilis gorseli ayri istekle ve yalnizca bolumun ilk sayfasindan yazilir: model bolumun devamini gormez, okurun
+# henuz okumadigi bir seyi (spoiler) gosteremez. Hikaye disi sayfada (kunye, ithaf, yazarin hayati) {"skip": true}.
+OPENING_PAGE = 1500   # ilk sayfa: bu kadar karakter (en az bir cumle)
+MIN_OPENING_CHARS = 200   # kisa bolum de acilis alir (sahne sinirindan kucuk); yalnizca baslik gibi bolumler almaz
+OPENING_TASK = (
+    'Style guide of the edition (it is added to every prompt automatically, do not repeat it):\n{style}\n\n'
+    'Recurring characters (when one appears, copy its look into the prompt word for word):\n{characters}\n\n'
+    '{places}'
+    '{note}'
+    'Below is the first page of a chapter as numbered sentences. Write the image shown while this page is read, at '
+    'the very start of the chapter. Show only what this page itself tells or implies (place, people, situation, '
+    'mood): the reader has not read any further, so never show anything that may happen later in the chapter. '
+    'If the page is not part of the story (author biography, title or copyright page, dedication, contents, notes '
+    'about the edition, foreword or preface by someone else), answer {{"skip": true}}. Otherwise give:\n'
+    '- "title": short title in the language of the book\n'
+    '- "prompt": ' + PROMPT_RULE + '\n'
+    '{extra}'
+    '{cast}'
+    'JSON shape: {{"title": "...", "prompt": "..."{shape}}}\n\n')
 # karakter kimligi acikken (F201): her sahneye gorunen karakterlerin adlari; poz ve bakis portreden kopyalanmasin
 CAST_TASK = (
     '- "cast": names of the recurring characters visible in the image (exact names from the list above or from '
@@ -436,7 +452,8 @@ def character_lines(characters):
 def scene_prompt(style, characters, sentences, start, stop, count, note='', previous=None, identity=False,
                  modifiers=(), focus=False, places=None, changes=False, opening=False):
     """Parcanin sahne istegi. `focus`: onemli anlari sec (az ve seyrek siklik, onem puaniyla); `places`: mekan kimligi
-    acikken bilinen mekanlar (None kapali); `changes`: gorunus degisimlerini sor; `opening`: bolum acilis gorseli."""
+    acikken bilinen mekanlar (None kapali); `changes`: gorunus degisimlerini sor; `opening`: bolumun ilk sayfasinin
+    kendi gorseli var (sahneler sonrasindan baslar)."""
     lines = '\n'.join(f'{i}: {_clean(sentences[i])}' for i in range(start, stop))
     before = (f'The previous image showed: {previous}\n\n') if previous else ''
     numbers = {'count': count, 'low': max(1, count - 1), 'high': count + 1, 'first': start, 'last': stop - 1}
@@ -453,9 +470,44 @@ def scene_prompt(style, characters, sentences, start, stop, count, note='', prev
         importance=IMPORTANCE_TASK if focus else '',
         extra=(PLACE_TASK.format() if places is not None else '') + (CHANGES_TASK.format() if changes else ''),
         cast=CAST_TASK.format(limit=MAX_CAST) if identity else '', first=start,
-        opening=OPENING_TASK.format(second=start + 1) if opening else '', cast_shape=shape,
-        opening_shape=OPENING_SHAPE.format() if opening else '')
+        opening=OPENED_TASK.format(second=start + 1) if opening else '', cast_shape=shape)
     return SCENE_SYSTEM, task + lines
+
+
+def first_page(sentences, limit=OPENING_PAGE):
+    """Bolumun ilk sayfasinin cumle sayisi (en az bir)."""
+    size = 0
+    for index, sentence in enumerate(sentences):
+        size += len(sentence) + 1
+        if size >= limit:
+            return index + 1
+    return len(sentences)
+
+
+def opening_prompt(style, characters, sentences, note='', identity=False, modifiers=(), places=None):
+    """Bolum acilis gorseli istegi: yalnizca bolumun ilk sayfasi gider (spoiler olmasin)."""
+    lines = '\n'.join(f'{i}: {_clean(sentences[i])}' for i in range(first_page(sentences)))
+    shape = (', "cast": []' if identity else '') + (', "place": ""' if places is not None else '')
+    task = OPENING_TASK.format(
+        style=style, characters=character_lines(characters), note=note_text(note, modifiers),
+        places=PLACES_LIST.format(places=character_lines(places)) if places is not None else '',
+        extra=PLACE_TASK.format().split('\n')[0] + '\n' if places is not None else '',
+        cast=CAST_TASK.format(limit=MAX_CAST) if identity else '', shape=shape)
+    return SCENE_SYSTEM, task + lines
+
+
+def parse_opening(raw, style=''):
+    """Acilis gorseli {title, prompt[, cast, place]}; hikaye disi sayfa ya da istemsiz yanit None."""
+    data = _json_object(raw) or {}
+    prompt = strip_style(_clean(data.get('prompt')), style)
+    if data.get('skip') is True or not prompt:
+        return None
+    entry = {'title': _clean(data.get('title'))[:80], 'prompt': prompt[:1200]}
+    if isinstance(data.get('cast'), list):
+        entry['cast'] = clean_cast(data['cast'])
+    if _clean(data.get('place')):
+        entry['place'] = _clean(data['place'])[:60]
+    return entry
 
 
 def strip_style(prompt, style):
@@ -505,11 +557,9 @@ def parse_scenes(raw, start, stop, sentences, style='', first=True):
 
 
 def parse_extras(raw, style=''):
-    """Sahne yanitinin secenekli alanlari (F209): {'opening': {title, prompt} | None, 'places': [...],
-    'changes': [{name, start, look}]} (sahnelerdeki 'places' / 'changes' listeleri birlestirilir)."""
+    """Sahne yanitinin secenekli alanlari (F209): {'places': [...], 'changes': [{name, start, look}]} (sahnelerdeki
+    'places' / 'changes' listeleri birlestirilir)."""
     data = _json_object(raw) or {}
-    opening = data.get('opening') if isinstance(data.get('opening'), dict) else None
-    prompt = strip_style(_clean((opening or {}).get('prompt')), style)
     places, changes = [], []
     items = [data] + [item for item in data.get('scenes') or () if isinstance(item, dict)] \
         if isinstance(data.get('scenes'), list) else [data]
@@ -517,8 +567,7 @@ def parse_extras(raw, style=''):
         places += clean_places(item.get('places'))
         changes += [c for c in item.get('changes') or () if isinstance(c, dict)] \
             if isinstance(item.get('changes'), list) else []
-    return {'opening': {'title': _clean(opening.get('title'))[:80], 'prompt': prompt[:1200]} if prompt else None,
-            'places': places, 'changes': changes}
+    return {'places': places, 'changes': changes}
 
 
 def select_moments(candidates, target, spacing):
@@ -679,6 +728,58 @@ def renumber(plan, texts):
     return True
 
 
+def opening_scene(plan, real, sentences, ask, add):
+    """Bolum acilis gorseli (F209): ilk sayfadan ayri istek, sahne plan['scenes']'e eklenir. Hikaye disi sayfa
+    plan['opening_skipped']'e yazilir, bir daha sorulmaz. Donen: bolumun acilis gorseli var mi."""
+    key = f'{real}-open'
+    if any(scene['id'] == key for scene in plan['scenes']):
+        return True
+    if real in (plan.get('opening_skipped') or ()):
+        return False
+    people = 'no-people' not in (plan.get('modifiers') or ())
+    found = parse_opening(ask(*opening_prompt(
+        plan['style'], characters_at(plan['characters'], real, 0) if people else [], sentences, plan.get('note'),
+        plan.get('identity'), plan.get('modifiers'), plan.get('places') if plan.get('place_identity') else None)),
+        plan['style'])
+    if not found:
+        plan.setdefault('opening_skipped', []).append(real)
+        return False
+    entry = {'id': key, 'section': real, 'start': 0, 'anchor': _clean(sentences[0]),
+             'title': found['title'] or 'Bölüm açılışı', 'prompt': found['prompt'], 'opening': True}
+    for name in ('cast', 'place'):
+        if name in found:
+            entry[name] = found[name]
+    add(entry, plan['scenes'])
+    return True
+
+
+def add_openers(sections, ask, plan, cancel=None, progress=None, save=None):
+    """Var olan plana eksik bolum acilis gorsellerini ekler (yeniden planlamadan, F209). Ilk cumlesinde zaten
+    sahnesi olan bolum ve daha once atlanan hikaye disi sayfa sorulmaz; `progress(islenen, toplam)` bolum sayisiyla."""
+    plan['openers'] = True
+    todo = [section for index, section in enumerate(sections)
+            if len(section['sentences']) > 1 and sum(len(s) + 1 for s in section['sentences']) >= MIN_OPENING_CHARS
+            and not any(scene['section'] == section.get('number', index) and scene['start'] == 0
+                        and not scene.get('opening') for scene in plan['scenes'])]
+
+    def add(entry, where):
+        entry.update(seed=random.randrange(1, 2 ** 31), image='', skip=False)
+        where.append(entry)
+
+    for done, section in enumerate(todo):
+        if cancel is not None and cancel.is_set():
+            raise Cancelled('Görsel planı durduruldu.')
+        if progress:
+            progress(done, len(todo))
+        opening_scene(plan, section.get('number', sections.index(section)), section['sentences'], ask, add)
+        plan['scenes'].sort(key=lambda s: (s['section'], s['start'], not s.get('opening')))
+        if save:
+            save(plan)
+    if progress:
+        progress(len(todo), len(todo))
+    return plan
+
+
 def plan_book(sections, ask, plan, cancel=None, progress=None, save=None):
     """Plani doldurur (kaldigi parcadan devam eder). `ask(system, user) -> yanit`; `progress(islenen, toplam)` cumle
     sayisiyla; `save(plan)` her parcadan sonra (durdurulup yeniden baslatilinca devam icin). Donen: plan."""
@@ -716,10 +817,11 @@ def plan_book(sections, ask, plan, cancel=None, progress=None, save=None):
         section, start, stop = parts[number]
         sentences = sections[section]['sentences']
         count = scene_count(sum(len(s) + 1 for s in sentences[start:stop]), density)
+        real = sections[section].get('number', section)   # okuyucunun bolum numarasi
+        opening = (bool(plan.get('openers')) and start == 0 and stop > 1
+                   and sum(len(s) + 1 for s in sentences) >= MIN_OPENING_CHARS
+                   and opening_scene(plan, real, sentences, ask, add))
         if count:
-            real = sections[section].get('number', section)   # okuyucunun bolum numarasi
-            opening = (bool(plan.get('openers')) and start == 0 and stop > 1
-                       and sum(len(s) + 1 for s in sentences) >= MIN_OPENING_CHARS)
             earlier = (plan.get('candidates') or []) + plan['scenes']
             previous = max(earlier, key=lambda s: (s['section'], s['start']))['prompt'] if earlier else None
             raw = ask(*scene_prompt(plan['style'], characters_at(plan['characters'], real, start), sentences, start,
@@ -736,10 +838,7 @@ def plan_book(sections, ask, plan, cancel=None, progress=None, save=None):
                                                        and start <= int(c['start']) < stop], real)
             if places:
                 plan['places'] = merge_characters(plan.get('places') or [], extras['places'])
-            if opening and extras['opening']:
-                add({'id': f'{real}-open', 'section': real, 'start': start, 'anchor': _clean(sentences[start]),
-                     'title': extras['opening']['title'] or 'Bölüm açılışı', 'prompt': extras['opening']['prompt'],
-                     'opening': True}, plan['scenes'])
+            if opening:
                 # acilis gorseli bolumun ilk cumlesinde; ayni cumleye dusen sahne bir sonrakine kayar
                 taken = {scene['start'] for scene in scenes}
                 for scene in scenes:

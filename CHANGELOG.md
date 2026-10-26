@@ -2,6 +2,12 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.37.0 — 2026-10-27
+
+### Değişen
+- **Her bölüm başında görsel (F210):** Bölüm açılış görseli artık sıklıktan bağımsız; "Çok seyrek"te bile her bölüm bir görselle açılıyor. Seçenek Sıklık satırının yanına taşındı. Görsel ayrı bir istekle ve yalnızca bölümün ilk sayfasından yazılıyor: dil modeli bölümün devamını görmediği için okurun henüz okumadığı bir şeyi göstermiyor. Kısa bölümler de açılış alıyor; künye, ithaf, yazarın hayatı gibi hikâye dışı sayfaları model atlıyor ve bu sayfalar bir daha sorulmuyor.
+- **Eksik bölüm açılışlarını tamamla:** İnceleme ekranındaki düğme, var olan planı silmeden açılış görseli olmayan bölümlere görsel ekliyor.
+
 ## 2.36.0 — 2026-10-26
 
 ### Yeni

@@ -229,10 +229,10 @@
   }
 
   let readingRun = 0;
-  async function startPlan(resume = false) {
+  async function startPlan(resume = false, openersOnly = false) {
     if (otherJob) { toast('Başka bir kitabın görselleri için iş sürüyor.'); return; }
     if (app.emotionJob) { toast('Duygu etiketleri oluşturulurken görsel planı çıkarılamaz.'); return; }
-    if (!resume && plan?.complete) {
+    if (!resume && !openersOnly && plan?.complete) {
       const yes = await confirm({ title: 'Baştan planla', message: 'Mevcut plan ve üretilmiş görseller silinir. Devam edilsin mi?',
         ok: 'Baştan planla', cancel: 'Vazgeç', danger: true });
       if (!yes) return;
@@ -250,11 +250,11 @@
     }
     if (app.artJob?.reading !== reading) return;   // bolumler okunurken durduruldu
     const result = await act('art_plan_create', book, sections, note, preset, density, title, resume, identity && !noCast, modifiers,
-      { openers, places: placeIdentity, changes: lookChanges && !noPeople, upscale });
+      { openers, places: placeIdentity, changes: lookChanges && !noPeople, upscale }, openersOnly);
     if (!result?.started) { if (app.artJob?.reading === reading) app.artJob = null; return; }
     if (app.artJob?.reading === reading) app.artJob = { book, title, stage: 'plan', done: 0, total: result.total };
     replanning = false;
-    plan = null;
+    if (!openersOnly) plan = null;
   }
 
   // Bolumler okunurken is henuz arka uca gitmedi: durdurmak yalnizca bekleyen baslatmayi birakir.
@@ -411,11 +411,10 @@
               <button class:on={density === key} onclick={() => (density = key)}>{label}</button>
             {/each}
           </div>
-          <span class="dim">{DENSITY_HINT[density]}</span>
-        </div>
-        <div class="row">
-          <Toggle bind:checked={openers} label="Bölüm açılış görseli" />
-          <span class="dim">Her bölümün başında, ilk satırlar okunurken bölümün genel görünümü (mekânı ve havası).</span>
+          <Toggle bind:checked={openers} label="Her bölüm başında görsel" />
+          <span class="dim">{DENSITY_HINT[density]}{openers
+            ? ' Sıklıktan bağımsız olarak her bölüm, o anki sayfadan çizilen bir görselle açılır (bölümün devamını göstermez).'
+            : ''}</span>
         </div>
         <div class="row">
           <Toggle bind:checked={placeIdentity} label="Mekân kimliği" />
@@ -546,8 +545,12 @@
           </div>
         {/if}
         {#if plan.openers || plan.look_changes}
-          <div class="dim">{[plan.openers && 'Bölüm açılış görseli', plan.look_changes && 'görünüm değişimi'].filter(Boolean).join(' · ')} açık</div>
+          <div class="dim">{[plan.openers && 'Her bölüm başında görsel', plan.look_changes && 'görünüm değişimi'].filter(Boolean).join(' · ')} açık</div>
         {/if}
+        <div class="row">
+          <button class="btn sm" disabled={Boolean(app.artJob)} onclick={() => startPlan(false, true)}
+            title="Yeniden planlamadan, açılış görseli olmayan her bölüme o anki sayfadan bir görsel planlanır."><Icon name="image" size={13} />{plan.openers ? 'Eksik bölüm açılışlarını tamamla' : 'Her bölüm başına görsel ekle'}</button>
+        </div>
         {#if plan.lora}
           <div class="row lora">
             <span><b>LoRA:</b> {plan.lora.label}{#if plan.lora.trigger} · tetik <code>{plan.lora.trigger}</code>{/if}</span>

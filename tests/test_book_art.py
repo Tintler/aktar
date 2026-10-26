@@ -482,28 +482,76 @@ class OptionsTest(unittest.TestCase):
         self.assertEqual(len(again['scenes']), 2)
 
     def test_chapter_openers(self):
-        sections = book(3, 60, 60)
-        prompts = []
+        sections = book(1, 60, 60, 60)
+        prompts, openings = [], []
 
         def ask(system, user):
             prompts.append(user)
             if 'JSON shape: {"style"' in user:
                 return self.style_reply(user)
-            first = int(user.split('the first scene starts at ')[1].split(')')[0])
-            return json.dumps({'scenes': [{'start': first, 'title': 'T', 'prompt': f'scene {first}'}],
-                               'opening': {'title': 'Açılış', 'prompt': 'A wide valley at dawn.'}})
+            if 'first page of a chapter' in user:
+                openings.append(user)
+                if 'Bölüm 2 ' in user:
+                    return json.dumps({'skip': True})   # hikaye disi sayfa
+                return json.dumps({'title': 'Açılış', 'prompt': 'A wide valley at dawn.'})
+            first = int((user.split('the first scene starts at ')[1:] or ['0)'])[0].split(')')[0])
+            return json.dumps({'scenes': [{'start': first, 'title': 'T', 'prompt': f'scene {first}',
+                                           'importance': 5}]})
 
-        result = book_art.plan_book(sections, ask, book_art.new_plan(options={'openers': True}))
-        self.assertTrue(all('"opening" (once' in p for p in prompts[1:]))
+        saved = []
+        result = book_art.plan_book(sections, ask, book_art.new_plan(options={'openers': True}),
+                                    save=lambda plan: saved.append(json.loads(json.dumps(plan))))
+        # kisa bolum (0) sorulmaz; acilis istegi yalnizca ilk sayfayi gorur (spoiler yok)
+        self.assertEqual(len(openings), 3)
+        self.assertTrue(all('\n15: ' in p and '\n16: ' not in p and '"skip": true' in p for p in openings))
         scenes = [(s['id'], s['start'], bool(s.get('opening'))) for s in result['scenes']]
-        self.assertEqual(scenes, [('1-open', 0, True), ('1-1', 1, False), ('2-open', 0, True), ('2-1', 1, False)])
+        self.assertEqual(scenes, [('1-open', 0, True), ('1-1', 1, False), ('2-0', 0, False),
+                                  ('3-open', 0, True), ('3-1', 1, False)])
+        self.assertEqual(result['opening_skipped'], [2])
+        self.assertIn('sentence 1 or later', next(p for p in prompts if '\n0: Bölüm 1 cümle 0' in p
+                                                  and 'first page of a chapter' not in p))
         here, _carry = book_art.section_images(
             {'scenes': [dict(s, image='x.png') for s in reversed(result['scenes'])]}, 1)
         self.assertTrue(here[0]['opening'])
+        # yeniden baslatmada var olan ve atlanan acilislar bir daha sorulmaz
+        openings.clear()
+        half = next(p for p in saved if p['next_chunk'] == 3)
+        book_art.plan_book(sections, ask, half)
+        self.assertEqual(len(openings), 1)
+        # cok seyrekte de her bolumun acilisi var
+        sparse = book_art.plan_book(sections, ask, book_art.new_plan(density='sparse', options={'openers': True}))
+        self.assertEqual([s['id'] for s in sparse['scenes'] if s.get('opening')], ['1-open', '3-open'])
+        # sahne alamayacak kadar kisa bolum de acilir
+        short = book_art.plan_book(book(4), ask, book_art.new_plan(options={'openers': True}))
+        self.assertEqual([s['id'] for s in short['scenes']], ['0-open'])
         # kapaliyken istemde yok
         prompts.clear()
         book_art.plan_book(sections, ask, book_art.new_plan())
-        self.assertFalse(any('"opening"' in p for p in prompts))
+        self.assertFalse(any('first page' in p or 'own image' in p for p in prompts))
+
+    def test_add_openers_to_existing_plan(self):
+        sections = [dict(s, number=n + 2) for n, s in enumerate(book(1, 60, 60, 60))]
+        asked = []
+
+        def ask(system, user):
+            if 'JSON shape: {"style"' in user:
+                return self.style_reply(user)
+            if 'first page of a chapter' in user:
+                asked.append(user)
+                return json.dumps({'title': 'Açılış', 'prompt': 'A quiet harbour.'})
+            return json.dumps({'scenes': [{'start': 0 if '0: Bölüm 3 ' in user else 5, 'title': 'T', 'prompt': 'p'}]})
+
+        plan = book_art.plan_book(sections, ask, book_art.new_plan(density='low'))
+        self.assertFalse(any(s.get('opening') for s in plan['scenes']))
+        book_art.add_openers(sections, ask, plan)
+        # bolum 5'in (metinde 'Bölüm 3') ilk cumlesinde zaten sahne var: sorulmaz; kisa bolum (2) sorulmaz
+        self.assertEqual(len(asked), 2)
+        self.assertTrue(plan['openers'])
+        self.assertEqual([(s['id'], s['section']) for s in plan['scenes']],
+                         [('3-open', 3), ('3-5', 3), ('4-open', 4), ('4-5', 4), ('5-0', 5)])
+        asked.clear()
+        book_art.add_openers(sections, ask, plan)
+        self.assertEqual(asked, [])
 
     def test_place_identity(self):
         prompts = []

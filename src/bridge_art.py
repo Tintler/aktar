@@ -217,11 +217,12 @@ class ArtMixin:
             return _error(error)
 
     def art_plan_create(self, book, sections, note='', preset='', density='medium', title='', resume=False,
-                        identity=False, modifiers=None, options=None):
+                        identity=False, modifiers=None, options=None, openers_only=False):
         """Dil modeliyle sahne planini arka planda cikarir. `sections`: [{'sentences', 'breaks'}] okuyucunun
         bolmesiyle. `resume`: yarim kalan plan kaldigi yerden (not ve siklik onunki). `identity`: karakter kimligi
         (sahnelere gorunen karakterler yazilir). `modifiers`: tarzdan bagimsiz secenekler (book_art.MODIFIERS).
-        `options` (F209): openers, places, changes, upscale (book_art.new_plan). Olay 'art' (stage 'plan')."""
+        `options` (F209): openers, places, changes, upscale (book_art.new_plan). `openers_only`: tamamlanmis plana
+        yalnizca eksik bolum acilis gorselleri eklenir (book_art.add_openers). Olay 'art' (stage 'plan')."""
         try:
             store = self._art_store()
             store.folder(book)
@@ -235,7 +236,9 @@ class ArtMixin:
         if not total:
             return _error('Kitapta metin bulunamadı.')
         old = self._art_load(book)
-        if resume and old and not old.get('complete'):
+        if openers_only and not (old and old.get('complete')):
+            return _error('Önce kitabın görsel planını çıkarın.')
+        if openers_only or (resume and old and not old.get('complete')):
             plan = old
         else:
             size = self._art_prefs().get('size') or book_art.DEFAULT_SIZE
@@ -248,7 +251,7 @@ class ArtMixin:
             emotion = getattr(self, '_emotion_job', None)
             if emotion is not None and emotion.is_alive():
                 return _error('Duygu etiketleri oluşturulurken görsel planı çıkarılamaz (ikisi de dil modelini kullanır).')
-            if not resume and old:
+            if not resume and not openers_only and old:
                 store.clear(book)
             cancel = threading.Event()
             self._art_cancel_event, self._art_stage = cancel, 'plan'
@@ -274,7 +277,8 @@ class ArtMixin:
                     ask = lambda system, user: client.chat([{'role': 'system', 'content': system},
                                                             {'role': 'user', 'content': user}],
                                                            temperature=0.4, max_tokens=book_art.MAX_TOKENS)
-                    result = book_art.plan_book(sections, ask, plan, cancel, progress, lambda p: store.save(book, p))
+                    run = book_art.add_openers if openers_only else book_art.plan_book
+                    result = run(sections, ask, plan, cancel, progress, lambda p: store.save(book, p))
                     store.save(book, result)
                     self._log(f'Kitap görselleri: {len(result["scenes"])} sahne planlandı ({title or book}).')
                     self._emit('art', {'book': book, 'title': title, 'stage': 'plan', 'finished': True,
