@@ -29,7 +29,8 @@ import xml.etree.ElementTree as ET
 MOBI_SUFFIXES = ('.mobi', '.azw3', '.azw', '.prc')
 FB2_SUFFIXES = ('.fb2', '.fbz', '.fb2.zip')
 SUFFIXES = MOBI_SUFFIXES + FB2_SUFFIXES
-DIALOG_FILTER = 'E-kitap (*.epub *.mobi *.azw3 *.azw *.prc *.fb2 *.fbz *.zip)'
+# pywebview aciklamada tire, uzantilar arasinda bosluk kabul etmez (';' ister)
+DIALOG_FILTER = 'Kitap (*.epub;*.mobi;*.azw3;*.azw;*.prc;*.fb2;*.fbz;*.zip)'
 CHUNK_CHARS = 40000          # baslik bulunamazsa bolum boyu
 
 

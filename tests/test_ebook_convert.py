@@ -71,6 +71,13 @@ FB2 = '''<?xml version="1.0" encoding="utf-8"?>
 </FictionBook>'''
 
 
+class DialogFilterTests(unittest.TestCase):
+    def test_filter_is_valid_for_pywebview(self):
+        # webview.util.parse_file_type ile ayni kalip
+        pattern = r'^([\w ]+)\((\*(?:\.(?:\w+|\*))*(?:;\*(?:\.(?:\w+|\*))*)*)\)$'
+        self.assertRegex(ebook_convert.DIALOG_FILTER, pattern)
+
+
 class PalmDocTests(unittest.TestCase):
     def test_decompress(self):
         data = b'ab' + b'\x80\x10' + b'\xe1' + b'\x02\xff\xfe' + b'z'
