@@ -267,7 +267,7 @@ class PlanTest(unittest.TestCase):
         def ask(system, user):
             prompts.append(user)
             if '"style"' in user and 'JSON shape: {"style"' in user:
-                return json.dumps({'style': 'muted watercolour', 'characters': [{'name': 'Ana', 'look': 'red coat'}]})
+                return json.dumps({'style': 'muted watercolour', 'characters': [{'name': 'Ana', 'look': 'woman in a red coat'}]})
             first = int(user.split('the first scene starts at ')[1].split(')')[0])
             return json.dumps({'scenes': [{'start': first, 'title': 'T', 'prompt': f'scene {first}'}]})
 
@@ -276,7 +276,7 @@ class PlanTest(unittest.TestCase):
         result = book_art.plan_book(sections, ask, plan, save=lambda p: saved.append(json.loads(json.dumps(p))))
         self.assertTrue(result['complete'])
         self.assertIn('daha soyut ol', prompts[0])
-        self.assertIn('Ana: red coat', prompts[1])
+        self.assertIn('Ana: woman in a red coat', prompts[1])
         self.assertEqual([s['section'] for s in result['scenes']], [1])   # 3 cumlelik bolum sahne almaz
         self.assertEqual(result['scenes'][0]['anchor'], sections[1]['sentences'][0])
         # stil yazilmis, ilk parca bitmis yarim plandan devam: stil yeniden istenmez
@@ -284,6 +284,57 @@ class PlanTest(unittest.TestCase):
         prompts.clear()
         book_art.plan_book(sections, ask, half)
         self.assertFalse(any('JSON shape: {"style"' in p for p in prompts))
+
+    def test_age_in_looks(self):
+        """F211: yassiz tarif ('Small, slight build') gorsel modelinde cocuk ciziliyordu; istemlerde yetiskin sayilir."""
+        tate = {'name': 'Tate', 'look': 'Small, slight build, pale mannequin-like face'}
+        self.assertFalse(book_art.has_age(tate['look']))
+        for look in ('Middle-aged man, gaunt', 'Girl of about ten', 'woman in her 30s', 'a bulky robot', 'young, thin'):
+            self.assertTrue(book_art.has_age(look), look)
+        self.assertEqual(book_art.person_look(tate), 'Adult, small, slight build, pale mannequin-like face')
+        self.assertEqual(book_art.person_look({'look': 'Boy of about ten'}), 'Boy of about ten')
+        fox = {'name': 'Tilki', 'look': 'Slender red fox, bushy tail', 'kind': 'other'}
+        self.assertEqual(book_art.person_look(fox), 'Slender red fox, bushy tail')   # insan degil: yetiskin denmez
+        self.assertEqual(book_art.clean_characters([fox, {'name': 'A', 'look': 'x', 'kind': 'human'}]),
+                         [fox, {'name': 'A', 'look': 'x'}])
+        self.assertEqual(book_art.keep_portraits([{'name': 'tilki', 'look': 'fox'}], [fox])[0]['kind'], 'other')
+        self.assertIn('Adult, small, slight build', book_art.portrait_prompt(tate))
+        self.assertIn('Adult, small', book_art.identity_prompt({'prompt': 'p'}, [tate], 's'))
+        self.assertIn('- Tate: Adult, small', book_art.character_lines([tate]))
+        self.assertIn('- Maden: rusty shaft', book_art.character_lines([{'name': 'Maden', 'look': 'rusty shaft'}], False))
+
+    def test_plan_book_rewrites_ageless_looks(self):
+        sections = book(3, 60)
+        prompts = []
+
+        def ask(system, user):
+            prompts.append(user)
+            if 'JSON shape: {"style"' in user:
+                return json.dumps({'style': 's', 'characters': [{'name': 'Tate', 'look': 'Small, slight build'},
+                                                                {'name': 'Ana', 'look': 'woman in a red coat'},
+                                                                {'name': 'Tilki', 'look': 'Slender, bushy tail'}]})
+            if 'do not say the age and sex' in user and 'Tate' in user:
+                return json.dumps({'characters': [{'name': 'Tate', 'look': 'Man in his fifties, small, slight build'},
+                                                  {'name': 'Tilki', 'look': 'Other red fox, bushy tail', 'kind': 'other'}]})
+            if 'do not say the age and sex' in user:
+                return json.dumps({'characters': [{'name': 'Bo', 'look': 'tall, thin', 'kind': 'human'}]})
+            first = int(user.split('the first scene starts at ')[1].split(')')[0])
+            return json.dumps({'scenes': [{'start': first, 'title': 'T', 'prompt': 'p',
+                                           'characters': [{'name': 'Bo', 'look': 'tall, thin'}]}]})
+
+        plan = book_art.plan_book(sections, ask, book_art.new_plan())
+        looks = {c['name']: c['look'] for c in plan['characters']}
+        self.assertEqual(looks['Tate'], 'Man in his fifties, small, slight build')
+        self.assertEqual(looks['Ana'], 'woman in a red coat')
+        tilki = next(c for c in plan['characters'] if c['name'] == 'Tilki')
+        self.assertEqual((tilki['look'], tilki['kind']), ('Red fox, bushy tail', 'other'))
+        self.assertIn('- Tilki: Red fox, bushy tail', book_art.character_lines(plan['characters']))
+        age = [p for p in prompts if 'do not say the age and sex' in p]
+        self.assertIn('- Tate: Small, slight build', age[0])
+        self.assertNotIn('Ana', age[0].split('Rewrite')[0])
+        self.assertEqual(len(age), 2)   # stil adiminda Tate, parcada yeni tanitilan Bo
+        self.assertEqual(looks['Bo'], 'tall, thin')   # yanit yas vermedi: tarif kalir, istemde yetiskin sayilir
+        self.assertIn('- Bo: Adult, tall, thin', book_art.character_lines(plan['characters']))
 
     def test_presets_and_modifiers(self):
         """F202: LoRA'li tarz plana kopyalanir; secenekler dil modeline kural, gorsel istemine olumlu son ek olur."""
@@ -310,9 +361,9 @@ class PlanTest(unittest.TestCase):
         def ask(system, user):
             prompts.append(user)
             if 'JSON shape: {"style"' in user:
-                return json.dumps({'style': 's', 'characters': [{'name': 'Ana', 'look': 'red coat'}]})
+                return json.dumps({'style': 's', 'characters': [{'name': 'Ana', 'look': 'woman in a red coat'}]})
             return json.dumps({'scenes': [{'start': 0, 'title': 'T', 'prompt': 'p',
-                                           'characters': [{'name': 'Bo', 'look': 'tall'}]}]})
+                                           'characters': [{'name': 'Bo', 'look': 'tall man'}]}]})
 
         result = book_art.plan_book(book(60), ask, plan)
         self.assertTrue(all('Hard rule: No people' in p and 'Hard rule: Every image is a wide' in p for p in prompts))
@@ -415,7 +466,7 @@ class OptionsTest(unittest.TestCase):
 
     @staticmethod
     def style_reply(user, **extra):
-        return json.dumps(dict({'style': 'muted watercolour', 'characters': [{'name': 'Ana', 'look': 'red coat'}]},
+        return json.dumps(dict({'style': 'muted watercolour', 'characters': [{'name': 'Ana', 'look': 'woman in a red coat'}]},
                                **extra))
 
     def test_density_levels(self):
@@ -586,7 +637,7 @@ class OptionsTest(unittest.TestCase):
                 return self.style_reply(user)
             first = int(user.split('the first scene starts at ')[1].split(')')[0])
             reply = {'scenes': [{'start': first, 'title': 'T', 'prompt': 'p'}]}
-            if first == 0 and '- Ana: red coat' in user:
+            if first == 0 and '- Ana: woman in a red coat' in user:
                 reply['changes'] = [{'name': 'Ana', 'start': 2, 'look': 'grey-haired woman in a black uniform'},
                                     {'name': 'Yok', 'start': 2, 'look': 'x'}, {'name': 'Ana', 'start': 9999, 'look': 'y'}]
             return json.dumps(reply)
@@ -596,7 +647,7 @@ class OptionsTest(unittest.TestCase):
         ana = plan['characters'][0]
         self.assertEqual(ana['changes'], [{'section': 0, 'start': 2, 'look': 'grey-haired woman in a black uniform'}])
         self.assertIn('- Ana: grey-haired woman in a black uniform', prompts[-1])   # sonraki bolumde yeni gorunus
-        self.assertEqual(book_art.look_at(ana, 0, 1), 'red coat')
+        self.assertEqual(book_art.look_at(ana, 0, 1), 'woman in a red coat')
         self.assertEqual(book_art.look_at(ana, 1, 0), 'grey-haired woman in a black uniform')
         scene = {'section': 1, 'start': 0, 'prompt': 'A grey-haired woman in a black uniform walks.'}
         self.assertEqual(book_art.scene_people(scene, plan['characters'])[0]['look'], ana['changes'][0]['look'])
@@ -880,6 +931,26 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(shown['scenes'], [])
         self.assertEqual(read.call_count, 1)
         self.assertTrue(json.loads((store.folder('ab12cd34ef') / 'plan.json').read_text(encoding='utf-8'))['numbered'])
+
+    def test_scene_carries_book_chapter_title(self):
+        """F211: kartta okuyucunun sira numarasi yerine kitabin icindekilerdeki bolum adi."""
+        store = self.bridge._art_store()
+        plan = book_art.new_plan()
+        plan['complete'] = True
+        plan['scenes'] = [{'id': f'{n}-open', 'section': n, 'start': 0, 'anchor': 'a', 'opening': True, 'image': '',
+                           'skip': False} for n in (6, 7, 8)]
+        store.save('ab12cd34ef', plan)
+
+        class Epub:
+            toc = [{'section': 6, 'title': 'Sunuş'}, {'section': 8, 'title': '1'}, {'section': 8, 'title': 'Alt'}]
+
+        class Shelf:
+            def _book(self, book_id):
+                return {}, Epub()
+
+        self.bridge._shelf = lambda: Shelf()
+        scenes = self.bridge.art_plan_get('ab12cd34ef')['plan']['scenes']
+        self.assertEqual([s.get('chapter') for s in scenes], ['Sunuş', None, '1'])
 
     def test_restyle_keeps_prompts(self):
         """F209: tarz degisince istemler ve seed'ler kalir; stil kilavuzu dil modeliyle yeniden yazilir, LoRA plana."""

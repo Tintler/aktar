@@ -24,6 +24,9 @@
     rare: 'yaklaşık 10 sayfada bir: kitabın tamamından en önemli anlar', low: 'yaklaşık 4 sayfada bir: önemli anlar',
     medium: 'sahne değişiminde, yaklaşık 1,5 sayfada bir', high: 'yarım–bir sayfada bir' };
   const UPSCALE_LABEL = (value) => (value ? `${String(value).replace('.', ',')}×` : 'Kapalı');
+  // F211: kitabin icindekilerdeki bolum adi ("1" -> "1. bölüm"); girdisi olmayan bolumde okuyucunun numarasi
+  const CHAPTER = (scene) => (!scene.chapter ? `Bölüm ${scene.section + 1}`
+    : /^\d+$/.test(scene.chapter) ? `${scene.chapter}. bölüm` : scene.chapter);
 
   let options = $state(null);
   let plan = $state(null);
@@ -603,7 +606,7 @@
             </div>
             <div class="meta">
               <b class="ellipsis" title={scene.title}>{scene.title}</b>
-              <span class="dim">{[scene.opening ? `Bölüm ${scene.section + 1} açılışı` : `Bölüm ${scene.section + 1} · cümle ${scene.start + 1}`,
+              <span class="dim" title={`Okuyucuda ${scene.section + 1}. bölüm`}>{[scene.opening ? `${CHAPTER(scene)} · açılış` : `${CHAPTER(scene)} · cümle ${scene.start + 1}`,
                 scene.importance && `önem ${scene.importance}/10`, scene.upscaled && `${UPSCALE_LABEL(scene.upscaled)} büyük`].filter(Boolean).join(' · ')}</span>
             </div>
             {#if plan.place_identity && placeNames.length}

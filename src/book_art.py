@@ -181,6 +181,10 @@ def digest(sections, limit=DIGEST_CHARS):
     return '\n\n'.join(parts)[:limit + 2000]
 
 
+# Yas ve cinsiyet (F211): "small, slight build" gibi yassiz tarif gorsel modelinde cocuk (iri kafali) ciziliyordu
+AGE_RULE = ('Every look starts with the explicit age and sex, e.g. "Man in his fifties", "Woman of about thirty", '
+            '"Boy of about ten"; a short, small or slight adult is still a man or woman. An animal, robot, creature or '
+            'spirit starts with what it is (e.g. "Old red fox") and gets "kind": "other".')
 STYLE_SYSTEM = (
     'You are the art director of an illustrated edition of a book. The illustrations are shown full-screen behind '
     'the text while the book is read aloud; all of them must look like ONE consistent illustrated edition. '
@@ -191,8 +195,8 @@ STYLE_TASK = (
     'technique, colour palette, lighting, mood, era / technology look of the world. Do not name real artists. '
     'Do not describe a specific scene.\n'
     '2. "characters": the recurring characters (at most 8) with a fixed English visual description each '
-    '(15-35 words: age, build, face, hair, clothing) so they look the same in every image. Only permanent features, '
-    'never emotions or momentary states (no "crying", "holding a rod"). Leave out characters '
+    '(15-35 words: age, build, face, hair, clothing) so they look the same in every image. ' + AGE_RULE + ' '
+    'Only permanent features, never emotions or momentary states (no "crying", "holding a rod"). Leave out characters '
     'that are never described or barely appear.\n'
     '{places}'
     '{note}'
@@ -268,6 +272,8 @@ def clean_characters(value, limit=12):
             changes = clean_changes(item.get('changes'))
             if changes:
                 entry['changes'] = changes
+            if item.get('kind') == 'other':   # insan degil (F211): tarif yetiskin sayilmaz
+                entry['kind'] = 'other'
             result.append(entry)
     return result[:limit]
 
@@ -324,6 +330,66 @@ def apply_changes(characters, changes, section):
             continue
         character['changes'] = clean_changes((character.get('changes') or [])
                                              + [{'section': section, 'start': start, 'look': look}])
+    return characters
+
+
+# ---------------------------------------------------------------- yas ve cinsiyet (F211)
+AGE_WORDS = re.compile(
+    r'\b(?:man|men|woman|women|boy|boys|girl|girls|child|children|kid|baby|infant|toddler|teen\w*|adolescent|youth|'
+    r'lady|gentleman|adult|elderly|elder|old|aged|middle-aged|young|\w+ties|\d+s|years?|grand\w+|'
+    r'robot|android|cyborg|automaton|golem|creature|animal|beast|monster|alien|fairy|dog|cat|horse|bird|dragon|wolf|'
+    r'machine|ghost|spirit|entity)\b', re.I)
+AGE_SYSTEM = ('You fix character descriptions for an illustrated book. Answer with JSON only.')
+AGE_TASK = (
+    'These character looks do not say the age and sex, so the image model may draw an adult as a child:\n'
+    '{characters}\n\n'
+    'Judged from the book text below, rewrite each look so it starts with the explicit age and sex (e.g. "Man in '
+    'his fifties", "Woman of about thirty", "Boy of about ten"); keep the rest of the look word for word. A short, '
+    'small or slight person who works, marries or leads others is an adult. An animal, robot, creature or spirit '
+    'gets "kind": "other" and its look starts with what it is, e.g. {{"name": "Fox", "look": "Old red fox, bushy '
+    'tail", "kind": "other"}}.\n'
+    'JSON shape: {{"characters": [{{"name": "...", "look": "...", "kind": "human"}}]}}\n\nBook text:\n\n')
+
+
+def has_age(look):
+    """Tarif yas ya da cinsiyet (ya da bilinen bir insan disi tur) soyluyor mu."""
+    return bool(AGE_WORDS.search(str(look or '')))
+
+
+def person_look(character):
+    """Gorsel modeline giden tarif: yassiz insan tarifi yetiskin sayilir (yoksa ufak tefek kisi cocuk ciziliyordu);
+    insan olmayan (kind 'other') oldugu gibi."""
+    look = _clean(character.get('look'))
+    if not look or character.get('kind') == 'other' or has_age(look):
+        return look
+    return f'Adult, {look[0].lower()}{look[1:]}'
+
+
+def age_prompt(characters, sample):
+    return AGE_SYSTEM, AGE_TASK.format(characters=character_lines(characters, False)) + sample
+
+
+def fix_ages(characters, ask, sample, asked):
+    """Yassiz tarifleri dil modeline bir kez yeniden yazdirir (`asked`: bu planlamada sorulan adlar). Insan olmayan
+    'kind': 'other' alir; yanit yas vermezse tarif kalir, isteme giderken person_look yetiskin sayar."""
+    todo = [c for c in characters if c.get('kind') != 'other' and not has_age(c['look'])
+            and c['name'].lower() not in asked]
+    if not todo:
+        return characters
+    asked.update(c['name'].lower() for c in todo)
+    try:
+        fixed = {c['name'].lower(): c for c in
+                 clean_characters((_json_object(ask(*age_prompt(todo, sample))) or {}).get('characters'))}
+    except ValueError:
+        return characters
+    for character in todo:
+        found = fixed.get(character['name'].lower())
+        if found and found.get('kind') == 'other':
+            character['kind'] = 'other'   # model bazen tur yerine "Other red fox" yaziyor
+            look = re.sub(r'^other\b[\s,:]*', '', found['look'], flags=re.I) or found['look']
+            character['look'] = look[0].upper() + look[1:]
+        elif found and has_age(found['look']):
+            character['look'] = found['look']
     return characters
 
 
@@ -387,7 +453,7 @@ SCENE_TASK = (
     '- "prompt": ' + PROMPT_RULE + '\n'
     '{importance}'
     '- "characters": optional, new recurring characters introduced here with a fixed look '
-    '[{{"name": "...", "look": "..."}}]\n'
+    '[{{"name": "...", "look": "..."}}]. ' + AGE_RULE + '\n'
     '{extra}'
     '{cast}'
     '{opening}'
@@ -414,7 +480,7 @@ PLACE_TASK = ('- "place": name of the recurring place where the scene happens (e
 # gorunus degisimi (F209): karakterin kalici gorunusu degisirse sonraki gorseller yeni tarifle
 CHANGES_TASK = ('- "changes": optional, only when a recurring character\'s lasting appearance changes in this part '
                 '(grows older, new clothes or uniform, a scar, new hair): [{{"name": "...", "start": sentence number, '
-                '"look": "the full new look, 15-35 words"}}]; later images use the new look\n')
+                '"look": "the full new look, 15-35 words"}}]; later images use the new look. ' + AGE_RULE + '\n')
 # bolum acilis gorseli (F209): bolumun ilk sayfasi kendi gorselini aldiysa sahneler sonrasindan baslar
 OPENED_TASK = ('The first page of this chapter already has its own image, so the scenes start at sentence {second} '
                'or later.\n')
@@ -445,8 +511,10 @@ CAST_TASK = (
     'middle of the action, not posing or looking at the camera unless the text says so).\n')
 
 
-def character_lines(characters):
-    return '\n'.join(f'- {c["name"]}: {c["look"]}' for c in characters) or '- (none yet)'
+def character_lines(characters, people=True):
+    """Dil modeline giden liste; `people` kapali (mekanlar, yas istegi) tarif oldugu gibi."""
+    return '\n'.join(f'- {c["name"]}: {person_look(c) if people else c["look"]}'
+                     for c in characters) or '- (none yet)'
 
 
 def scene_prompt(style, characters, sentences, start, stop, count, note='', previous=None, identity=False,
@@ -464,7 +532,7 @@ def scene_prompt(style, characters, sentences, start, stop, count, note='', prev
         shape += ', "changes": []'
     task = SCENE_TASK.format(
         style=style, characters=character_lines(characters), note=note_text(note, modifiers), previous=before,
-        places=PLACES_LIST.format(places=character_lines(places)) if places is not None else '',
+        places=PLACES_LIST.format(places=character_lines(places, False)) if places is not None else '',
         choose=(FOCUS_TASK if focus else SPLIT_TASK).format(**numbers),
         start_rule=(FOCUS_START if focus else SPLIT_START).format(**numbers),
         importance=IMPORTANCE_TASK if focus else '',
@@ -490,7 +558,7 @@ def opening_prompt(style, characters, sentences, note='', identity=False, modifi
     shape = (', "cast": []' if identity else '') + (', "place": ""' if places is not None else '')
     task = OPENING_TASK.format(
         style=style, characters=character_lines(characters), note=note_text(note, modifiers),
-        places=PLACES_LIST.format(places=character_lines(places)) if places is not None else '',
+        places=PLACES_LIST.format(places=character_lines(places, False)) if places is not None else '',
         extra=PLACE_TASK.format().split('\n')[0] + '\n' if places is not None else '',
         cast=CAST_TASK.format(limit=MAX_CAST) if identity else '', shape=shape)
     return SCENE_SYSTEM, task + lines
@@ -597,7 +665,8 @@ def keep_portraits(characters, old):
     by_name = {c['name'].lower(): c for c in old or ()}
     for character in characters:
         before = by_name.get(character['name'].lower(), {})
-        character.update({key: before[key] for key in ('portrait', 'portrait_version', 'portrait_seed', 'portrait_own')
+        character.update({key: before[key] for key in ('portrait', 'portrait_version', 'portrait_seed', 'portrait_own',
+                                                        'kind')
                           if key in before})
     return characters
 
@@ -646,16 +715,17 @@ def _sentence(text):
 
 def portrait_prompt(character):
     return (f'Character reference portrait, head and shoulders, three-quarter view with the head turned slightly, '
-            f'relaxed natural expression, face clearly visible. {_sentence(character["look"])}. Plain flat mid-grey '
-            f'studio backdrop with nothing else behind, soft even studio light.')
+            f'relaxed natural expression, face clearly visible. {_sentence(person_look(character))}. '
+            f'Plain flat mid-grey studio backdrop with nothing else behind, soft even studio light.')
 
 
 def identity_prompt(scene, people, style):
     """Kimlik is akisinin istemi (talimat bicimi: LoRA "bu kisiyi ... ciz" diye egitildi). Stil sona eklenir;
     kimlik is akisinda PRE/POST dugumu yoktur (son ek comfy_client.fill'de '. ' ile eklenir)."""
     who = ('this person' if len(people) == 1 else 'these people')
-    names = ' and '.join(f'the person from reference {n + 1} ({_sentence(c["look"])})' for n, c in enumerate(people)) \
-        if len(people) > 1 else _sentence(people[0]['look'])
+    looks = [_sentence(person_look(c)) for c in people]
+    names = ' and '.join(f'the person from reference {n + 1} ({look})' for n, look in enumerate(looks)) \
+        if len(people) > 1 else looks[0]
     return (f'Create an illustration of {who}: {names}. {_sentence(scene["prompt"])}. Preserve the exact facial '
             f'identity of the reference portrait, but not its pose, framing or background: the pose, gaze and '
             f'expression follow the scene. Style: {_sentence(style)}')
@@ -797,9 +867,13 @@ def plan_book(sections, ask, plan, cancel=None, progress=None, save=None):
         at += sum(len(s) + 1 for s in section['sentences'])
     if progress:
         progress(done, total)
+    asked = set()   # yasi yeniden sorulan karakterler (F211)
     if not plan.get('style'):
-        raw = ask(*style_prompt(digest(sections), plan.get('note'), plan.get('modifiers'), places))
+        sample = digest(sections)
+        raw = ask(*style_prompt(sample, plan.get('note'), plan.get('modifiers'), places))
         plan['style'], plan['characters'] = parse_style(raw)
+        if people:
+            fix_ages(plan['characters'], ask, sample, asked)
         if places:
             plan['places'] = parse_places(raw)
         if not people:
@@ -832,6 +906,9 @@ def plan_book(sections, ask, plan, cancel=None, progress=None, save=None):
             extras = parse_extras(raw, plan['style'])
             if people:
                 plan['characters'] = merge_characters(plan['characters'], extra)
+                new = {c['name'].lower() for c in extra}   # yalnizca bu parcada tanitilanlar (metin onlari anlatir)
+                fix_ages([c for c in plan['characters'] if c['name'].lower() in new], ask,
+                         ' '.join(_clean(s) for s in sentences[start:stop]), asked)
                 if plan.get('look_changes'):
                     apply_changes(plan['characters'], [c for c in extras['changes']
                                                        if str(c.get('start', '')).strip().isdigit()

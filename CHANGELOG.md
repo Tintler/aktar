@@ -2,6 +2,12 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.37.1 — 2026-10-27
+
+### Düzeltilen
+- **Ufak tefek karakterler çocuk gibi çiziliyordu (F211):** Dil modeli bazı karakterlere yaş ve cinsiyet yazmadan ("small, slight build") tarif veriyordu; görsel modeli bunları iri kafalı bir çocuk olarak çiziyor, portre de sahnelere bu yüzü taşıyordu. Karakter tarifleri artık açık yaş ve cinsiyetle başlıyor ("Man in his fifties"); yaş vermeyen tarif dil modeline bir kez yeniden yazdırılıyor, yine yaşsız kalan insan tarifi portre ve sahne istemlerinde yetişkin sayılıyor. Hayvan, robot, yaratık ve ruh gibi insan olmayan karakterler ayrıca işaretleniyor; onlara yaş eklenmiyor. Var olan planlarda portreyi yeniden üretmek yetiyor.
+- **Sahne kartında kitabın bölüm adı:** Kartlar okuyucunun dosya sırasını ("Bölüm 9") değil, kitabın içindekilerdeki adı ("1. bölüm", "Sunuş") gösteriyor; okuyucudaki numara ipucunda.
+
 ## 2.37.0 — 2026-10-27
 
 ### Değişen

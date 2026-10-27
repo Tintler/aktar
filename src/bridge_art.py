@@ -87,16 +87,31 @@ class ArtMixin:
                   else 'UYARI: Görsel planının bölümleri kitapla eşleşmedi; planı yeniden oluşturun.')
         return plan
 
+    def _art_chapters(self, book):
+        """Okuyucu bolum numarasi -> kitabin icindekilerdeki adi (F211; yalnizca kendi girdisi olan bolumler: kapak,
+        ithaf gibi girdisiz bolume bir oncekinin adi verilmez)."""
+        try:
+            toc = self._shelf()._book(book)[1].toc
+        except Exception:   # kitap kitapliktan kalkmis: kartlar okuyucu numarasini gosterir
+            return {}
+        chapters = {}
+        for entry in toc:
+            chapters.setdefault(entry['section'], entry['title'])
+        return chapters
+
     def _art_view(self, book, plan):
         """Arayuze giden plan: her sahnenin gorsel adresi (media_server)."""
         if not plan:
             return None
         view = dict(plan)
         store = self._art_store()
+        chapters = self._art_chapters(book)
         scenes = []
         for scene in plan['scenes']:
             path = store.image_path(book, scene)
             shown = dict(scene, url=self._media.file_url(path) if path and path.is_file() else '')
+            if chapters.get(scene['section']):
+                shown['chapter'] = chapters[scene['section']]
             if plan.get('identity'):
                 shown['people'] = [c['name'] for c in book_art.cast_of(scene, plan['characters'])]
             scenes.append(shown)
