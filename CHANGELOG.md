@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.41.0 — 2026-10-27
+
+### Eklenen
+- **Kitap görsellerinde tam boy kıyafet referansı (F220):** "Karakter kimliği" bölümündeki yeni "Tam boy kıyafet referansı" seçeneği açıkken, karakterin giydiği her kıyafet için portresi referans verilerek ayakta, önden, düz fonlu bir tam boy görsel üretilir. Kıyafetli sahneler portre yerine o anki kıyafetin tam boy görseliyle çizilir, böylece kıyafet tarifin yanında görselden de korunur. Bu görseller sahne üretilirken eksik olanlar için kendiliğinden üretilir; kıyafet, görünüş ya da portre değişince yenilenir, artık gerekmeyenler silinir. Kartta küçük görselleri gösterilir ve yeni seed ile yeniden üretilebilir. Yalnızca kimlik iş akışının referans sayısı kadar kişiye üretilir; kıyafeti olmayan karakter (giysisi tarifinde) portresiyle çizilir. Seçenek kapalıyken her şey eskisi gibi.
+
 ## 2.40.0 — 2026-10-27
 
 ### Eklenen

@@ -132,7 +132,13 @@ class ArtMixin:
         characters = []
         for character in plan.get('characters') or ():
             path = store.portrait_path(book, character)
-            characters.append(dict(character, portrait_url=self._media.file_url(path) if path and path.is_file() else ''))
+            shown = dict(character, portrait_url=self._media.file_url(path) if path and path.is_file() else '')
+            if plan.get('bodies'):   # F220 gecerli tam boy referanslar (simdiki portreden)
+                shown['body_urls'] = [self._media.file_url(store.folder(book) / e['file'])
+                                      for e in character.get('bodies') or ()
+                                      if e.get('from') == character.get('portrait')
+                                      and (store.folder(book) / e['file']).is_file()]
+            characters.append(shown)
         view['characters'] = characters
         view['summary'] = book_art.summary(plan)
         return view
@@ -355,6 +361,8 @@ class ArtMixin:
                                                              plan.get('characters'))
             if 'identity' in values:
                 plan['identity'] = bool(values['identity'])
+            if 'bodies' in values:   # F220 tam boy kiyafet referansi
+                plan['bodies'] = bool(values['bodies'])
             if 'lora_strength' in values and plan.get('lora'):   # LoRA'nin gucu (0-2)
                 plan['lora']['strength'] = round(min(2.0, max(0.0, float(values['lora_strength']))), 2)
             if 'extras' in values:   # F218 ek LoRA'lar: kimlik listesi (planda olanlarin gucu kalir)
@@ -483,13 +491,16 @@ class ArtMixin:
         return {'plan': self._art_view(book, plan)}
 
     # ------------------------------------------------------------------ uretim
-    def art_generate(self, book, scene_ids=None, title='', all_scenes=False, portraits=None, upscale_only=False):
+    def art_generate(self, book, scene_ids=None, title='', all_scenes=False, portraits=None, upscale_only=False,
+                     bodies=None):
         """Gorselleri ComfyUI ile arka planda uretir: `scene_ids` verilirse yalnizca onlar (varsa gorseli yenilenir),
         `all_scenes` butun sahneler (stil degisince), yoksa gorseli olmayanlar. `portraits`: yeniden uretilecek karakter
         portreleri (yeni seed; yalnizca portre istenirse sahne uretilmez). Karakter kimligi aciksa sahnelerdeki portresi
         olmayan karakterlerin portresi once uretilir. F209: planda buyutme aciksa her gorsel uretimden sonra RTX ile
         buyutulur; `upscale_only` var olan gorselleri yeniden uretmeden buyutur (`scene_ids` yoksa buyutulmemis
-        olanlar). Olay 'art' (stage 'generate')."""
+        olanlar). F220: planda tam boy referans aciksa sahnelerin gerektirdigi eksik tam boy kiyafet referanslari
+        portrelerden sonra uretilir; `bodies`: tam boy referanslari yeniden uretilecek karakterler (yeni seed).
+        Olay 'art' (stage 'generate')."""
         try:
             store = self._art_store()
             plan = store.load(book)
@@ -509,7 +520,7 @@ class ArtMixin:
         elif scene_ids:
             wanted = set(scene_ids)
             targets = [scene['id'] for scene in ordered if scene['id'] in wanted]
-        elif portraits is not None and not all_scenes:
+        elif (portraits is not None or bodies is not None) and not all_scenes:
             targets = []
         elif all_scenes:
             targets = [scene['id'] for scene in ordered if not scene.get('skip')]
@@ -519,19 +530,34 @@ class ArtMixin:
         known = {c['name'].lower(): c['name'] for c in plan['characters']}
         faces = [known[name.lower()] for name in portraits or () if name.lower() in known] if identity else []
         renew = set(faces)
-        identity_workflow = None
+        identity_workflow = body_workflow = None
+        wear = []   # F220 uretilecek tam boy referanslar [(ad, sahne kimligi)]
+        redo = {name.lower() for name in bodies or ()}
         if identity:
             cast = [c for scene in ordered if scene['id'] in set(targets)
                     for c in book_art.cast_of(scene, plan['characters'])[:book_art.MAX_CAST]]
             for character in cast:
                 if character['name'] not in faces and not (store.portrait_path(book, character) or Path()).is_file():
                     faces.append(character['name'])
-            if cast:
+            if cast or redo:
                 try:
                     identity_workflow = self._art_identity_workflow()
                 except comfy_client.ComfyError as error:
                     return _error(error)
-        if not targets and not faces:
+                # yalnizca is akisinin referans sayisi kadar kisi kimlikle cizilir; fazlasina tam boy uretilmez
+                slots = len(comfy_client.references(identity_workflow))
+                renew_bodies = {name.lower() for name in faces} | redo
+                chosen = set(targets)
+                for name, scene_id in book_art.body_needs(plan, [s for s in ordered if s['id'] in chosen
+                                                                  or redo and not s.get('skip')], slots):
+                    if scene_id not in chosen and name.lower() not in redo:
+                        continue
+                    scene = store.scene(plan, scene_id)
+                    person = next(c for c in book_art.scene_people(scene, plan['characters']) if c['name'] == name)
+                    if name.lower() in renew_bodies or not (store.body_path(book, person, book_art.body_key(person))
+                                                            or Path()).is_file():
+                        wear.append((name, scene_id))
+        if not targets and not faces and not wear:
             return _error('Üretilecek görsel yok.')
         url = self._art_url()
         try:
@@ -545,7 +571,8 @@ class ArtMixin:
                 style_only = loras[:len(book_art.plan_loras(plan, False))]
                 portrait_workflow = comfy_client.add_loras(workflow, style_only)
                 workflow = comfy_client.add_loras(workflow, loras)
-                if identity_workflow is not None:
+                if identity_workflow is not None:   # tam boy referans portre gibi ek LoRA'siz (F220)
+                    body_workflow = comfy_client.add_loras(identity_workflow, style_only)
                     identity_workflow = comfy_client.add_loras(identity_workflow, loras)
         except comfy_client.ComfyError as error:
             return _error(error)
@@ -559,11 +586,11 @@ class ArtMixin:
             size = book_art.SIZES.get(plan.get('size'), book_art.SIZES[book_art.DEFAULT_SIZE])
             title = title or plan.get('title') or ''
 
-            total = len(faces) + len(targets)
+            total = len(faces) + len(wear) + len(targets)
             uploaded = {}   # portre dosyasi -> ComfyUI'deki adi (is boyunca bir kez yuklenir)
 
-            def upload(character):
-                path = store.portrait_path(book, character)
+            def upload(character, path=None):
+                path = path or store.portrait_path(book, character)
                 if path.name not in uploaded:
                     uploaded[path.name] = comfy_client.upload_image(url, path.read_bytes(),
                                                                     f'aktar-{book[:12]}-{path.name}')
@@ -602,6 +629,28 @@ class ArtMixin:
                 updated = store.write_portrait(book, name, comfy_client.generate(url, filled, cancel), seed=seed)
                 return {'character': next(c for c in self._art_view(book, updated)['characters'] if c['name'] == name)}
 
+            def body(name, scene_id):
+                """F220 karakterin o sahnedeki kiyafetiyle tam boy referansi (portre referans verilerek)."""
+                current = store.load(book)
+                character = store.character(current, name)
+                scene = store.scene(current, scene_id)
+                person = next(c for c in book_art.scene_people(scene, current['characters']) if c['name'] == name)
+                if not (store.portrait_path(book, character) or Path()).is_file():
+                    raise ValueError(f'{name} için portre yok.')
+                self._emit('art', {'book': book, 'title': title, 'stage': 'generate', 'done': state['done'],
+                                   'total': total, 'current': f'Tam boy: {name}'})
+                key = book_art.body_key(person)
+                old = next((e for e in character.get('bodies') or () if e.get('key') == key), {})
+                seed = old['seed'] if old.get('seed') and name.lower() not in redo else random.randrange(1, 2 ** 31)
+                filled = comfy_client.fill(body_workflow, book_art.image_style(
+                                               current, book_art.body_prompt(person, current['style']), False),
+                                           '', book_art.image_suffix(current, book_art.PORTRAIT_SUFFIX, False), seed,
+                                           book_art.BODY_SIZE,
+                                           f'Aktar/{book[:12]}/boy-{book_art.portrait_slug(name)}-{key}',
+                                           images=[upload(character)])
+                updated = store.write_body(book, name, key, comfy_client.generate(url, filled, cancel), seed=seed)
+                return {'character': next(c for c in self._art_view(book, updated)['characters'] if c['name'] == name)}
+
             def scene_image(scene_id):
                 current = store.load(book)
                 scene = store.scene(current, scene_id)
@@ -638,6 +687,13 @@ class ArtMixin:
                     people = [c for c in book_art.scene_people(scene, current['characters'])
                               if (store.portrait_path(book, c) or Path()).is_file()]
                     people = people[:len(comfy_client.references(identity_workflow))]
+                # F220 tam boy referanslar: kiyafeti olan herkesinki varsa portre yerine onlar (kiyafet de
+                # referanstan); kiyafeti olmayanin giysisi portresinde (tarifinde), portresiyle
+                worn = [store.body_path(book, c, book_art.body_key(c)) if c.get('outfit')
+                        else store.portrait_path(book, c) for c in people] \
+                    if current.get('bodies') and current.get('outfits') else []
+                worn = worn if any(c.get('outfit') for c in people) and all(
+                    path and path.is_file() for path in worn) else []
                 # F209 mekanin tarifiyle; F219 kiyafet (kimlikle cizilenlerinki kimlik isteminde)
                 text = dict(scene, prompt=book_art.scene_text(current, scene, [c['name'] for c in people], part))
                 suffix = ', '.join(part for part in (extra, book_art.image_suffix(
@@ -647,9 +703,11 @@ class ArtMixin:
                     filled = comfy_client.fill(identity_workflow, book_art.image_style(
                                                    current, book_art.identity_prompt(text, people, current['style'],
                                                                                      faces_shown,
-                                                                                     bool(current.get('outfits')))),
+                                                                                     bool(current.get('outfits')),
+                                                                                     bool(worn))),
                                                '', suffix, seed, image_size, prefix,
-                                               images=[upload(c) for c in people])
+                                               images=[upload(c, path) for c, path in zip(people, worn or
+                                                                                          [None] * len(people))])
                 else:   # insanla ilgili son ek yalnizca istemde insan varsa (F213)
                     filled = comfy_client.fill(workflow, text['prompt'], book_art.image_style(current, current['style']),
                                                suffix, seed, image_size, prefix)
@@ -670,11 +728,13 @@ class ArtMixin:
             def work():
                 failures, streak = [], 0
                 try:
-                    for kind, item in [('portrait', name) for name in faces] + [('scene', i) for i in targets]:
+                    for kind, item in ([('portrait', name) for name in faces] + [('body', w) for w in wear]
+                                       + [('scene', i) for i in targets]):
                         if cancel.is_set():
                             raise comfy_client.Cancelled('durduruldu')
                         try:
-                            shown = portrait(item) if kind == 'portrait' else scene_image(item)
+                            shown = (portrait(item) if kind == 'portrait' else body(*item) if kind == 'body'
+                                     else scene_image(item))
                         except comfy_client.Cancelled:
                             raise
                         except (comfy_client.ComfyError, OSError, ValueError) as error:

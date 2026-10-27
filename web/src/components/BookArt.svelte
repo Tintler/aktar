@@ -325,9 +325,9 @@
     act('art_cancel');
   }
 
-  async function generate(ids = null, all = false, portraits = null) {
+  async function generate(ids = null, all = false, portraits = null, bodies = null) {
     if (otherJob) { toast('Başka bir kitabın görselleri için iş sürüyor.'); return; }
-    const result = await act('art_generate', book, ids, title, all, portraits);
+    const result = await act('art_generate', book, ids, title, all, portraits, false, bodies);
     if (result?.started) app.artJob = { book, title, stage: 'generate', done: 0, total: result.total, current: '' };
   }
 
@@ -380,6 +380,11 @@
 
   async function setIdentity(value) {
     const result = await act('art_plan_save', book, { identity: value });
+    if (result) applyPlan(result.plan);
+  }
+
+  async function setBodies(value) {
+    const result = await act('art_plan_save', book, { bodies: value });
     if (result) applyPlan(result.plan);
   }
 
@@ -686,6 +691,13 @@
           <div class="warn"><Icon name="alert" size={16} /><span>{options?.identity_workflow?.message ?? 'Kimlik iş akışı seçilmedi.'}</span>
             <button class="btn sm" onclick={openSettings}><Icon name="settings" size={14} />Ayarlar</button></div>
         {/if}
+        {#if plan.identity && plan.outfits}
+          <div class="row">
+            <Toggle checked={Boolean(plan.bodies)} disabled={Boolean(app.artJob)} label="Tam boy kıyafet referansı" onchange={setBodies} />
+          </div>
+          <p class="dim">Açıkken her karakterin giydiği her kıyafet için portreden tam boy bir referans görseli üretilir; sahneler portre yerine o anki
+            kıyafetin tam boy görseliyle çizilir, böylece kıyafet görselden de korunur. Kıyafet ya da portre değişince referans kendiliğinden yenilenir.</p>
+        {/if}
         {#if plan.identity}
           {#if !faces.length}<p class="dim">Planda tekrar eden karakter yok; yukarıdaki "Karakterler" kutusuna ekleyebilirsiniz.</p>{/if}
           <div class="faces">
@@ -696,6 +708,13 @@
                   {:else}<span class="dim">{generating && job.current === `Portre: ${character.name}` ? 'Üretiliyor…' : 'Portre yok'}</span>{/if}
                 </div>
                 <b class="ellipsis" title={character.look}>{character.name}</b>
+                {#if plan.bodies && character.body_urls?.length}
+                  <div class="bodies" title="Tam boy kıyafet referansları">
+                    {#each character.body_urls as url (url)}<img src={url} alt={`${character.name} tam boy`} loading="lazy" />{/each}
+                    <button class="btn sm ghost" disabled={Boolean(app.artJob) || !options?.workflow.ok} title="Tam boy referansları yeni seed ile üret"
+                      onclick={() => generate(null, false, null, [character.name])}><Icon name="refresh" size={13} /></button>
+                  </div>
+                {:else if generating && job.current === `Tam boy: ${character.name}`}<span class="dim">Tam boy üretiliyor…</span>{/if}
                 <div class="acts">
                   <button class="btn sm ghost" disabled={Boolean(app.artJob) || !options?.workflow.ok} title="Yeni seed ile portre"
                     onclick={() => generate(null, false, [character.name])}><Icon name="refresh" size={13} />{character.portrait_url ? '' : 'Üret'}</button>
@@ -821,6 +840,8 @@
   .portrait { aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: var(--surface); display: grid; place-items: center; font-size: 12px; }
   .portrait img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .face .acts { flex-wrap: nowrap; }
+  .bodies { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  .bodies img { width: 30px; aspect-ratio: 832 / 1216; object-fit: cover; border-radius: 4px; background: var(--surface); }
   .cast { display: flex; gap: 4px; flex-wrap: wrap; }
   .clothing { margin: 0; font-size: 11.5px; line-height: 1.4; display: flex; flex-direction: column; gap: 2px; }
   .cast .chip { font-size: 11.5px; padding: 2px 8px; }

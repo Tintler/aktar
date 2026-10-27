@@ -45,6 +45,7 @@ araligindaki sahnelerin 'outfits' {ad: giysi} alanina yazilir; kiyafeti olmayan 
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 import re
@@ -1155,7 +1156,7 @@ def keep_portraits(characters, old):
     for character in characters:
         before = by_name.get(character['name'].lower(), {})
         character.update({key: before[key] for key in ('portrait', 'portrait_version', 'portrait_seed', 'portrait_own',
-                                                        'kind')
+                                                        'kind', 'bodies')
                           if key in before})
     return characters
 
@@ -1214,22 +1215,75 @@ def portrait_prompt(character):
             f'Plain flat mid-grey studio backdrop with nothing else behind, soft even studio light.')
 
 
-def identity_prompt(scene, people, style, faces=True, clothing=False):
+BODY_SIZE = (832, 1216)   # tam boy kiyafet referansi (F220): dik, bas ve ayaklar kadraja sigsin
+
+
+def body_key(character):
+    """Tam boy referansin anahtari (F220): o yerdeki gorunus + kiyafet; biri degisince yeni referans gerekir."""
+    text = f'{_sentence(person_look(character))}|{_sentence(character.get("outfit") or "")}'
+    return hashlib.sha1(text.lower().encode('utf-8')).hexdigest()[:10]
+
+
+def body_of(character, key):
+    """Karakterin `key` icin gecerli tam boy referansi (simdiki portreden uretilmis) ya da None."""
+    return next((entry for entry in character.get('bodies') or ()
+                 if entry.get('key') == key and entry.get('from') == character.get('portrait')), None)
+
+
+def body_prompt(character, style):
+    """Tam boy kiyafet referansi kimlik is akisiyla, portre referans verilerek (yuz korunur, kiyafet tariften)."""
+    return (f'Create a full-body character reference of this person: {_wearing(character)}. Standing upright, '
+            f'front view, the whole figure from head to feet visible, arms relaxed at the sides, neutral expression. '
+            f'Plain flat mid-grey studio backdrop with nothing else behind, soft even studio light. Preserve the exact '
+            f'facial identity and hair of the reference portrait; the clothing follows the description above, not '
+            f'the reference. Style: {_sentence(medium(style))}')
+
+
+def body_needs(plan, scenes, slots=MAX_CAST):
+    """`scenes` icin gereken tam boy referanslar [(ad, sahne kimligi)]: kiyafeti olan, kimlikle cizilecek (kimlik is
+    akisinin referans sayisi `slots` kadar) karakterler; ayni gorunus+kiyafet bir kez. Planda 'bodies' kapaliysa bos."""
+    if not (plan.get('identity') and plan.get('outfits') and plan.get('bodies')):
+        return []
+    found, seen = [], set()
+    for scene in scenes:
+        for person in scene_people(scene, plan.get('characters') or [])[:slots]:
+            if not person.get('outfit'):
+                continue
+            key = (person['name'].lower(), body_key(person))
+            if key not in seen:
+                seen.add(key)
+                found.append((person['name'], scene['id']))
+    return found
+
+
+def body_keys(plan, name):
+    """Planin butun sahnelerinde `name` icin gereken referans anahtarlari (eskiler silinirken bunlar kalir)."""
+    return {body_key(person) for scene in plan.get('scenes') or ()
+            for person in scene_people(scene, plan.get('characters') or [])[:MAX_CAST]
+            if person['name'].lower() == str(name).lower() and person.get('outfit')}
+
+
+def identity_prompt(scene, people, style, faces=True, clothing=False, bodies=False):
     """Kimlik is akisinin istemi (talimat bicimi: LoRA "bu kisiyi ... ciz" diye egitildi). Stil sona eklenir;
     kimlik is akisinda PRE/POST dugumu yoktur (son ek comfy_client.fill'de '. ' ile eklenir). `faces` kapali
     ("Yuz gosterme", F213): yuz kimligi istenmez (portredeki one bakan yuzu sahneye tasiyordu), sac, beden ve giysi.
     `clothing` (F219): kisinin o anki kiyafeti tarifine eklenir, giysi portreden alinmaz (Identity Edit referanstaki
-    giysiyi tasir; gecelik, zirh gibi o ana ait kiyafet ezilmesin)."""
+    giysiyi tasir; gecelik, zirh gibi o ana ait kiyafet ezilmesin). `bodies` (F220): referanslar o anki kiyafetin tam
+    boy gorselleri, giysi de referanstan korunur."""
     who = ('this person' if len(people) == 1 else 'these people')
     looks = [_wearing(c) if clothing else _sentence(person_look(c)) for c in people]
     names = ' and '.join(f'the person from reference {n + 1} ({look})' for n, look in enumerate(looks)) \
         if len(people) > 1 else looks[0]
-    keep = ('the exact facial identity of the reference portrait' if faces else
-            'the hair and build of the reference portrait' if clothing else
-            'the hair, build and clothing of the reference portrait')
+    if bodies:
+        keep = ('the exact facial identity, hair, build and clothing of the reference image' if faces else
+                'the hair, build and clothing of the reference image')
+    else:
+        keep = ('the exact facial identity of the reference portrait' if faces else
+                'the hair and build of the reference portrait' if clothing else
+                'the hair, build and clothing of the reference portrait')
     turn = 'the pose, gaze and expression follow the scene' if faces else \
         'the pose follows the scene and the face is turned away from the viewer'
-    dress = ' The clothing follows the description above, not the reference.' if clothing else ''
+    dress = ' The clothing follows the description above, not the reference.' if clothing and not bodies else ''
     return (f'Create an illustration of {who}: {names}. {_sentence(scene["prompt"])}. Preserve {keep}, but not '
             f'its pose, framing or background: {turn}.{dress} Style: {_sentence(style)}')
 
@@ -1762,12 +1816,46 @@ class Store:
 
         def change(plan):
             character = self.character(plan, name)
-            holder['old'] = character.pop('portrait', None)
+            holder['old'] = [character.pop('portrait', None)] + [e.get('file') for e in character.pop('bodies', ())]
             character.pop('portrait_own', None)
 
         plan = self.update(book, change)
-        if holder.get('old'):
-            (self.folder(book) / holder['old']).unlink(missing_ok=True)
+        for old in filter(None, holder.get('old') or ()):
+            (self.folder(book) / old).unlink(missing_ok=True)
+        return plan
+
+    def body_path(self, book, character, key):
+        """Karakterin `key` icin gecerli tam boy referansi (F220) ya da None."""
+        entry = body_of(character, key)
+        return self.folder(book) / entry['file'] if entry and entry.get('file') else None
+
+    def write_body(self, book, name, key, data, seed=None):
+        """Tam boy referans boy-<ad>-<anahtar>-<surum>.png (F220). Ayni anahtarin eskisi, baska portreden
+        uretilmisler ve planda artik gerekmeyen anahtarlar silinir."""
+        folder = self.folder(book)
+        folder.mkdir(parents=True, exist_ok=True)
+        holder = {}
+
+        def change(plan):
+            character = self.character(plan, name)
+            entries = character.get('bodies') or []
+            version = max((int(e.get('version', 0)) for e in entries), default=0) + 1
+            file = f'boy-{portrait_slug(character["name"])}-{key}-{version}.png'
+            partial = folder / (file + '.part')
+            partial.write_bytes(data)
+            partial.replace(folder / file)
+            needed = body_keys(plan, name)
+            kept = [e for e in entries if e.get('key') != key and e.get('key') in needed
+                    and e.get('from') == character.get('portrait')]
+            holder['old'] = [e.get('file') for e in entries if e not in kept]
+            entry = {'key': key, 'file': file, 'from': character.get('portrait'), 'version': version}
+            if seed is not None:
+                entry['seed'] = int(seed)
+            character['bodies'] = kept + [entry]
+
+        plan = self.update(book, change)
+        for old in filter(None, holder.get('old') or ()):
+            (folder / old).unlink(missing_ok=True)
         return plan
 
     def books(self):

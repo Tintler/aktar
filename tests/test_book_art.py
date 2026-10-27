@@ -950,6 +950,10 @@ class OutfitTest(unittest.TestCase):
         text = book_art.identity_prompt({'prompt': 'p'}, [dict(bo, outfit='pyjamas')], 's', False, True)
         self.assertIn('bald, wearing pyjamas', text)
         self.assertIn('Preserve the hair and build of the reference portrait', text)
+        worn = book_art.identity_prompt({'prompt': 'p'}, [bo], 's', False, True, True)   # F220 tam boy referans
+        self.assertIn('Preserve the hair, build and clothing of the reference image', worn)
+        self.assertNotIn('not the reference', worn)
+        self.assertNotEqual(book_art.body_key(bo), book_art.body_key(dict(bo, outfit='pyjamas')))
         self.assertIn('The clothing follows the description above, not the reference.', text)
         old = book_art.identity_prompt({'prompt': 'p'}, [bo], 's', False)
         self.assertIn('hair, build and clothing', old)
@@ -1413,6 +1417,86 @@ class BridgeTest(unittest.TestCase):
         cleared = self.bridge.art_scene_update('ab12cd34ef', '1-0', {'outfits': {}})['plan']['scenes'][0]
         self.assertNotIn('outfits', cleared)
         self.assertEqual(cleared['clothing'], [{'name': 'Sekai', 'outfit': 'scuffed white jumpsuit', 'own': False}])
+
+    def test_body_reference_per_outfit(self):
+        """F220: kiyafet basina tam boy referans portreden uretilir, sahne portre yerine onunla cizilir; kiyafet
+        degisince yeni referans, portre yenilenince hepsi yenilenir."""
+        store = self.identity_plan()
+        source = Path(self.tmp.name) / 'kimlik.json'
+        source.write_text(json.dumps(IDENTITY), encoding='utf-8')
+        self.bridge.art_set_workflow(str(source), 'identity')
+        store.update('ab12cd34ef', lambda p: (p.update(bodies=True), p['scenes'][0].update(cast=['Sekai']),
+                                              p['characters'][0].update(look='Young woman, short black hair',
+                                                                        outfit='scuffed white jumpsuit')))
+        self.assertEqual(self.bridge.art_generate('ab12cd34ef', ['1-0'])['total'], 3)   # portre + tam boy + sahne
+        self.assertEqual(self.finish()['done'], 3)
+        portrait, body, scene = self.fake.prompts
+        self.assertIn('97', portrait)
+        self.assertTrue(body['9']['inputs']['prompt'].startswith(
+            'Create a full-body character reference of this person: Young woman, short black hair, wearing scuffed '
+            'white jumpsuit.'))
+        self.assertEqual((body['7']['inputs']['width'], body['7']['inputs']['height']), book_art.BODY_SIZE)
+        plan = store.load('ab12cd34ef')
+        sekai = plan['characters'][0]
+        self.assertEqual(body['5']['inputs']['image'], f'aktar-ab12cd34ef-{sekai["portrait"]}')
+        [entry] = sekai['bodies']
+        self.assertEqual(entry['from'], sekai['portrait'])
+        self.assertEqual(scene['5']['inputs']['image'], f'aktar-ab12cd34ef-{entry["file"]}')
+        self.assertIn('Preserve the exact facial identity, hair, build and clothing of the reference image',
+                      scene['9']['inputs']['prompt'])
+        self.assertNotIn('not the reference', scene['9']['inputs']['prompt'])
+        view = self.bridge.art_plan_get('ab12cd34ef')['plan']
+        self.assertEqual(len(view['characters'][0]['body_urls']), 1)
+
+        # var olan referans yeniden uretilmez; sahneye ozel kiyafet ikinci referans ister, ilki kalir
+        self.assertEqual(self.bridge.art_generate('ab12cd34ef', ['1-0'])['total'], 1)
+        self.finish()
+        self.bridge.art_scene_update('ab12cd34ef', '1-0', {'outfits': {'Sekai': 'orange spacesuit'}})
+        self.assertEqual(self.bridge.art_generate('ab12cd34ef', ['1-0'])['total'], 2)
+        self.finish()
+        self.assertIn('wearing orange spacesuit', self.fake.prompts[-2]['9']['inputs']['prompt'])
+        files = [e['file'] for e in store.load('ab12cd34ef')['characters'][0]['bodies']]
+        self.assertEqual(len(files), 1)   # planda artik gerekmeyen jumpsuit referansi silindi
+        self.assertFalse((store.folder('ab12cd34ef') / entry['file']).exists())
+
+        # yalnizca tam boy referansi yeni seed ile: sahne uretilmez
+        old = store.load('ab12cd34ef')['characters'][0]['bodies'][0]
+        self.assertEqual(self.bridge.art_generate('ab12cd34ef', bodies=['sekai'])['total'], 1)
+        self.finish()
+        new = store.load('ab12cd34ef')['characters'][0]['bodies'][0]
+        self.assertNotEqual((new['file'], new['seed']), (old['file'], old['seed']))
+        self.assertFalse((store.folder('ab12cd34ef') / old['file']).exists())
+
+        # portre yenilenince tam boy da yenilenir; kapatilinca sahne portreyle
+        self.assertEqual(self.bridge.art_generate('ab12cd34ef', ['1-0'], portraits=['Sekai'])['total'], 3)
+        self.finish()
+        sekai = store.load('ab12cd34ef')['characters'][0]
+        self.assertEqual(sekai['bodies'][0]['from'], sekai['portrait'])
+        self.bridge.art_plan_save('ab12cd34ef', {'bodies': False})
+        self.bridge.art_generate('ab12cd34ef', ['1-0'])
+        self.finish()
+        self.assertEqual(self.fake.prompts[-1]['5']['inputs']['image'], f'aktar-ab12cd34ef-{sekai["portrait"]}')
+        self.assertNotIn('body_urls', self.bridge.art_plan_get('ab12cd34ef')['plan']['characters'][0])
+        self.bridge.art_portrait_clear('ab12cd34ef', 'Sekai')
+        self.assertFalse(list(store.folder('ab12cd34ef').glob('boy-*')))
+
+    def test_body_reference_follows_slots(self):
+        """F220: tek referansli is akisinda yalnizca ilk kisi kimlikle cizilir, ikinciye tam boy uretilmez;
+        kiyafeti olmayan (giysisi tarifinde) portresiyle kalir."""
+        store = self.identity_plan()
+        source = Path(self.tmp.name) / 'kimlik.json'
+        source.write_text(json.dumps(IDENTITY), encoding='utf-8')
+        self.bridge.art_set_workflow(str(source), 'identity')
+        store.update('ab12cd34ef', lambda p: (p.update(bodies=True), p['scenes'][0].update(cast=['Bot', 'Sekai']),
+                                              p['characters'][0].update(outfit='scuffed white jumpsuit'),
+                                              p['characters'].append({'name': 'Bot', 'look': 'Security robot, '
+                                                                      'matte black armour'})))
+        self.assertEqual(self.bridge.art_generate('ab12cd34ef', ['1-0'])['total'], 3)   # iki portre + sahne
+        self.finish()
+        self.assertFalse(store.load('ab12cd34ef')['characters'][0].get('bodies'))
+        scene = self.fake.prompts[-1]
+        self.assertTrue(scene['5']['inputs']['image'].endswith(store.load('ab12cd34ef')['characters'][1]['portrait']))
+        self.assertIn('Preserve the exact facial identity of the reference portrait', scene['9']['inputs']['prompt'])
 
     def test_band_two_strips(self):
         """F217: orta bos secenegi her sahneyi iki seritte (ust, alt) uretir, gecisle tek gorselde birlestirir."""
