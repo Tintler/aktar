@@ -402,7 +402,7 @@ class PlanTest(unittest.TestCase):
         """F213: "Yuz gosterme" insansiz sahneye figur ekletmez: son ek yalnizca istemde insan varsa, kural dil
         modeline figur eklememesini soyler, yalin olumsuz cumle ("No faces are shown.") atilir."""
         plan = book_art.new_plan('', 'watercolor', modifiers=['no-faces'])
-        face = 'people seen from behind'
+        face = 'back view, every face turned away'
         self.assertNotIn(face, book_art.image_suffix(plan, prompt='An empty study with a heavy oak desk.'))
         self.assertIn(face, book_art.image_suffix(plan, prompt='A man in a grey coat reads a letter.'))
         self.assertIn(face, book_art.image_suffix(plan, prompt='The crowd surges toward the barrier.'))
@@ -420,6 +420,34 @@ class PlanTest(unittest.TestCase):
         self.assertIn('hair, build and clothing', hidden)
         self.assertNotIn('facial identity', hidden)
         self.assertIn('facial identity', book_art.identity_prompt({'prompt': 'He walks away.'}, [character], 'Ink.'))
+
+    def test_no_faces_cleans_prompt(self):
+        """F215: son ek kisi adi tasimaz (asagidan gorulen sahneye seyirci kalabaligi ekletiyordu); kurala ragmen
+        yazilan kameraya bakis, yuz ifadesi ve gogusten yukari cekim uretimde ayiklanir, kayitli istem degismez."""
+        suffix = book_art.image_suffix(book_art.new_plan('', 'watercolor', modifiers=['no-faces']), prompt='A man.')
+        self.assertNotRegex(suffix.split(book_art.SUFFIX)[0], r'\b(?:people|figures?|persons?|crowd)\b')
+        self.assertIn('chest up', book_art.note_text('', ['no-faces']))
+        prompt = ('A woman of about twenty-five; slight build; wearing a cracked helmet stands on the Access Bridge, '
+                  'looking toward the camera with an expression of apprehension. She is framed from the chest up, her '
+                  'face partially obscured by the angle and shadows. The background shows dark iron railings.')
+        self.assertEqual(book_art.hide_faces(prompt),
+                         'A woman of about twenty-five; slight build; wearing a cracked helmet stands on the Access '
+                         'Bridge, seen from behind. The background shows dark iron railings.')
+        cases = {'A woman looks at the camera.': 'A woman turns away from the viewer.',
+                 'They turn to face the viewer, silhouetted.': 'They turn away from the viewer, silhouetted.',
+                 'Gazing straight into the lens, he waits.': 'Seen from behind, he waits.',
+                 'He climbs the sheer rock face, his eyes fixed on the ledge.': 'He climbs the sheer rock face.',
+                 'A dark room. Her face is lit by amber light.': 'A dark room.',
+                 'She looks at the old map, her back to us.': 'She looks at the old map, her back to us.',
+                 'He walks away, his face turned away from the lamp.':
+                     'He walks away, his face turned away from the lamp.',
+                 'Her eyes.': 'Her eyes.'}   # istemin tamami atilmaz
+        for source, expected in cases.items():
+            self.assertEqual(book_art.hide_faces(source), expected)
+        scene = {'prompt': prompt, 'place': ''}
+        self.assertEqual(book_art.scene_text({'modifiers': ['no-faces']}, scene), book_art.hide_faces(prompt))
+        self.assertEqual(book_art.scene_text({'modifiers': []}, scene), prompt)
+        self.assertEqual(scene['prompt'], prompt)
 
     def test_scene_keeps_reader_section_number(self):
         # bos bolumler (kapak, gorsel sayfasi) okuyucuda sayilir ama plana gelmez: sahne okuyucunun numarasini almali

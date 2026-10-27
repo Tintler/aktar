@@ -118,14 +118,41 @@ MODIFIERS = (
              'tiny distant figures.',
      'suffix': 'wide establishing shot, expansive landscape'},
     # F213: kural ve son ek her sahneye insan ekletiyordu (dil modeli bos odaya "arkadan gorulen adam" yaziyordu);
-    # kural yalnizca metnin sahneye koydugu kisiler icin, son ek ('people') yalnizca istemde insan varsa
+    # kural yalnizca metnin sahneye koydugu kisiler icin, son ek ('people') yalnizca istemde insan varsa.
+    # F215: son ekteki "people" asagidan gorulen sahneye arkadan gorulen seyirci kalabaligi ekletiyordu: son ek kisi
+    # adi tasimaz; dil modelinin yine de yazdigi kameraya bakis / gogusten yukari cekim uretimde ayiklanir (hide_faces)
     {'id': 'no-faces', 'label': 'Yüz gösterme',
      'rule': 'Faces are never shown. This is only about the people the passage itself puts in the scene: show them '
              'from behind, from far away or with the face out of frame. Never add a person, figure or silhouette to '
-             'follow this rule; a place, an object or a landscape without people stays without people. Write what is '
-             'visible ("seen from behind"), never "no faces".',
-     'suffix': 'people seen from behind, faces turned away from the viewer', 'people': True},
+             'follow this rule; a place, an object or a landscape without people stays without people. Never frame a '
+             'person in close-up or from the chest up, never have anyone look toward the camera and never describe a '
+             'facial expression. Write what is visible ("seen from behind"), never "no faces".',
+     'suffix': 'back view, every face turned away from the viewer', 'people': True},
 )
+# "Yuz gosterme" (F215): kameraya bakis "seen from behind" olur; yakin cekim / yuz / ifade anlatan yan cumle atilir
+FACE_GAZE = re.compile(
+    r'\b(?:(?P<turn>turn|turns|turned|turning)\s+(?:back\s+)?to\s+)?(?P<verb>look|looks|looking|gaze|gazes|gazing|'
+    r'stare|stares|staring|glance|glances|glancing|peer|peers|peering|turn|turns|turned|turning|face|faces|facing)\s+'
+    r'(?:back\s+|up\s+)?(?:directly\s+|straight\s+)?(?:(?:toward|towards|at|into|to)\s+)?(?:the\s+)?'
+    r'(?:camera|viewer|lens|reader|audience)\b', re.I)
+
+
+def _turned_away(match):
+    """Kameraya bakis cumlenin yapisi bozulmadan arkasini donmeye cevrilir: looks -> turns, look -> turn, looking/turned
+    -> seen from behind."""
+    verb = (match['turn'] or match['verb']).lower()
+    if verb.endswith(('ing', 'ed')):
+        return 'seen from behind'
+    return 'turns away from the viewer' if verb.endswith('s') else 'turn away from the viewer'
+FACE_EXPRESSION = re.compile(
+    r',?\s*\bwith\s+(?:an?|her|his|their)\s+(?:[\w-]+\s+){0,3}?expressions?\b(?:\s+of\s+[\w-]+(?:\s+and\s+[\w-]+)?)?',
+    re.I)
+FACE_SHOWN = re.compile(
+    r'\b(?:close-?ups?|(?:from|framed)\s+the\s+(?:chest|waist|shoulders)\s+up|head\s+and\s+shoulders|facial|'
+    r'(?:her|his|their|its|an?|the|[\w-]+\'s)\s+(?:(?!(?:rock|cliff|stone|clock|mountain|wall|coal|north|south|east|'
+    r'west)\b)[\w-]+\s+)?(?:faces?|expressions?|eyes|features))\b', re.I)
+FACE_HIDDEN = re.compile(r'\b(?:away|behind|averted|out of (?:the )?frame|fully hidden|not visible)\b', re.I)
+FACE_PRONOUN = re.compile(r'(?:she|he|they|it|her|his|their|its)\b', re.I)
 # istemde insan var mi (people'li son ek icin; yanlis pozitif yalnizca son eki ekler)
 PEOPLE_WORDS = re.compile(
     r'\b(?:man|men|woman|women|person|persons|people|figure|figures|silhouett\w*|child|children|boy|boys|girl|girls|'
@@ -640,6 +667,30 @@ def strip_negations(prompt):
     return ' '.join(kept) if kept else prompt
 
 
+def _shows_face(clause):
+    return bool(FACE_SHOWN.search(clause)) and not FACE_HIDDEN.search(clause)
+
+
+def hide_faces(prompt):
+    """"Yuz gosterme" acikken gorsel modeline giden istem (F215): kurala ragmen yazilan kameraya bakis "seen from
+    behind" olur, yuz ifadesi atilir, yakin cekim / yuz anlatan yan cumle atilir (cumlenin ilk yan cumlesi kisiyi
+    tanittigi icin kalir; zamirle baslayan cumle tanitilmis kisiyi anlatir, tamami atilir). Kayitli istem degismez."""
+    result = []
+    for sentence in re.split(r'(?<=[.!?])\s+', prompt.strip()):
+        end =sentence[-1] if sentence.endswith(('.', '!', '?')) else ''
+        sentence = FACE_GAZE.sub(_turned_away, FACE_EXPRESSION.sub('', sentence))
+        clauses = re.split(r'(?<=[,;])\s+', sentence)
+        if FACE_PRONOUN.match(clauses[0]) and _shows_face(clauses[0]):
+            continue
+        kept = [clauses[0]] + [c for c in clauses[1:] if not _shows_face(c)]
+        text = ' '.join(kept)
+        if len(kept) < len(clauses):
+            text = text.rstrip(' ,;')
+            text += end if end and not text.endswith(end) else ''
+        result.append(text[:1].upper() + text[1:])
+    return ' '.join(result) if result else prompt
+
+
 def strip_style(prompt, style):
     """Model talimata ragmen istemin basina stil kilavuzunu yazdiysa (gorsel modeline iki kez gider) o cumleler
     atilir: stilin ilk 5 kelimesiyle baslayan cumleler istemin basindan silinir."""
@@ -821,8 +872,11 @@ def scene_people(scene, characters):
 
 def scene_text(plan, scene):
     """Gorsel modeline giden sahne istemi: mekan kimligi aciksa sahnenin mekaninin kalici tarifi sona eklenir
-    (dil modeli mekani tarif etmez, yalnizca adini verir; mekan tarifi duzenlenince yeni gorsellere yansir)."""
+    (dil modeli mekani tarif etmez, yalnizca adini verir; mekan tarifi duzenlenince yeni gorsellere yansir).
+    "Yuz gosterme" acikken yuzu gosteren ifadeler ayiklanir (hide_faces, eski planlar da)."""
     prompt = scene['prompt']
+    if 'no-faces' in (plan.get('modifiers') or ()):
+        prompt = hide_faces(prompt)
     if plan.get('place_identity') and scene.get('place'):
         place = next((p for p in plan.get('places') or () if p['name'].lower() == scene['place'].lower()), None)
         if place:
