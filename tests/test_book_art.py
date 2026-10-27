@@ -441,7 +441,15 @@ class PlanTest(unittest.TestCase):
                  'She looks at the old map, her back to us.': 'She looks at the old map, her back to us.',
                  'He walks away, his face turned away from the lamp.':
                      'He walks away, his face turned away from the lamp.',
-                 'Her eyes.': 'Her eyes.'}   # istemin tamami atilmaz
+                 'Her eyes.': 'Her eyes.',   # istemin tamami atilmaz
+                 # gercek model (gemma-4-26b) ciktisi: tarifteki yuz kalir, yuzun gorunusunu anlatan yan cumle gider
+                 'Lincoln Powell, a man in his late thirties with a thin build and a weary face, is seen from behind.':
+                     'Lincoln Powell, a man in his late thirties with a thin build and a weary face, is seen from '
+                     'behind.',
+                 'Ben Reich stands facing him, seen from a low angle that obscures his face, surrounded by teals.':
+                     'Ben Reich stands facing him surrounded by teals.',
+                 'Jerry Church, seen in profile with his face obscured by deep shadow, leans over the counter.':
+                     'Jerry Church leans over the counter.'}
         for source, expected in cases.items():
             self.assertEqual(book_art.hide_faces(source), expected)
         scene = {'prompt': prompt, 'place': ''}

@@ -129,7 +129,8 @@ MODIFIERS = (
              'facial expression. Write what is visible ("seen from behind"), never "no faces".',
      'suffix': 'back view, every face turned away from the viewer', 'people': True},
 )
-# "Yuz gosterme" (F215): kameraya bakis "seen from behind" olur; yakin cekim / yuz / ifade anlatan yan cumle atilir
+# "Yuz gosterme" (F215): kameraya bakis "seen from behind" olur; yakin cekim / yuz / ifade anlatan yan cumle atilir.
+# Kisiyi tarif eden "a man with a weary face" yuz gosterimi sayilmaz (yan cumleyle tarifi de atiliyordu)
 FACE_GAZE = re.compile(
     r'\b(?:(?P<turn>turn|turns|turned|turning)\s+(?:back\s+)?to\s+)?(?P<verb>look|looks|looking|gaze|gazes|gazing|'
     r'stare|stares|staring|glance|glances|glancing|peer|peers|peering|turn|turns|turned|turning|face|faces|facing)\s+'
@@ -149,7 +150,7 @@ FACE_EXPRESSION = re.compile(
     re.I)
 FACE_SHOWN = re.compile(
     r'\b(?:close-?ups?|(?:from|framed)\s+the\s+(?:chest|waist|shoulders)\s+up|head\s+and\s+shoulders|facial|'
-    r'(?:her|his|their|its|an?|the|[\w-]+\'s)\s+(?:(?!(?:rock|cliff|stone|clock|mountain|wall|coal|north|south|east|'
+    r'(?:her|his|their|its|the|[\w-]+\'s)\s+(?:(?!(?:rock|cliff|stone|clock|mountain|wall|coal|north|south|east|'
     r'west)\b)[\w-]+\s+)?(?:faces?|expressions?|eyes|features))\b', re.I)
 FACE_HIDDEN = re.compile(r'\b(?:away|behind|averted|out of (?:the )?frame|fully hidden|not visible)\b', re.I)
 FACE_PRONOUN = re.compile(r'(?:she|he|they|it|her|his|their|its)\b', re.I)
@@ -682,7 +683,12 @@ def hide_faces(prompt):
         clauses = re.split(r'(?<=[,;])\s+', sentence)
         if FACE_PRONOUN.match(clauses[0]) and _shows_face(clauses[0]):
             continue
-        kept = [clauses[0]] + [c for c in clauses[1:] if not _shows_face(c)]
+        kept = [clauses[0]]
+        for clause in clauses[1:]:
+            if not _shows_face(clause):
+                kept.append(clause)
+            elif clause.endswith(',') and kept[-1].endswith(','):   # ara cumle: "Church, <atilan>, leans"
+                kept[-1] = kept[-1][:-1]
         text = ' '.join(kept)
         if len(kept) < len(clauses):
             text = text.rstrip(' ,;')

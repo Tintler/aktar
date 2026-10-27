@@ -5,7 +5,7 @@ Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: ye
 ## 2.37.5 — 2026-10-27
 
 ### Düzeltilen
-- **"Yüz gösterme" açıkken yüzler yine görünüyordu (F215):** Seçeneğin görsel istemine eklediği "arkadan görülen kişiler" eki, kişinin aşağıdan görüldüğü sahnelerde (düşüş, atlayış) ön plana arkası dönük bir seyirci kalabalığı ekletiyordu; ek artık kişi adı taşımıyor ("back view"). Dil modelinin kurala rağmen yazdığı "kameraya bakıyor", yüz ifadesi ve göğüsten yukarı/yakın çekim ifadeleri üretimde istemden ayıklanıyor: kameraya bakış arkasını dönmeye çevriliyor, yüzü anlatan yan cümle atılıyor. Kayıtlı istem değişmiyor; var olan planlarda görselleri yeniden üretmek yetiyor. Dil modeline giden kural da yakın çekim, kameraya bakış ve yüz ifadesini açıkça yasaklıyor.
+- **"Yüz gösterme" açıkken yüzler yine görünüyordu (F215):** Seçeneğin görsel istemine eklediği "arkadan görülen kişiler" eki, kişinin aşağıdan görüldüğü sahnelerde (düşüş, atlayış) ön plana arkası dönük bir seyirci kalabalığı ekletiyordu; ek artık kişi adı taşımıyor ("back view"). Dil modelinin kurala rağmen yazdığı "kameraya bakıyor", yüz ifadesi ve göğüsten yukarı/yakın çekim ifadeleri üretimde istemden ayıklanıyor: kameraya bakış arkasını dönmeye çevriliyor, yüzü anlatan yan cümle atılıyor. Kayıtlı istem değişmiyor; var olan planlarda görselleri yeniden üretmek yetiyor. Dil modeline giden kural da yakın çekim, kameraya bakış ve yüz ifadesini açıkça yasaklıyor. Gerçek dil modeliyle (Gemma 4 26B, Qwen 3.6 35B; Yıkıma Giden Adam ve Compulsory) denendi: yeni kuralla yüz anlatan istemler yaklaşık yarıya iniyor, kalanlar ayıklanıyor; kişiyi tarif eden "yorgun yüzlü" gibi ifadeler korunuyor.
 
 ## 2.37.4 — 2026-10-27
 
