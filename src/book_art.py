@@ -35,6 +35,13 @@ F209 secenekleri (hepsi kapaliyken istemler ve akis eskisi gibi):
   - Gorunus degisimi (plan['look_changes']): karakterin 'changes' listesi; sahneler o yerdeki gorunusle.
   - RTX buyutme (plan['upscale'] katsayi): uretilen gorsel ComfyUI'de RTX Video Super Resolution ile buyutulur.
   - Toplu stil degisikligi (restyle): istemler kalir, stil kilavuzu ve LoRA degisir, gorseller yeniden uretilir.
+
+Kiyafet (F219, yeni planlarda plan['outfits']; eski planda istemler eskisi gibi): karakterin 'look'u yalnizca beden ve
+yuz, giysisi ayri 'outfit'. Dil modeli giysiyi isteme yazmaz; uretimde sahnedeki karakterlerin o anki giysisi kodla
+eklenir (scene_text), kiyafeti belirtilmeyen sahnede model giysiyi yeniden uydurmasin. Degisimler sahne isteginde
+degil, parca basina ayri bir soruyla bulunur (outfit_changes): kalici olan (uniforma, yeni elbise, eski giysisine
+donmek) karakterin 'outfits' listesine [{section, start, outfit}], yalnizca o ana ait olan (gecelik, can yelegi, zirh)
+araligindaki sahnelerin 'outfits' {ad: giysi} alanina yazilir; kiyafeti olmayan karaktere bir kez sorulur (fix_outfits).
 """
 from __future__ import annotations
 
@@ -329,13 +336,20 @@ STYLE_TASK = (
     'technique, colour palette, lighting, mood, era / technology look of the world. Do not name real artists. '
     'Do not describe a specific scene.\n'
     '2. "characters": the recurring characters (at most 8) with a fixed English visual description each '
-    '(15-35 words: age, build, face, hair, clothing) so they look the same in every image. ' + AGE_RULE + ' '
+    '(15-35 words: age, build, face, hair{look_parts}) so they look the same in every image. ' + AGE_RULE + ' '
     'Only permanent features, never emotions or momentary states (no "crying", "holding a rod"). Leave out characters '
     'that are never described or barely appear.\n'
+    '{outfit_rule}'
     '{places}'
     '{note}'
-    'JSON shape: {{"style": "...", "characters": [{{"name": "...", "look": "..."}}]{places_shape}}}\n\n'
+    'JSON shape: {{"style": "...", "characters": [{{"name": "...", "look": "..."{outfit_shape}}}]{places_shape}}}\n\n'
     'Book excerpts (beginning of each chapter):\n\n')
+# kiyafet (F219): giysi tarifin parcasi degil; isteme kodla eklenir, dil modeli kopyalarken atlamasin ya da degistirmesin
+OUTFIT_WORDS = '8-25 words: garments, colours, materials, footwear, notable accessories'
+OUTFIT_STYLE = (
+    '   Each character also gets "outfit": the ONE set of clothing they usually wear at the start of the book ('
+    + OUTFIT_WORDS + '), no alternatives and no "or"; nightclothes or clothing worn only once are not their usual '
+    'clothing. The look itself never mentions clothing. An animal or creature without clothes gets "".\n')
 # mekan kimligi (F209): tekrar eden mekanlarin sabit tarifi; gorsel istemine uretimde eklenir (scene_text)
 PLACES_TASK = (
     '3. "places": the recurring locations (at most 8) with a fixed English visual description each (20-40 words: '
@@ -464,9 +478,12 @@ def image_suffix(plan, base=SUFFIX, modifiers=True, prompt=None):
     return ', '.join(part for part in parts + [base] if part)
 
 
-def style_prompt(sample, note='', modifiers=(), places=False):
+def style_prompt(sample, note='', modifiers=(), places=False, outfits=False):
     return STYLE_SYSTEM, STYLE_TASK.format(note=note_text(note, modifiers), places=PLACES_TASK if places else '',
-                                           places_shape=PLACES_SHAPE if places else '') + sample
+                                           places_shape=PLACES_SHAPE if places else '',
+                                           look_parts='' if outfits else ', clothing',
+                                           outfit_rule=OUTFIT_STYLE if outfits else '',
+                                           outfit_shape=', "outfit": "..."' if outfits else '') + sample
 
 
 def parse_style(raw):
@@ -495,6 +512,11 @@ def clean_characters(value, limit=12):
             changes = clean_changes(item.get('changes'))
             if changes:
                 entry['changes'] = changes
+            if _clean(item.get('outfit')):   # F219 kiyafet
+                entry['outfit'] = _clean(item['outfit'])[:300]
+            outfits = clean_changes(item.get('outfits'), 'outfit')
+            if outfits:
+                entry['outfits'] = outfits
             if item.get('kind') == 'other':   # insan degil (F211): tarif yetiskin sayilmaz
                 entry['kind'] = 'other'
             result.append(entry)
@@ -507,20 +529,21 @@ def clean_places(value, limit=12):
 
 
 # ---------------------------------------------------------------- gorunus degisimi (F209)
-def clean_changes(value):
-    """Karakterin kalici gorunus degisimleri [{section, start, look}] okuma sirasiyla (ayni yerde sonuncusu)."""
+def clean_changes(value, key='look'):
+    """Karakterin kalici gorunus degisimleri [{section, start, look}] okuma sirasiyla (ayni yerde sonuncusu);
+    `key` 'outfit': kiyafet degisimleri (F219)."""
     found = {}
     for item in value if isinstance(value, list) else ():
         if not isinstance(item, dict):
             continue
-        look = _clean(item.get('look'))[:400]
+        look = _clean(item.get(key))[:400]
         try:
             where = (max(0, int(item.get('section'))), max(0, int(item.get('start') or 0)))
         except (TypeError, ValueError):
             continue
         if look:
-            found[where] = {'section': where[0], 'start': where[1], 'look': look}
-    return [found[key] for key in sorted(found)][:12]
+            found[where] = {'section': where[0], 'start': where[1], key: look}
+    return [found[where] for where in sorted(found)][:24 if key == 'outfit' else 12]
 
 
 def look_at(character, section, start=0):
@@ -532,28 +555,55 @@ def look_at(character, section, start=0):
     return look
 
 
+def outfit_at(character, section, start=0):
+    """Karakterin (bolum, cumle) yerindeki kiyafeti (F219): o yere kadarki son kalici degisim, yoksa ilk kiyafeti."""
+    outfit = character.get('outfit') or ''
+    for change in character.get('outfits') or ():
+        if (change['section'], change['start']) <= (int(section), int(start)):
+            outfit = change['outfit']
+    return outfit
+
+
 def characters_at(characters, section, start=0):
-    """Karakterler, gorunusleri o yerdeki haliyle (dil modeline giden liste)."""
-    return [dict(c, look=look_at(c, section, start)) for c in characters]
+    """Karakterler, gorunusleri (ve F219 kiyafetleri) o yerdeki haliyle (dil modeline giden liste)."""
+    return [dict(c, look=look_at(c, section, start),
+                 **({'outfit': outfit_at(c, section, start)} if c.get('outfit') or c.get('outfits') else {}))
+            for c in characters]
 
 
-def apply_changes(characters, changes, section):
-    """Dil modelinin bildirdigi degisimler ([{name, start, look}]) adi bilinen karakterlere eklenir."""
+def apply_changes(characters, changes, section, key='look'):
+    """Dil modelinin bildirdigi degisimler ([{name, start, look}]) adi bilinen karakterlere eklenir; `key` 'outfit':
+    kalici kiyafet degisimleri ([{name, start, outfit}] -> karakterin 'outfits' listesi, F219)."""
     by_name = {c['name'].lower(): c for c in characters}
+    field, current = ('changes', look_at) if key == 'look' else ('outfits', outfit_at)
     for item in changes if isinstance(changes, list) else ():
         if not isinstance(item, dict):
             continue
         character = by_name.get(_clean(item.get('name')).lower())
-        look = _clean(item.get('look'))[:400]
+        look = _clean(item.get(key))[:400]
         try:
             start = int(str(item.get('start')).strip())
         except (TypeError, ValueError):
             continue
-        if character is None or not look or look == look_at(character, section, start):
+        if character is None or not look or look == current(character, section, start):
             continue
-        character['changes'] = clean_changes((character.get('changes') or [])
-                                             + [{'section': section, 'start': start, 'look': look}])
+        character[field] = clean_changes((character.get(field) or [])
+                                         + [{'section': section, 'start': start, key: look}], key)
     return characters
+
+
+def clean_scene_outfits(value, characters=None):
+    """Sahnenin yalnizca o ana ait kiyafetleri {ad: kiyafet} (F219, arayuzden elle); `characters` verilirse yalnizca
+    bilinen adlar (karakterin kendi yazilisiyla)."""
+    names = {c['name'].lower(): c['name'] for c in characters} if characters is not None else None
+    result = {}
+    for name, outfit in (value.items() if isinstance(value, dict) else ()):
+        name, outfit = _clean(name)[:60], _clean(outfit)[:300]
+        if names is not None:
+            name = names.get(name.lower(), '')
+        if name and outfit:
+            result[name] = outfit
+    return result
 
 
 # ---------------------------------------------------------------- yas ve cinsiyet (F211)
@@ -616,6 +666,147 @@ def fix_ages(characters, ask, sample, asked):
     return characters
 
 
+# ---------------------------------------------------------------- kiyafet (F219)
+OUTFIT_SYSTEM = AGE_SYSTEM
+OUTFIT_FILL = (
+    'These characters of an illustrated book have no clothing description yet:\n{characters}\n\n'
+    'Judged from the book text below, give each of them "outfit": the one set of clothing they wear when they appear '
+    'here (' + OUTFIT_WORDS + '), no alternatives and no "or"; if the text does not say, choose clothing that fits '
+    'their role, the place and the era. An animal or creature without clothes gets "".\n'
+    'JSON shape: {{"characters": [{{"name": "...", "outfit": "..."}}]}}\n\nBook text:\n\n')
+
+
+# Kiyafet degisimi sahne isteginden ayri, parca basina dar bir soruyla bulunur: sahne isteginde model ayni uniformayi
+# bazen kalici bazen o ana ait yaziyor, geceligi kalici sayiyor, listede uniformali baska biri varken kahramanin
+# uniformaya gectigini hic yazmiyordu (gemma-4-26b denemeleri). Ayri soruda kararlar tutarli.
+CHANGE_TASK = (
+    'Characters of the book and the clothing they wear at the start of this part:\n{characters}\n\n'
+    'Below is the next part of the book as numbered sentences. List every time one of these characters puts on '
+    'different clothing: a uniform, new clothes, nightclothes, a life jacket, armour, a disguise, wet or torn clothes, '
+    'changing back into their usual clothes; also when the situation clearly requires other clothing (in bed at '
+    'night, swimming). For each give:\n'
+    '- "name": exact name from the list\n'
+    '- "from": number of the sentence from which they wear it\n'
+    '- "wear": the whole outfit they wear from then on, not only the changed item (new shoes: the shoes together '
+    'with the rest of their clothing), as a list of garments without a verb ("a grey suit, white shirt, black '
+    'shoes"), no story or explanation (' + OUTFIT_WORDS + ')\n'
+    '- "keep": true when they changed clothes for good and still wear them later (a uniform they now wear every day, '
+    'new clothes, going back to clothing they wore earlier in the book); false when the clothing is only for that '
+    'moment or '
+    'occasion (nightclothes, a life jacket or coat for one trip, armour for one battle, a disguise), even when the '
+    'text does not say when it comes off\n'
+    '- "until": for "keep": false, number of the last sentence of that situation (the same night, the same storm)\n'
+    'Answer {{"changes": []}} when nobody changes clothes.\n'
+    'JSON shape: {{"changes": [{{"name": "...", "from": 0, "wear": "...", "keep": false, "until": 0}}]}}\n\n')
+
+
+def change_prompt(characters, sentences, start, stop):
+    """`characters`: o anki kiyafetiyle ('outfit'), 'earlier': daha once giydikleri (eski giysisine donus kalici
+    sayilsin; listede yalnizca uniforma varken eski yagmurluguna donmesini o ana ait sayiyordu)."""
+    def line(c):
+        text = f'- {c["name"]}: {c.get("outfit") or "(not described)"}'
+        return text + (f' (earlier in the book: {"; ".join(c["earlier"])})' if c.get('earlier') else '')
+    lines = '\n'.join(line(c) for c in characters) or '- (none)'
+    text = '\n'.join(f'{i}: {_clean(sentences[i])}' for i in range(start, stop))
+    return OUTFIT_SYSTEM, CHANGE_TASK.format(characters=lines) + text
+
+
+def _number(value):
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_outfit_changes(raw, start, stop, characters):
+    """[{name, from, wear, keep, until}]: bilinen adlar, parcanin icindeki cumleler; o ana ait degisimin sonu yoksa ya
+    da parcanin disindaysa parcanin son cumlesi."""
+    names = {c['name'].lower(): c['name'] for c in characters}
+    found = []
+    data = _json_object(raw) or {}
+    for item in data.get('changes') if isinstance(data.get('changes'), list) else ():
+        if not isinstance(item, dict):
+            continue
+        name, wear, at = names.get(_clean(item.get('name')).lower()), _clean(item.get('wear'))[:300], _number(item.get('from'))
+        if not name or not wear or at is None or not start <= at < stop:
+            continue
+        keep = item.get('keep') is True or str(item.get('keep')).lower() == 'true'
+        until = _number(item.get('until'))
+        until = None if keep else min(stop - 1, until) if until is not None and until >= at else stop - 1
+        found.append({'name': name, 'from': at, 'wear': wear, 'keep': keep, 'until': until})
+    return sorted(found, key=lambda change: change['from'])
+
+
+def apply_outfit_changes(plan, changes, section, scenes, stop):
+    """Kalici degisim karakterin 'outfits' listesine; o ana ait olan, `scenes` icinde (bu parcanin sahneleri) o
+    araliga dusenlerin 'outfits' alanina (elle yazilmis olan ezilmez). Sahnenin ilk yarisinda baslayan degisim o
+    sahneden sayilir (gorsel sahnenin basini degil ortasini da gosterir: gecelik 18. cumlede, 17'de baslayan "gece
+    okumasi" sahnesi yagmurlukla ciziliyordu). `stop`: parcanin sonu (son sahnenin araligi)."""
+    starts = sorted({scene['start'] for scene in scenes if scene['section'] == section})
+
+    def begins(at):
+        for first, after in zip(starts, starts[1:] + [stop]):
+            if first < at < after and at - first <= (after - first) // 2:
+                return first
+        return at
+
+    apply_changes(plan['characters'], [{'name': c['name'], 'start': begins(c['from']), 'outfit': c['wear']}
+                                       for c in changes if c['keep']], section, 'outfit')
+    for change in changes:
+        if change['keep']:
+            continue
+        first = begins(change['from'])
+        for scene in scenes:
+            if scene['section'] == section and first <= scene['start'] <= change['until']:
+                scene.setdefault('outfits', {}).setdefault(change['name'], change['wear'])
+    return plan
+
+
+def outfit_changes(plan, ask, sentences, section, start, stop):
+    """Parcanin kiyafet degisimleri (CHANGE_TASK); okunamayan yanit degisimsiz sayilir."""
+    people = []
+    for character in plan['characters']:
+        if character.get('kind') == 'other':
+            continue
+        now = outfit_at(character, section, start)
+        worn = [character.get('outfit') or ''] + [c['outfit'] for c in character.get('outfits') or ()
+                                                  if (c['section'], c['start']) <= (int(section), int(start))]
+        earlier = list(dict.fromkeys(o for o in worn if o and o != now))
+        people.append(dict(character, outfit=now, **({'earlier': earlier} if earlier else {})))
+    if not people:
+        return []
+    try:
+        raw = ask_json(ask, *change_prompt(people, sentences, start, stop))
+    except ValueError:
+        return []
+    return parse_outfit_changes(raw, start, stop, people)
+
+
+def outfit_prompt(characters, sample):
+    return OUTFIT_SYSTEM, OUTFIT_FILL.format(characters=character_lines(characters)) + sample
+
+
+def fix_outfits(characters, ask, sample, asked):
+    """Kiyafeti olmayan karaktere dil modeline bir kez kiyafet yazdirir (`asked`: bu planlamada sorulan adlar).
+    Sahne isteginde yeni tanitilan karaktere model cogu zaman kiyafet yazmiyordu; kiyafetsiz karakterin giysisi her
+    gorselde yeniden uyduruluyordu."""
+    todo = [c for c in characters if c.get('kind') != 'other' and not c.get('outfit')
+            and c['name'].lower() not in asked]
+    if not todo:
+        return characters
+    asked.update(c['name'].lower() for c in todo)
+    try:
+        data = _json_object(ask_json(ask, *outfit_prompt(todo, sample))) or {}
+    except ValueError:
+        return characters
+    found = {_clean(item.get('name')).lower(): _clean(item.get('outfit'))[:300]
+             for item in data.get('characters') or () if isinstance(item, dict)}
+    for character in todo:
+        if found.get(character['name'].lower()):
+            character['outfit'] = found[character['name'].lower()]
+    return characters
+
+
 # ---------------------------------------------------------------- 2. sahneler
 def chunks(sections, limit=CHUNK_CHARS):
     """[(bolum, bas, son)]: bolumler, uzunsa cumle sinirinda `limit` karakterlik parcalara bolunur."""
@@ -666,7 +857,7 @@ PROMPT_RULE = (
     'reflective passages prefer places, objects, period details or symbolic imagery.')
 SCENE_TASK = (
     'Style guide of the edition (it is added to every prompt automatically, do not repeat it):\n{style}\n\n'
-    'Recurring characters (when one appears, copy its look into the prompt word for word):\n{characters}\n\n'
+    'Recurring characters (when one appears, copy its look into the prompt word for word{copy}):\n{characters}\n\n'
     '{places}'
     '{note}'
     '{previous}'
@@ -713,7 +904,7 @@ OPENING_PAGE = 1500   # ilk sayfa: bu kadar karakter (en az bir cumle)
 MIN_OPENING_CHARS = 200   # kisa bolum de acilis alir (sahne sinirindan kucuk); yalnizca baslik gibi bolumler almaz
 OPENING_TASK = (
     'Style guide of the edition (it is added to every prompt automatically, do not repeat it):\n{style}\n\n'
-    'Recurring characters (when one appears, copy its look into the prompt word for word):\n{characters}\n\n'
+    'Recurring characters (when one appears, copy its look into the prompt word for word{copy}):\n{characters}\n\n'
     '{places}'
     '{note}'
     'Below is the first page of a chapter as numbered sentences. Write the image shown while this page is read, at '
@@ -732,35 +923,54 @@ CAST_TASK = (
     '"characters"), the most important first, at most {limit}; [] if none. Each of them is drawn from a reference '
     'portrait, so for them describe pose, action, gaze direction and expression clearly (people are caught in the '
     'middle of the action, not posing or looking at the camera unless the text says so).\n')
+# kiyafet (F219): sahnedeki karakterlerin o anki kiyafeti uretimde kodla eklenir, bunun icin kim gorunuyor bilinmeli
+CAST_PLAIN = ('- "cast": names of the recurring characters visible in the image (exact names from the list above or '
+              'from "characters"), the most important first; [] if none.\n')
+OUTFIT_COPY = ('; never describe the clothing of a recurring character in the prompt: what they wear now ("clothing '
+               'now") is added to the prompt automatically')
+NEW_OUTFIT_TASK = ('- new characters in "characters" also get "outfit": the clothing they wear when introduced ('
+                   + OUTFIT_WORDS + '), the look itself never mentions clothing.\n')
+# kiyafet acikken gorunus degisimi giysiyi saymaz (kiyafet degisimi ayri soruyla: outfit_changes)
+CHANGES_NO_CLOTHES = CHANGES_TASK.replace('new clothes or uniform, ', '').replace(
+    'later images use the new look.', 'later images use the new look; the look never mentions clothing.')
 
 
-def character_lines(characters, people=True):
-    """Dil modeline giden liste; `people` kapali (mekanlar, yas istegi) tarif oldugu gibi."""
-    return '\n'.join(f'- {c["name"]}: {person_look(c) if people else c["look"]}'
-                     for c in characters) or '- (none yet)'
+def character_lines(characters, people=True, outfits=False):
+    """Dil modeline giden liste; `people` kapali (mekanlar, yas istegi) tarif oldugu gibi; `outfits` (F219) o anki
+    kiyafet 'clothing now' olarak."""
+    def line(c):
+        text = f'- {c["name"]}: {person_look(c) if people else c["look"]}'
+        if outfits and c.get('outfit'):
+            text = f'{_sentence(text)}. Clothing now: {c["outfit"]}'
+        return text
+    return '\n'.join(line(c) for c in characters) or '- (none yet)'
 
 
 def scene_prompt(style, characters, sentences, start, stop, count, note='', previous=None, identity=False,
-                 modifiers=(), focus=False, places=None, changes=False, opening=False):
+                 modifiers=(), focus=False, places=None, changes=False, opening=False, outfits=False):
     """Parcanin sahne istegi. `focus`: onemli anlari sec (az ve seyrek siklik, onem puaniyla); `places`: mekan kimligi
     acikken bilinen mekanlar (None kapali); `changes`: gorunus degisimlerini sor; `opening`: bolumun ilk sayfasinin
-    kendi gorseli var (sahneler sonrasindan baslar)."""
+    kendi gorseli var (sahneler sonrasindan baslar); `outfits` (F219): kiyafet isteme yazilmaz, sahnede gorunenler
+    (cast) ve yeni karakterin kiyafeti sorulur (kiyafet degisimi ayri soruda: outfit_changes)."""
     lines = '\n'.join(f'{i}: {_clean(sentences[i])}' for i in range(start, stop))
     before = (f'The previous image showed: {previous}\n\n') if previous else ''
     numbers = {'count': count, 'low': max(1, count - 1), 'high': count + 1, 'first': start, 'last': stop - 1}
-    shape = ', "cast": []' if identity else ''
+    shape = ', "cast": []' if identity or outfits else ''
     if places is not None:
         shape += ', "place": "", "places": []'
     if changes:
         shape += ', "changes": []'
     task = SCENE_TASK.format(
-        style=style, characters=character_lines(characters), note=note_text(note, modifiers), previous=before,
+        style=style, characters=character_lines(characters, outfits=outfits), note=note_text(note, modifiers),
+        previous=before, copy=OUTFIT_COPY if outfits else '',
         places=PLACES_LIST.format(places=character_lines(places, False)) if places is not None else '',
         choose=(FOCUS_TASK if focus else SPLIT_TASK).format(**numbers),
         start_rule=(FOCUS_START if focus else SPLIT_START).format(**numbers),
         importance=IMPORTANCE_TASK if focus else '',
-        extra=(PLACE_TASK.format() if places is not None else '') + (CHANGES_TASK.format() if changes else ''),
-        cast=CAST_TASK.format(limit=MAX_CAST) if identity else '', first=start,
+        extra=(PLACE_TASK.format() if places is not None else '')
+        + ((CHANGES_NO_CLOTHES if outfits else CHANGES_TASK).format() if changes else '')
+        + (NEW_OUTFIT_TASK if outfits else ''),
+        cast=CAST_TASK.format(limit=MAX_CAST) if identity else CAST_PLAIN if outfits else '', first=start,
         opening=OPENED_TASK.format(second=start + 1) if opening else '', cast_shape=shape)
     return SCENE_SYSTEM, task + lines
 
@@ -775,15 +985,17 @@ def first_page(sentences, limit=OPENING_PAGE):
     return len(sentences)
 
 
-def opening_prompt(style, characters, sentences, note='', identity=False, modifiers=(), places=None):
-    """Bolum acilis gorseli istegi: yalnizca bolumun ilk sayfasi gider (spoiler olmasin)."""
+def opening_prompt(style, characters, sentences, note='', identity=False, modifiers=(), places=None, outfits=False):
+    """Bolum acilis gorseli istegi: yalnizca bolumun ilk sayfasi gider (spoiler olmasin). `outfits` (F219): kiyafet
+    isteme yazilmaz, gorunenler (cast) sorulur."""
     lines = '\n'.join(f'{i}: {_clean(sentences[i])}' for i in range(first_page(sentences)))
-    shape = (', "cast": []' if identity else '') + (', "place": ""' if places is not None else '')
+    shape = (', "cast": []' if identity or outfits else '') + (', "place": ""' if places is not None else '')
     task = OPENING_TASK.format(
-        style=style, characters=character_lines(characters), note=note_text(note, modifiers),
+        style=style, characters=character_lines(characters, outfits=outfits), note=note_text(note, modifiers),
+        copy=OUTFIT_COPY if outfits else '',
         places=PLACES_LIST.format(places=character_lines(places, False)) if places is not None else '',
         extra=PLACE_TASK.format().split('\n')[0] + '\n' if places is not None else '',
-        cast=CAST_TASK.format(limit=MAX_CAST) if identity else '', shape=shape)
+        cast=CAST_TASK.format(limit=MAX_CAST) if identity else CAST_PLAIN if outfits else '', shape=shape)
     return SCENE_SYSTEM, task + lines
 
 
@@ -894,8 +1106,7 @@ def parse_extras(raw, style=''):
         if isinstance(data.get('scenes'), list) else [data]
     for item in items:
         places += clean_places(item.get('places'))
-        changes += [c for c in item.get('changes') or () if isinstance(c, dict)] \
-            if isinstance(item.get('changes'), list) else []
+        changes += [c for c in item.get('changes') or () if isinstance(c, dict)]             if isinstance(item.get('changes'), list) else []
     return {'places': places, 'changes': changes}
 
 
@@ -991,40 +1202,99 @@ def _sentence(text):
     return _clean(text).rstrip(' .')
 
 
+def _wearing(character):
+    """Tarif + ilk kiyafeti (F219; kiyafetsiz eski planda tarif oldugu gibi)."""
+    look = _sentence(person_look(character))
+    return f'{look}, wearing {_lower(_sentence(character["outfit"]))}' if character.get('outfit') else look
+
+
 def portrait_prompt(character):
     return (f'Character reference portrait, head and shoulders, three-quarter view with the head turned slightly, '
-            f'relaxed natural expression, face clearly visible. {_sentence(person_look(character))}. '
+            f'relaxed natural expression, face clearly visible. {_wearing(character)}. '
             f'Plain flat mid-grey studio backdrop with nothing else behind, soft even studio light.')
 
 
-def identity_prompt(scene, people, style, faces=True):
+def identity_prompt(scene, people, style, faces=True, clothing=False):
     """Kimlik is akisinin istemi (talimat bicimi: LoRA "bu kisiyi ... ciz" diye egitildi). Stil sona eklenir;
     kimlik is akisinda PRE/POST dugumu yoktur (son ek comfy_client.fill'de '. ' ile eklenir). `faces` kapali
-    ("Yuz gosterme", F213): yuz kimligi istenmez (portredeki one bakan yuzu sahneye tasiyordu), sac, beden ve giysi."""
+    ("Yuz gosterme", F213): yuz kimligi istenmez (portredeki one bakan yuzu sahneye tasiyordu), sac, beden ve giysi.
+    `clothing` (F219): kisinin o anki kiyafeti tarifine eklenir, giysi portreden alinmaz (Identity Edit referanstaki
+    giysiyi tasir; gecelik, zirh gibi o ana ait kiyafet ezilmesin)."""
     who = ('this person' if len(people) == 1 else 'these people')
-    looks = [_sentence(person_look(c)) for c in people]
+    looks = [_wearing(c) if clothing else _sentence(person_look(c)) for c in people]
     names = ' and '.join(f'the person from reference {n + 1} ({look})' for n, look in enumerate(looks)) \
         if len(people) > 1 else looks[0]
     keep = ('the exact facial identity of the reference portrait' if faces else
+            'the hair and build of the reference portrait' if clothing else
             'the hair, build and clothing of the reference portrait')
     turn = 'the pose, gaze and expression follow the scene' if faces else \
         'the pose follows the scene and the face is turned away from the viewer'
+    dress = ' The clothing follows the description above, not the reference.' if clothing else ''
     return (f'Create an illustration of {who}: {names}. {_sentence(scene["prompt"])}. Preserve {keep}, but not '
-            f'its pose, framing or background: {turn}. Style: {_sentence(style)}')
+            f'its pose, framing or background: {turn}.{dress} Style: {_sentence(style)}')
 
 
 def scene_people(scene, characters):
-    """Sahnedeki karakterler, gorunusleri sahnenin yerindeki haliyle (F209 gorunus degisimi)."""
-    return characters_at(cast_of(scene, characters), scene['section'], scene['start'])
+    """Sahnedeki karakterler, gorunusleri sahnenin yerindeki haliyle (F209 gorunus degisimi); F219 kiyafet o yerdeki
+    kalici kiyafet, sahnenin kendi kiyafeti (scene['outfits']) varsa o."""
+    people = characters_at(cast_of(scene, characters), scene['section'], scene['start'])
+    own = {name.lower(): outfit for name, outfit in (scene.get('outfits') or {}).items()}
+    return [dict(c, outfit=own[c['name'].lower()]) if c['name'].lower() in own else c for c in people]
 
 
-def scene_text(plan, scene):
+_DRESSED = re.compile(r'^(?:(?:is|are|now|still|fully|wearing|wears|wear|dressed|clad|clothed)\s+)+(?:in\s+)?',
+                      re.I)
+
+
+def _lower(text):
+    """Cumle ortasina giren kiyafet: 'A navy coat' -> 'a navy coat' (kisaltma gibi 'RAF' kalir). Bastaki fiil atilir:
+    model 'fully dressed in business attire' yaziyordu, istemde 'wears fully dressed in' oluyordu."""
+    text = _DRESSED.sub('', text) or text
+    first = text.split()[0] if text.split() else ''
+    return text[0].lower() + text[1:] if first[:1].isupper() and not first[1:2].isupper() else text
+
+
+def _who(character, least=4):
+    """Kiyafet cumlesinde kisinin kisa tarifi: tarifin ilk virgullu parcalari (en az `least`, en fazla 10 kelime)."""
+    parts = []
+    for part in _sentence(person_look(character)).split(','):
+        parts.append(part.strip())
+        if len(', '.join(parts).split()) >= least:
+            break
+    text = ' '.join(', '.join(parts).split()[:10]).rstrip(' ,;:')
+    return f'the {text[0].lower()}{text[1:]}' if text else 'the person'
+
+
+def clothing_text(plan, scene, exclude=(), part=False):
+    """Sahnede gorunen karakterlerin o anki kiyafeti (F219): 'Clothing: the man in his fifties wears ...'. `exclude`:
+    kiyafeti baska yoldan (kimlik istemi) giden adlar; `part` (orta bos seridi): yalnizca bu parcanin isteminde
+    gecen karakterler (ust seride kiyafet yazilinca oraya da insan ciziliyordu)."""
+    if not plan.get('outfits') or 'no-people' in (plan.get('modifiers') or ()):
+        return ''
+    people = scene_people(scene, plan.get('characters') or [])
+    if part:
+        shown = {c['name'] for c in cast_of({'prompt': scene['prompt']}, plan.get('characters') or [])}
+        people = [c for c in people if c['name'] in shown]
+    skip = {name.lower() for name in exclude}
+    people = [c for c in people if c.get('outfit') and c['name'].lower() not in skip]
+    who = [_who(c) for c in people]
+    # ayni kisa tarif (iki "man in his fifties"): kim neyi giyiyor ayrilsin diye tarif uzar
+    who = [_who(c, 10) if who.count(text) > 1 else text for c, text in zip(people, who)]
+    parts = [f'{text} wears {_lower(_sentence(c["outfit"]))}' for c, text in zip(people, who)]
+    return f'Clothing: {"; ".join(parts)}.' if parts else ''
+
+
+def scene_text(plan, scene, exclude=(), part=False):
     """Gorsel modeline giden sahne istemi: mekan kimligi aciksa sahnenin mekaninin kalici tarifi sona eklenir
     (dil modeli mekani tarif etmez, yalnizca adini verir; mekan tarifi duzenlenince yeni gorsellere yansir).
-    "Yuz gosterme" acikken yuzu gosteren ifadeler ayiklanir (hide_faces, eski planlar da)."""
+    "Yuz gosterme" acikken yuzu gosteren ifadeler ayiklanir (hide_faces, eski planlar da). F219: sahnedekilerin
+    kiyafeti (clothing_text; `exclude`, `part` orada)."""
     prompt = scene['prompt']
     if 'no-faces' in (plan.get('modifiers') or ()):
         prompt = hide_faces(prompt)
+    clothing = clothing_text(plan, scene, exclude, part)
+    if clothing:
+        prompt = f'{_sentence(prompt)}. {clothing}'
     if plan.get('place_identity') and scene.get('place'):
         place = next((p for p in plan.get('places') or () if p['name'].lower() == scene['place'].lower()), None)
         if place:
@@ -1049,7 +1319,8 @@ def clean_upscale(value):
 def new_plan(note='', preset='', density='medium', size=DEFAULT_SIZE, title='', identity=False, modifiers=(),
              options=None):
     """Yeni plan. `options` (F209): openers (bolum acilis gorseli), places (mekan kimligi), changes (gorunus
-    degisimi), upscale (RTX buyutme katsayisi, 0 kapali); F218 extras (ek LoRA kimlikleri, EXTRA_LORAS)."""
+    degisimi), upscale (RTX buyutme katsayisi, 0 kapali); F218 extras (ek LoRA kimlikleri, EXTRA_LORAS); F219 outfits
+    (kiyafet kilidi, varsayilan acik; karaktersiz planda kapali)."""
     modifiers, options = clean_modifiers(modifiers), options or {}
     people = 'no-people' not in modifiers
     return {'version': VERSION, 'created': datetime.now().isoformat(timespec='seconds'), 'title': title,
@@ -1060,7 +1331,8 @@ def new_plan(note='', preset='', density='medium', size=DEFAULT_SIZE, title='', 
             'lora': preset_lora(preset), 'extras': extra_loras(options.get('extras')),
             'openers': bool(options.get('openers')),
             'place_identity': bool(options.get('places')), 'places': [],
-            'look_changes': bool(options.get('changes')) and people, 'upscale': clean_upscale(options.get('upscale'))}
+            'look_changes': bool(options.get('changes')) and people, 'upscale': clean_upscale(options.get('upscale')),
+            'outfits': people and options.get('outfits', True) is not False}
 
 
 def renumber(plan, texts):
@@ -1096,7 +1368,8 @@ def opening_scene(plan, real, sentences, ask, add):
     try:
         raw = ask_json(ask, *opening_prompt(
             plan['style'], characters_at(plan['characters'], real, 0) if people else [], sentences, plan.get('note'),
-            plan.get('identity'), plan.get('modifiers'), plan.get('places') if plan.get('place_identity') else None))
+            plan.get('identity'), plan.get('modifiers'), plan.get('places') if plan.get('place_identity') else None,
+            bool(plan.get('outfits')) and people))
     except ValueError:   # okunamayan yanit hikaye disi sayfa sayilmaz: sonra (Acilislari ekle) yeniden sorulur
         return False
     found = parse_opening(raw, plan['style'])
@@ -1150,6 +1423,7 @@ def plan_book(sections, ask, plan, cancel=None, progress=None, save=None):
     focus, choose = focused(density), selective(density)
     people = 'no-people' not in (plan.get('modifiers') or ())
     places = plan.get('place_identity')
+    outfits = bool(plan.get('outfits')) and people   # F219
     # selective: her cumlenin kitaptaki karakter konumu (secilen anlarin arasi buna gore acilir)
     offsets, at = [], 0
     for section in sections:
@@ -1158,12 +1432,15 @@ def plan_book(sections, ask, plan, cancel=None, progress=None, save=None):
     if progress:
         progress(done, total)
     asked = set()   # yasi yeniden sorulan karakterler (F211)
+    dressed = set()   # kiyafeti sorulan karakterler (F219)
     if not plan.get('style'):
         sample = digest(sections)
-        raw = ask_json(ask, *style_prompt(sample, plan.get('note'), plan.get('modifiers'), places))
+        raw = ask_json(ask, *style_prompt(sample, plan.get('note'), plan.get('modifiers'), places, outfits))
         plan['style'], plan['characters'] = parse_style(raw)
         if people:
             fix_ages(plan['characters'], ask, sample, asked)
+        if outfits:
+            fix_outfits(plan['characters'], ask, sample, dressed)
         if places:
             plan['places'] = parse_places(raw)
         if not people:
@@ -1201,7 +1478,8 @@ def plan_book(sections, ask, plan, cancel=None, progress=None, save=None):
                 raw = ask_json(ask, *scene_prompt(
                     plan['style'], characters_at(plan['characters'], real, start), sentences, start, stop, count,
                     plan.get('note'), previous, plan.get('identity'), plan.get('modifiers'), focus,
-                    plan.get('places') if places else None, bool(plan.get('look_changes')) and people, opening))
+                    plan.get('places') if places else None, bool(plan.get('look_changes')) and people, opening,
+                    outfits))
             except ValueError as error:
                 # yeniden denemelerde de okunamayan parca plani durdurmaz ama sessizce de gecmez: plan sonunda bildirilir
                 raw = ''
@@ -1209,15 +1487,19 @@ def plan_book(sections, ask, plan, cancel=None, progress=None, save=None):
                                                       'error': str(error)[:200]})
             scenes, extra = parse_scenes(raw, start, stop, sentences, plan['style'], first=not focus)
             extras = parse_extras(raw, plan['style'])
+            changes = []
             if people:
                 plan['characters'] = merge_characters(plan['characters'], extra)
                 new = {c['name'].lower() for c in extra}   # yalnizca bu parcada tanitilanlar (metin onlari anlatir)
                 fix_ages([c for c in plan['characters'] if c['name'].lower() in new], ask,
                          ' '.join(_clean(s) for s in sentences[start:stop]), asked)
+                inside = lambda found: [c for c in found if str(c.get('start', '')).strip().isdigit()
+                                        and start <= int(c['start']) < stop]
                 if plan.get('look_changes'):
-                    apply_changes(plan['characters'], [c for c in extras['changes']
-                                                       if str(c.get('start', '')).strip().isdigit()
-                                                       and start <= int(c['start']) < stop], real)
+                    apply_changes(plan['characters'], inside(extras['changes']), real)
+                if outfits:   # F219 eksik kiyafet, sonra parcanin kiyafet degisimleri (ayri soru)
+                    fix_outfits(plan['characters'], ask, ' '.join(_clean(s) for s in sentences[start:stop]), dressed)
+                    changes = outfit_changes(plan, ask, sentences, real, start, stop)
             if places:
                 plan['places'] = merge_characters(plan.get('places') or [], extras['places'])
             if opening:
@@ -1242,6 +1524,9 @@ def plan_book(sections, ask, plan, cancel=None, progress=None, save=None):
                     add(entry, plan.setdefault('candidates', []))
                 else:
                     add(entry, plan['scenes'])
+            if changes:   # kalici olan karakterin kiyafeti, o ana ait olan bu parcanin sahnelerine (acilis dahil)
+                apply_outfit_changes(plan, changes, real, [s for s in (plan.get('candidates') or []) + plan['scenes']
+                                                          if s['section'] == real and start <= s['start'] < stop], stop)
         plan['next_chunk'] = max(plan.get('next_chunk', 0), number + 1)
         if not plan.get('failed'):
             plan.pop('failed', None)

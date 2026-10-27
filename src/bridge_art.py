@@ -122,6 +122,11 @@ class ArtMixin:
                 shown['chapter'] = chapters[scene['section']]
             if plan.get('identity'):
                 shown['people'] = [c['name'] for c in book_art.cast_of(scene, plan['characters'])]
+            if plan.get('outfits'):   # F219 sahnedekilerin o anki kiyafeti (own: yalnizca bu sahneye ait)
+                own = {name.lower() for name in scene.get('outfits') or {}}
+                shown['clothing'] = [{'name': c['name'], 'outfit': c.get('outfit') or '',
+                                      'own': c['name'].lower() in own}
+                                     for c in book_art.scene_people(scene, plan['characters'])]
             scenes.append(shown)
         view['scenes'] = scenes
         characters = []
@@ -249,7 +254,7 @@ class ArtMixin:
         """Dil modeliyle sahne planini arka planda cikarir. `sections`: [{'sentences', 'breaks'}] okuyucunun
         bolmesiyle. `resume`: yarim kalan plan kaldigi yerden (not ve siklik onunki). `identity`: karakter kimligi
         (sahnelere gorunen karakterler yazilir). `modifiers`: tarzdan bagimsiz secenekler (book_art.MODIFIERS).
-        `options` (F209): openers, places, changes, upscale (book_art.new_plan). `openers_only`: tamamlanmis plana
+        `options` (F209): openers, places, changes, upscale; F219 outfits (book_art.new_plan). `openers_only`: tamamlanmis plana
         yalnizca eksik bolum acilis gorselleri eklenir (book_art.add_openers). Olay 'art' (stage 'plan')."""
         try:
             store = self._art_store()
@@ -393,6 +398,12 @@ class ArtMixin:
                     scene.pop('cast', None)
                 else:
                     scene['cast'] = book_art.clean_cast(values['cast'])
+            if 'outfits' in values:   # F219 yalnizca bu sahneye ait kiyafetler {ad: kiyafet} (bos: her zamanki)
+                outfits = book_art.clean_scene_outfits(values['outfits'], plan['characters'])
+                if outfits:
+                    scene['outfits'] = outfits
+                else:
+                    scene.pop('outfits', None)
             if 'place' in values:   # F209 mekan kimligi: sahnenin mekani ('' yok)
                 place = ' '.join(str(values['place'] or '').split())[:60]
                 if place:
@@ -608,9 +619,9 @@ class ArtMixin:
                     strip = book_art.band_size(size)
                     data = book_art.band_compose(
                         picture(current, dict(scene, prompt=top), scene['seed'], strip, prefix + '-ust',
-                                book_art.BAND_TOP),
+                                book_art.BAND_TOP, part=True),
                         picture(current, dict(scene, prompt=bottom), scene['seed'] + 1, strip, prefix + '-alt',
-                                book_art.BAND_BOTTOM), size, tone)
+                                book_art.BAND_BOTTOM, part=True), size, tone)
                 else:
                     data = picture(current, scene, scene['seed'], size, prefix)
                 if factor:
@@ -620,21 +631,23 @@ class ArtMixin:
                 updated = store.write_image(book, scene_id, data, upscaled=factor)
                 return {'scene': next(s for s in self._art_view(book, updated)['scenes'] if s['id'] == scene_id)}
 
-            def picture(current, scene, seed, image_size, prefix, extra=''):
-                """Sahnenin (orta bosta: bir seridin) tek gorseli; karakterli sahne kimlik is akisiyla."""
+            def picture(current, scene, seed, image_size, prefix, extra='', part=False):
+                """Sahnenin (orta bosta: bir seridin, `part`) tek gorseli; karakterli sahne kimlik is akisiyla."""
                 people = []
                 if identity_workflow is not None and current.get('identity'):
                     people = [c for c in book_art.scene_people(scene, current['characters'])
                               if (store.portrait_path(book, c) or Path()).is_file()]
                     people = people[:len(comfy_client.references(identity_workflow))]
-                text = dict(scene, prompt=book_art.scene_text(current, scene))   # F209 mekanin tarifiyle
+                # F209 mekanin tarifiyle; F219 kiyafet (kimlikle cizilenlerinki kimlik isteminde)
+                text = dict(scene, prompt=book_art.scene_text(current, scene, [c['name'] for c in people], part))
                 suffix = ', '.join(part for part in (extra, book_art.image_suffix(
                     current, prompt=None if people else text['prompt'])) if part)
                 if people:
                     faces_shown = 'no-faces' not in (current.get('modifiers') or ())
                     filled = comfy_client.fill(identity_workflow, book_art.image_style(
                                                    current, book_art.identity_prompt(text, people, current['style'],
-                                                                                     faces_shown)),
+                                                                                     faces_shown,
+                                                                                     bool(current.get('outfits')))),
                                                '', suffix, seed, image_size, prefix,
                                                images=[upload(c) for c in people])
                 else:   # insanla ilgili son ek yalnizca istemde insan varsa (F213)

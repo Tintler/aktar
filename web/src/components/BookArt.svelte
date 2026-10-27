@@ -38,6 +38,7 @@
   let style = $state('');
   let characters = $state('');
   let editing = $state({});         // sahne -> elle duzenlenen istem
+  let outfitEdits = $state({});     // F219 sahne -> elle duzenlenen sahneye ozel kiyafetler ("Ad: giysi")
   let fixes = $state({});           // sahne -> duzeltme notu
   let refining = $state('');        // duzeltilen sahne
   let identity = $state(false);     // yeni planda karakter kimligi
@@ -50,6 +51,7 @@
   let openers = $state(false);
   let placeIdentity = $state(false);
   let lookChanges = $state(false);
+  let outfits = $state(true);        // F219 kıyafet kilidi (yeni planlarda varsayılan açık)
   let upscale = $state(0);
   let upscaleCheck = $state(null);  // RTX dugumu ComfyUI'de var mi
   let places = $state('');
@@ -103,14 +105,19 @@
     openers = Boolean(value.openers);
     placeIdentity = Boolean(value.place_identity);
     lookChanges = Boolean(value.look_changes);
+    outfits = value.outfits !== false;
     upscale = value.upscale ?? 0;
   }
 
   // Karakterler kutusu: "Ad: görünüş"; F209 görünüm değişimi "Ad [5. bölüm]: yeni görünüş" (o bölümden sonra).
+  // F219 kıyafet "Ad (kıyafet): giysi", kalıcı kıyafet değişimi "Ad (kıyafet) [5. bölüm]: yeni giysi".
   const PHASE = /^(.+?)\s*\[\s*(\d+)\.?\s*bölüm\s*\]$/i;
+  const OUTFIT = /^(.+?)\s*\(\s*kıyafet\s*\)$/i;
   function characterText(list) {
     return list.flatMap((c) => [`${c.name}: ${c.look}`,
-      ...(c.changes ?? []).map((change) => `${c.name} [${change.section + 1}. bölüm]: ${change.look}`)]).join('\n');
+      ...(c.outfit ? [`${c.name} (kıyafet): ${c.outfit}`] : []),
+      ...(c.changes ?? []).map((change) => `${c.name} [${change.section + 1}. bölüm]: ${change.look}`),
+      ...(c.outfits ?? []).map((change) => `${c.name} (kıyafet) [${change.section + 1}. bölüm]: ${change.outfit}`)]).join('\n');
   }
   function parseCharacters(text) {
     const old = Object.fromEntries((plan?.characters ?? []).map((c) => [c.name.toLowerCase(), c]));
@@ -120,18 +127,37 @@
       const [head, ...rest] = line.split(':');
       const look = rest.join(':').trim();
       if (!head.trim() || !look) continue;
-      const phase = head.trim().match(PHASE);
-      if (phase) phases.push({ name: phase[1].trim(), section: Number(phase[2]) - 1, look });
-      else list.push({ name: head.trim(), look, changes: [] });
+      let name = head.trim();
+      const phase = name.match(PHASE);
+      if (phase) name = phase[1].trim();
+      const outfit = name.match(OUTFIT);
+      if (outfit) name = outfit[1].trim();
+      if (phase) phases.push({ name, section: Number(phase[2]) - 1, look, key: outfit ? 'outfit' : 'look' });
+      else if (outfit) phases.push({ name, look, key: 'outfit' });
+      else list.push({ name, look, changes: [], outfits: [] });
     }
     for (const phase of phases) {
       const character = list.find((c) => c.name.toLowerCase() === phase.name.toLowerCase());
       if (!character) continue;
+      if (phase.section === undefined) { character.outfit = phase.look; continue; }
+      const field = phase.key === 'outfit' ? 'outfits' : 'changes';
       // ayni bolumdeki eski degisimin cumlesi korunur (kutuda yalnizca bolum yazar)
-      const before = (old[character.name.toLowerCase()]?.changes ?? []).find((c) => c.section === phase.section);
-      character.changes.push({ section: phase.section, start: before?.start ?? 0, look: phase.look });
+      const before = (old[character.name.toLowerCase()]?.[field] ?? []).find((c) => c.section === phase.section);
+      character[field].push({ section: phase.section, start: before?.start ?? 0, [phase.key]: phase.look });
     }
     return list;
+  }
+  // F219 sahneye özel kıyafet kutusu: "Ad: giysi" satırları
+  function outfitText(scene) {
+    return Object.entries(scene.outfits ?? {}).map(([name, outfit]) => `${name}: ${outfit}`).join('\n');
+  }
+  function parseOutfits(text) {
+    const result = {};
+    for (const line of text.split('\n')) {
+      const [name, ...rest] = line.split(':');
+      if (name.trim() && rest.join(':').trim()) result[name.trim()] = rest.join(':').trim();
+    }
+    return result;
   }
 
   load();
@@ -286,7 +312,7 @@
     }
     if (app.artJob?.reading !== reading) return;   // bolumler okunurken durduruldu
     const result = await act('art_plan_create', book, sections, note, preset, density, title, resume, identity && !noCast, modifiers,
-      { openers, places: placeIdentity, changes: lookChanges && !noPeople, upscale, extras }, openersOnly);
+      { openers, places: placeIdentity, changes: lookChanges && !noPeople, outfits: outfits && !noPeople, upscale, extras }, openersOnly);
     if (!result?.started) { if (app.artJob?.reading === reading) app.artJob = null; return; }
     if (app.artJob?.reading === reading) app.artJob = { book, title, stage: 'plan', done: 0, total: result.total };
     replanning = false;
@@ -333,8 +359,11 @@
   }
 
   async function savePrompt(scene) {
-    if (await updateScene(scene, { prompt: editing[scene.id] })) {
+    const values = { prompt: editing[scene.id] };
+    if (plan.outfits) values.outfits = parseOutfits(outfitEdits[scene.id] ?? '');
+    if (await updateScene(scene, values)) {
       delete editing[scene.id];
+      delete outfitEdits[scene.id];
       generate([scene.id]);
     }
   }
@@ -475,7 +504,14 @@
           {#if noPeople}<Toggle checked={false} disabled label="Görünüm değişimi" />
           {:else}<Toggle bind:checked={lookChanges} label="Görünüm değişimi" />{/if}
           <span class="dim">{noPeople ? 'Karakter çizilmediği için kapalı.'
+            : outfits ? 'Karakter yaşlanır ya da saçı değişirse sonraki görseller yeni görünüşle çizilir.'
             : 'Karakter yaşlanır, kıyafeti ya da saçı değişirse sonraki görseller yeni görünüşle çizilir.'}</span>
+        </div>
+        <div class="row">
+          {#if noPeople}<Toggle checked={false} disabled label="Kıyafet kilidi" />
+          {:else}<Toggle bind:checked={outfits} label="Kıyafet kilidi" />{/if}
+          <span class="dim">{noPeople ? 'Karakter çizilmediği için kapalı.'
+            : 'Karakterin kıyafeti ayrı yazılır ve her görsele aynen eklenir; metin kıyafetin değiştiğini söylerse (üniforma, gecelik, zırh) o sahnelerde yenisi kullanılır.'}</span>
         </div>
         <div class="row">
           <span class="dim lead">RTX büyütme</span>
@@ -575,7 +611,7 @@
         <summary>Stil ve karakterler</summary>
         <label class="l" for="art-style">Stil kılavuzu <small>Her görselin başına aynen eklenir. Değiştirmek planı yeniden yaptırmaz; kaydedip "Hepsini yeniden üret" deyin.</small></label>
         <textarea id="art-style" class="field" rows="4" bind:value={style} onchange={saveStyle}></textarea>
-        <label class="l" for="art-chars">Karakterler <small>Satır başına "Ad: görünüş"; görünüm değişimi "Ad [5. bölüm]: yeni görünüş". Sahne istemlerine dil modeli kopyalar; yeni sahnelere yansır, var olan istemler değişmez.</small></label>
+        <label class="l" for="art-chars">Karakterler <small>Satır başına "Ad: görünüş"; görünüm değişimi "Ad [5. bölüm]: yeni görünüş". Sahne istemlerine dil modeli kopyalar; yeni sahnelere yansır, var olan istemler değişmez.{#if plan.outfits} Kıyafet "Ad (kıyafet): giysi", kalıcı değişimi "Ad (kıyafet) [5. bölüm]: yeni giysi"; görsel üretilirken isteme eklenir.{/if}</small></label>
         <textarea id="art-chars" class="field" rows="3" bind:value={characters} onchange={saveCharacters}></textarea>
         <div class="row">
           <Toggle checked={Boolean(plan.place_identity)} disabled={Boolean(app.artJob)} label="Mekân kimliği" onchange={setPlaceIdentity} />
@@ -601,8 +637,8 @@
             <Icon name={upscaleCheck.ok === false ? 'alert' : 'check'} size={14} /><span>{upscaleCheck.message}</span>
           </div>
         {/if}
-        {#if plan.openers || plan.look_changes}
-          <div class="dim">{[plan.openers && 'Her bölüm başında görsel', plan.look_changes && 'görünüm değişimi'].filter(Boolean).join(' · ')} açık</div>
+        {#if plan.openers || plan.look_changes || plan.outfits}
+          <div class="dim">{[plan.openers && 'Her bölüm başında görsel', plan.look_changes && 'görünüm değişimi', plan.outfits && 'kıyafet kilidi'].filter(Boolean).join(' · ')} açık</div>
         {/if}
         <div class="row">
           <button class="btn sm" disabled={Boolean(app.artJob)} onclick={() => startPlan(false, true)}
@@ -703,12 +739,19 @@
             {/if}
             {#if editing[scene.id] !== undefined}
               <textarea class="field" rows="5" bind:value={editing[scene.id]}></textarea>
+              {#if plan.outfits}
+                <label class="l" for={`art-outfit-${scene.id}`}>Bu sahneye özel kıyafet <small>Satır başına "Ad: giysi"; boş bırakılan karakter o anki kıyafetiyle çizilir.</small></label>
+                <textarea id={`art-outfit-${scene.id}`} class="field" rows="2" bind:value={outfitEdits[scene.id]}></textarea>
+              {/if}
               <div class="acts">
-                <button class="btn sm ghost" onclick={() => delete editing[scene.id]}>Vazgeç</button>
+                <button class="btn sm ghost" onclick={() => { delete editing[scene.id]; delete outfitEdits[scene.id]; }}>Vazgeç</button>
                 <button class="btn sm primary" disabled={Boolean(app.artJob)} onclick={() => savePrompt(scene)}>Kaydet ve üret</button>
               </div>
             {:else}
               <p class="prompt dim" title={scene.prompt}>{scene.prompt}</p>
+              {#if scene.clothing?.some((c) => c.outfit)}
+                <p class="clothing dim">{#each scene.clothing.filter((c) => c.outfit) as c (c.name)}<span title={c.own ? 'Yalnızca bu sahneye ait kıyafet' : 'O anki kıyafeti'}><b>{c.name}{c.own ? ' (bu sahnede)' : ''}:</b> {c.outfit}</span>{/each}</p>
+              {/if}
               {#if !scene.skip}
                 <div class="fix">
                   <input class="field" placeholder="Ne değişsin? (daha karanlık, kişiyi çıkar…)" bind:value={fixes[scene.id]}
@@ -720,7 +763,7 @@
               <div class="acts">
                 {#if !scene.skip}
                   <button class="btn sm ghost" disabled={Boolean(app.artJob)} title="Aynı istem, yeni seed" onclick={() => retry(scene)}><Icon name="refresh" size={13} />Yeniden dene</button>
-                  <button class="btn sm ghost" onclick={() => (editing[scene.id] = scene.prompt)}><Icon name="pencil" size={13} />İstemi düzenle</button>
+                  <button class="btn sm ghost" onclick={() => { editing[scene.id] = scene.prompt; outfitEdits[scene.id] = outfitText(scene); }}><Icon name="pencil" size={13} />İstemi düzenle</button>
                 {/if}
                 <button class="btn sm ghost" onclick={() => updateScene(scene, { skip: !scene.skip })}>{scene.skip ? 'Geri al' : 'Görsel olmasın'}</button>
               </div>
@@ -779,6 +822,7 @@
   .portrait img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .face .acts { flex-wrap: nowrap; }
   .cast { display: flex; gap: 4px; flex-wrap: wrap; }
+  .clothing { margin: 0; font-size: 11.5px; line-height: 1.4; display: flex; flex-direction: column; gap: 2px; }
   .cast .chip { font-size: 11.5px; padding: 2px 8px; }
   .fix { display: flex; gap: 6px; }
   .fix .field { flex: 1; min-width: 0; height: 30px; font-size: 12px; }

@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.40.0 — 2026-10-27
+
+### Eklenen
+- **Kitap görsellerinde kıyafet kilidi (F219):** Karakterlerin kıyafeti artık görünüşten ayrı bir alanda tutuluyor ve sahne istemine dil modeli yerine Aktar ekliyor ("Clothing: the man in his fifties wears …"). Böylece kitap kıyafetten söz etmeyince karakter sahneden sahneye aynı giysiyle çiziliyor. Kıyafet değişimleri her parça için ayrı bir soruyla bulunuyor. Kalıcı değişimler (yeni üniforma, eski giysiye dönüş) karakterin "Ad (kıyafet) [5. bölüm]: …" satırına yazılıyor. O ana özgü olanlar (gecelik, can yeleği, zırh, kılık değiştirme) yalnızca o aralıktaki sahnelere ekleniyor. Sahne düzenlenirken "Bu sahneye özel kıyafet" kutusundan elle de verilebiliyor. Portre ve kimlik istemleri de güncel kıyafeti kullanıyor; kimlik açıkken kıyafet referans portreden değil tariften geliyor. Yeni planda "Kıyafet kilidi" seçeneği varsayılan olarak açık; eski planların istemleri değişmiyor.
+
 ## 2.39.0 — 2026-10-27
 
 ### Eklenen

@@ -319,7 +319,7 @@ class PlanTest(unittest.TestCase):
             return json.dumps({'scenes': [{'start': first, 'title': 'T', 'prompt': f'scene {first}'}]})
 
         saved = []
-        plan = book_art.new_plan('daha soyut ol', 'abstract', 'medium')
+        plan = book_art.new_plan('daha soyut ol', 'abstract', 'medium', options={'outfits': False})
         result = book_art.plan_book(sections, ask, plan, save=lambda p: saved.append(json.loads(json.dumps(p))))
         self.assertTrue(result['complete'])
         self.assertIn('daha soyut ol', prompts[0])
@@ -369,7 +369,7 @@ class PlanTest(unittest.TestCase):
             return json.dumps({'scenes': [{'start': first, 'title': 'T', 'prompt': 'p',
                                            'characters': [{'name': 'Bo', 'look': 'tall, thin'}]}]})
 
-        plan = book_art.plan_book(sections, ask, book_art.new_plan())
+        plan = book_art.plan_book(sections, ask, book_art.new_plan(options={'outfits': False}))
         looks = {c['name']: c['look'] for c in plan['characters']}
         self.assertEqual(looks['Tate'], 'Man in his fifties, small, slight build')
         self.assertEqual(looks['Ana'], 'woman in a red coat')
@@ -656,7 +656,7 @@ class OptionsTest(unittest.TestCase):
                                            'importance': 9 if first else 6}]})
 
         saved = []
-        plan = book_art.new_plan(density='rare')
+        plan = book_art.new_plan(density='rare', options={'outfits': False})
         result = book_art.plan_book(sections, ask, plan, save=lambda p: saved.append(json.loads(json.dumps(p))))
         self.assertTrue(result['complete'])
         self.assertTrue(all('moments of it that matter most' in p for p in prompts[1:]))
@@ -755,7 +755,7 @@ class OptionsTest(unittest.TestCase):
             return json.dumps({'scenes': [{'start': 0, 'title': 'T', 'prompt': 'Two miners wait.', 'place': 'Maden',
                                            'places': [{'name': 'Köy', 'look': 'stone houses on a hill'}]}]})
 
-        plan = book_art.plan_book(book(60), ask, book_art.new_plan(options={'places': True}))
+        plan = book_art.plan_book(book(60), ask, book_art.new_plan(options={'places': True, 'outfits': False}))
         self.assertIn('3. "places"', prompts[0])
         self.assertIn('- Maden: rusty steel shaft', prompts[1])
         self.assertEqual([p['name'] for p in plan['places']], ['Maden', 'Köy'])
@@ -765,7 +765,7 @@ class OptionsTest(unittest.TestCase):
                          'Two miners wait. Setting: rusty steel shaft with hazard lamps.')
         self.assertEqual(book_art.scene_text(dict(plan, place_identity=False), scene), 'Two miners wait.')
         prompts.clear()
-        book_art.plan_book(book(60), ask, book_art.new_plan())
+        book_art.plan_book(book(60), ask, book_art.new_plan(options={'outfits': False}))
         self.assertFalse(any('"place"' in p or '"places"' in p for p in prompts))
 
     def test_look_changes(self):
@@ -783,7 +783,7 @@ class OptionsTest(unittest.TestCase):
                                     {'name': 'Yok', 'start': 2, 'look': 'x'}, {'name': 'Ana', 'start': 9999, 'look': 'y'}]
             return json.dumps(reply)
 
-        plan = book_art.plan_book(sections, ask, book_art.new_plan(options={'changes': True}))
+        plan = book_art.plan_book(sections, ask, book_art.new_plan(options={'changes': True, 'outfits': False}))
         self.assertIn('"changes"', prompts[1])
         ana = plan['characters'][0]
         self.assertEqual(ana['changes'], [{'section': 0, 'start': 2, 'look': 'grey-haired woman in a black uniform'}])
@@ -815,6 +815,198 @@ class OptionsTest(unittest.TestCase):
         self.assertEqual(workflow['2']['class_type'], 'RTXVideoSuperResolution')
         self.assertEqual(workflow['2']['inputs']['resize_type.scale'], 2.0)
         self.assertEqual(workflow['3']['inputs']['images'], ['2', 0])
+
+
+class OutfitTest(unittest.TestCase):
+    """F219: kiyafet tariften ayri; uretimde kodla eklenir, kalici ve o ana ait degisimler algilanir."""
+
+    def plan(self, **values):
+        plan = book_art.new_plan()
+        plan.update(style='s', characters=[
+            {'name': 'Ana', 'look': 'Woman of about thirty, red hair, freckles', 'outfit': 'green wool coat',
+             'outfits': [{'section': 2, 'start': 5, 'outfit': 'grey prison uniform'}]},
+            {'name': 'Bo', 'look': 'Man in his fifties, bald', 'outfit': 'black suit'}], **values)
+        return plan
+
+    def test_old_prompts_unchanged_when_off(self):
+        system, user = book_art.style_prompt('ornek')
+        self.assertIn('(15-35 words: age, build, face, hair, clothing) so they', user)
+        self.assertIn('[{"name": "...", "look": "..."}]}', user)
+        self.assertNotIn('outfit', user)
+        user = book_art.scene_prompt('s', [{'name': 'Ana', 'look': 'woman', 'outfit': 'coat'}], ['a', 'b'], 0, 2, 1,
+                                     changes=True)[1]
+        self.assertIn('copy its look into the prompt word for word):', user)
+        self.assertIn('new clothes or uniform', user)
+        self.assertNotIn('Clothing now', user)
+        self.assertNotIn('"cast"', user)
+        self.assertNotIn('outfit', user)
+        self.assertNotIn('outfit', book_art.opening_prompt('s', [], ['a'])[1])
+
+    def test_prompts_ask_for_outfits(self):
+        user = book_art.style_prompt('ornek', outfits=True)[1]
+        self.assertIn('hair) so they', user)
+        self.assertIn('"outfit": the ONE set of clothing they usually wear', user)
+        self.assertIn('"look": "...", "outfit": "..."}]}', user)
+        people = book_art.characters_at(self.plan()['characters'], 2, 7)
+        user = book_art.scene_prompt('s', people, ['a', 'b'], 0, 2, 1, changes=True, outfits=True)[1]
+        self.assertIn('never describe the clothing of a recurring character', user)
+        self.assertIn('- Ana: Woman of about thirty, red hair, freckles. Clothing now: grey prison uniform', user)
+        self.assertNotIn('"outfits"', user)   # kiyafet degisimi ayri soruda
+        self.assertIn('new characters in "characters" also get "outfit"', user)
+        self.assertIn('- "cast": names of the recurring characters visible', user)
+        self.assertNotIn('new clothes or uniform', user)   # kiyafet gorunus degisimi sayilmaz
+        self.assertIn('"characters": [], "cast": [], "changes": []}]}', user)
+        user = book_art.opening_prompt('s', people, ['a'], outfits=True)[1]
+        self.assertIn('never describe the clothing of a recurring character', user)
+        self.assertNotIn('new characters in', user)
+        self.assertIn('"prompt": "...", "cast": []}', user)
+
+    def test_outfit_change_question(self):
+        """Kiyafet degisimi parca basina ayri soruda: kalici olan karakterin, o ana ait olan sahnenin kiyafeti."""
+        plan = self.plan()
+        ana = plan['characters'][0]
+        prompts = []
+
+        def ask(system, user):
+            prompts.append(user)
+            return json.dumps({'changes': [
+                {'name': 'ana', 'from': 12, 'wear': 'white nightgown', 'keep': False, 'until': 14},
+                {'name': 'Bo', 'from': 15, 'wear': 'diving suit', 'keep': 'false', 'until': 99},
+                {'name': 'Ana', 'from': 16, 'wear': 'green wool coat again', 'keep': True},
+                {'name': 'Kim', 'from': 12, 'wear': 'x', 'keep': True},
+                {'name': 'Ana', 'from': 3, 'wear': 'outside the part', 'keep': True}]})
+
+        changes = book_art.outfit_changes(plan, ask, [f's{i}' for i in range(30)], 2, 10, 20)
+        self.assertIn('- Ana: grey prison uniform (earlier in the book: green wool coat)\n- Bo: black suit\n',
+                      prompts[0])
+        self.assertIn('10: s10\n', prompts[0])
+        self.assertNotIn('9: s9', prompts[0])
+        self.assertEqual(changes, [
+            {'name': 'Ana', 'from': 12, 'wear': 'white nightgown', 'keep': False, 'until': 14},
+            {'name': 'Bo', 'from': 15, 'wear': 'diving suit', 'keep': False, 'until': 19},   # parcanin sonu
+            {'name': 'Ana', 'from': 16, 'wear': 'green wool coat again', 'keep': True, 'until': None}])
+        scenes = [{'section': 2, 'start': at, 'prompt': 'p'} for at in (10, 13, 15, 17)]
+        scenes[1]['outfits'] = {'Ana': 'elle yazilan'}
+        book_art.apply_outfit_changes(plan, changes, 2, scenes, 20)
+        self.assertEqual([s.get('outfits') for s in scenes],
+                         [None, {'Ana': 'elle yazilan'}, {'Bo': 'diving suit'}, {'Bo': 'diving suit'}])
+        # 16. cumledeki degisim 15-16 sahnesinin ilk yarisinda: o sahneden sayilir; 12 ise 10-12'nin ikinci yarisinda
+        self.assertEqual(book_art.outfit_at(ana, 2, 15), 'green wool coat again')
+        self.assertEqual(book_art.outfit_at(ana, 2, 14), 'grey prison uniform')
+        night = [{'section': 0, 'start': at, 'prompt': 'p'} for at in (0, 17, 23)]
+        book_art.apply_outfit_changes(plan, [{'name': 'Ana', 'from': 18, 'wear': 'nightgown', 'keep': False,
+                                              'until': 22}], 0, night, 30)
+        self.assertEqual([s.get('outfits') for s in night], [None, {'Ana': 'nightgown'}, None])
+        self.assertEqual(book_art.outfit_changes(plan, lambda s, u: 'bozuk', ['a'], 0, 0, 1), [])
+        self.assertEqual(book_art.clean_scene_outfits({'bo': ' x ', 'Kim': 'y'}, plan['characters']), {'Bo': 'x'})
+
+    def test_outfit_at_and_scene_people(self):
+        ana = self.plan()['characters'][0]
+        self.assertEqual(book_art.outfit_at(ana, 2, 4), 'green wool coat')
+        self.assertEqual(book_art.outfit_at(ana, 2, 5), 'grey prison uniform')
+        self.assertEqual(book_art.outfit_at({'name': 'X', 'look': 'y'}, 0), '')
+        self.assertNotIn('outfit', book_art.characters_at([{'name': 'X', 'look': 'y'}], 0)[0])
+        scene = {'section': 3, 'start': 0, 'prompt': 'p', 'cast': ['Ana', 'Bo'], 'outfits': {'bo': 'pyjamas'}}
+        people = book_art.scene_people(scene, self.plan()['characters'])
+        self.assertEqual([c['outfit'] for c in people], ['grey prison uniform', 'pyjamas'])
+        self.assertEqual(book_art.clean_scene_outfits({'bo': ' pyjamas ', 'Kim': 'x', 'Ana': ''},
+                                                      self.plan()['characters']), {'Bo': 'pyjamas'})
+
+    def test_clothing_added_to_prompt(self):
+        plan = self.plan()
+        scene = {'section': 1, 'start': 0, 'prompt': 'A woman of about thirty argues with a bald man.',
+                 'cast': ['Ana', 'Bo'], 'outfits': {'Bo': 'striped pyjamas'}}
+        self.assertEqual(book_art.scene_text(plan, scene),
+                         'A woman of about thirty argues with a bald man. Clothing: the woman of about thirty wears '
+                         'green wool coat; the man in his fifties wears striped pyjamas.')
+        self.assertEqual(book_art.scene_text(plan, scene, ['ana']),
+                         'A woman of about thirty argues with a bald man. Clothing: the man in his fifties wears '
+                         'striped pyjamas.')
+        old = dict(plan)
+        old.pop('outfits')
+        self.assertEqual(book_art.scene_text(old, scene), scene['prompt'])   # eski plan: istem birebir
+        # orta bos seridi: yalnizca bu parcada gecen karakterin kiyafeti (ust seride insan cizilmesin)
+        top = dict(scene, prompt='Rusted pipes and a grey sky overhead.')
+        bottom = dict(scene, prompt='A woman of about thirty, red hair, freckles kneels on the floor.')
+        self.assertEqual(book_art.scene_text(plan, top, part=True), top['prompt'])
+        self.assertTrue(book_art.scene_text(plan, bottom, part=True).endswith(
+            'Clothing: the woman of about thirty wears green wool coat.'))
+        lonely = {'section': 1, 'start': 0, 'prompt': 'An empty hall.', 'cast': []}
+        self.assertEqual(book_art.scene_text(plan, lonely), 'An empty hall.')
+        self.assertEqual(book_art._who({'look': 'Small, slight build, pale face'}), 'the adult, small, slight build')
+        self.assertEqual((book_art._lower('A navy coat'), book_art._lower('RAF uniform')), ('a navy coat', 'RAF uniform'))
+        self.assertEqual(book_art._lower('Fully dressed in business attire'), 'business attire')   # fiil atilir
+        self.assertEqual(book_art._lower('Wearing a dress'), 'a dress')
+        twins = dict(plan, characters=[{'name': 'Ben', 'look': 'Man in his fifties, bald, sharp nose', 'outfit': 'robe'},
+                                       {'name': 'Tate', 'look': 'Man in his fifties, small build', 'outfit': 'suit'}])
+        self.assertEqual(book_art.clothing_text(twins, dict(lonely, cast=['Ben', 'Tate'])),
+                         'Clothing: the man in his fifties, bald, sharp nose wears robe; '
+                         'the man in his fifties, small build wears suit.')   # ayni kisa tarif uzar
+
+    def test_portrait_and_identity_use_outfit(self):
+        ana, bo = self.plan()['characters']
+        self.assertIn('freckles, wearing green wool coat. Plain', book_art.portrait_prompt(ana))
+        self.assertIn('Woman of about thirty. Plain', book_art.portrait_prompt({'name': 'A', 'look': 'Woman of about thirty'}))
+        text = book_art.identity_prompt({'prompt': 'p'}, [dict(bo, outfit='pyjamas')], 's', False, True)
+        self.assertIn('bald, wearing pyjamas', text)
+        self.assertIn('Preserve the hair and build of the reference portrait', text)
+        self.assertIn('The clothing follows the description above, not the reference.', text)
+        old = book_art.identity_prompt({'prompt': 'p'}, [bo], 's', False)
+        self.assertIn('hair, build and clothing', old)
+        self.assertNotIn('wearing', old)
+
+    def test_characters_keep_outfits(self):
+        ana = self.plan()['characters'][0]
+        self.assertEqual(book_art.clean_characters([ana]), [ana])
+        self.assertEqual(book_art.keep_portraits(book_art.clean_characters([ana]), [dict(ana, portrait='p.png')])[0]
+                         ['outfits'], ana['outfits'])
+
+    def test_plan_book_detects_outfit_changes(self):
+        sections = book(3, 300)
+        prompts = []
+
+        def ask(system, user):
+            prompts.append(user)
+            if 'JSON shape: {"style"' in user:
+                return json.dumps({'style': 's', 'characters': [
+                    {'name': 'Ana', 'look': 'Woman of about thirty, red hair', 'outfit': 'green wool coat'}]})
+            if 'do not say the age and sex' in user:
+                return '{"characters": []}'
+            if 'have no clothing description yet' in user:
+                return json.dumps({'characters': [{'name': 'Bo', 'outfit': 'blue overalls'}]})
+            if 'puts on different clothing' in user:   # parcanin kiyafet degisimleri
+                if '\n0: ' not in user:
+                    return '{"changes": []}'
+                self.assertIn('- Bo: blue overalls\n', user)   # eksik kiyafet degisim sorusundan once yazildi
+                return json.dumps({'changes': [
+                    {'name': 'Ana', 'from': 0, 'wear': 'white nightgown', 'keep': False, 'until': 5},
+                    {'name': 'Ana', 'from': 40, 'wear': 'grey prison uniform', 'keep': True}]})
+            first = int(user.split('the first scene starts at ')[1].split(')')[0])
+            if first:
+                return json.dumps({'scenes': [{'start': first, 'title': 'T', 'prompt': 'later', 'cast': ['Ana']}]})
+            return json.dumps({'scenes': [
+                {'start': 0, 'title': 'Gece', 'prompt': 'night', 'cast': ['Ana']},
+                {'start': 20, 'title': 'Sabah', 'prompt': 'morning', 'cast': ['Ana']},
+                {'start': 40, 'title': 'Hapis', 'prompt': 'cell', 'cast': ['Ana'],
+                 'characters': [{'name': 'Gardiyan', 'look': 'Man in his forties', 'outfit': 'blue uniform'},
+                                {'name': 'Bo', 'look': 'Man in his twenties'}]}]})
+
+        plan = book_art.plan_book(sections, ask, book_art.new_plan())
+        self.assertTrue(plan['outfits'])
+        ana = plan['characters'][0]
+        self.assertEqual(ana['outfits'], [{'section': 1, 'start': 40, 'outfit': 'grey prison uniform'}])
+        self.assertEqual(plan['characters'][1]['outfit'], 'blue uniform')
+        self.assertEqual(plan['characters'][2]['outfit'], 'blue overalls')   # kiyafetsiz yeni karakter soruldu
+        self.assertEqual(sum('have no clothing description yet' in p for p in prompts), 1)
+        scenes = {scene['title']: scene for scene in plan['scenes']}
+        self.assertEqual(scenes['Gece']['outfits'], {'Ana': 'white nightgown'})
+        for title, outfit in (('Gece', 'white nightgown'), ('Sabah', 'green wool coat'),
+                              ('Hapis', 'grey prison uniform')):
+            self.assertEqual(book_art.clothing_text(plan, scenes[title]),
+                             f'Clothing: the woman of about thirty wears {outfit}.', title)
+        later = [p for p in prompts if 'the first scene starts at' in p and 'starts at 0)' not in p]
+        self.assertIn('Clothing now: grey prison uniform', later[0])   # sonraki parca yeni kiyafeti bilir
+        self.assertEqual(sum('puts on different clothing' in p for p in prompts), 3)   # parca basina bir soru
 
 
 class StoreTest(unittest.TestCase):
@@ -1204,6 +1396,23 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(self.fake.prompts[0]['97']['inputs']['positive'], 'An empty mine shaft. Setting: rusty shaft.')
         cleared = self.bridge.art_scene_update('ab12cd34ef', '1-9', {'place': ''})['plan']['scenes'][1]
         self.assertNotIn('place', cleared)
+
+    def test_outfit_sent_to_comfy(self):
+        """F219: sahnedeki karakterin kiyafeti isteme eklenir; sahneye ozel kiyafet arayuzden degistirilir."""
+        store = self.identity_plan(identity=False)
+        store.update('ab12cd34ef', lambda p: p['characters'][0].update(
+            look='Young woman, short black hair', outfit='scuffed white jumpsuit'))
+        updated = self.bridge.art_scene_update('ab12cd34ef', '1-0', {'outfits': {'sekai': 'orange spacesuit'},
+                                                                      'cast': ['Sekai']})
+        self.assertEqual(updated['plan']['scenes'][0]['clothing'],
+                         [{'name': 'Sekai', 'outfit': 'orange spacesuit', 'own': True}])
+        self.assertTrue(self.bridge.art_generate('ab12cd34ef', ['1-0'])['started'])
+        self.finish()
+        self.assertTrue(self.fake.prompts[0]['97']['inputs']['positive'].endswith(
+            'ledge. Clothing: the young woman, short black hair wears orange spacesuit.'))
+        cleared = self.bridge.art_scene_update('ab12cd34ef', '1-0', {'outfits': {}})['plan']['scenes'][0]
+        self.assertNotIn('outfits', cleared)
+        self.assertEqual(cleared['clothing'], [{'name': 'Sekai', 'outfit': 'scuffed white jumpsuit', 'own': False}])
 
     def test_band_two_strips(self):
         """F217: orta bos secenegi her sahneyi iki seritte (ust, alt) uretir, gecisle tek gorselde birlestirir."""
