@@ -476,6 +476,12 @@
         {/if}
       </div>
       {#if generating}<div class="track"><i style:width="{pct(job.done, job.total)}%"></i></div>{/if}
+      {#if plan.failed?.length && !app.artJob}
+        <div class="lora-note bad">
+          <Icon name="alert" size={14} /><span>Kitabın {plan.failed.length} parçası dil modelinden okunamadı; bu parçalardan sahne çıkmadı.</span>
+          <button class="btn ghost" onclick={() => startPlan(true)}><Icon name="refresh" size={15} />Yeniden dene</button>
+        </div>
+      {/if}
 
       {#if restyling}
         <div class="look restyle">
@@ -602,6 +608,7 @@
           <div class="scene card" class:skip={scene.skip}>
             <div class="img">
               {#if scene.url}<img src={scene.url} alt={scene.title} loading="lazy" />
+              {:else if scene.error && !scene.skip && !(generating && job.current === scene.title)}<span class="dim" title={scene.error}>Üretilemedi: {scene.error}</span>
               {:else}<span class="dim">{scene.skip ? 'Atlandı' : generating && job.current === scene.title ? 'Üretiliyor…' : 'Henüz üretilmedi'}</span>{/if}
             </div>
             <div class="meta">

@@ -12,6 +12,7 @@ F209: art_restyle tarzi degistirir (istemler kalir), plan['upscale'] aciksa her 
 """
 from __future__ import annotations
 
+import json
 import random
 import threading
 from pathlib import Path
@@ -19,6 +20,9 @@ from pathlib import Path
 import book_art
 import comfy_client
 from app_core import APP_DIR
+
+
+STOP_AFTER = 3   # uretimde art arda bu kadar hata: ComfyUI calismiyor, is durur
 
 
 def _error(error):
@@ -256,8 +260,8 @@ class ArtMixin:
         old = self._art_load(book)
         if openers_only and not (old and old.get('complete')):
             return _error('Önce kitabın görsel planını çıkarın.')
-        if openers_only or (resume and old and not old.get('complete')):
-            plan = old
+        if openers_only or (resume and old and (not old.get('complete') or old.get('failed'))):
+            plan = json.loads(json.dumps(old))   # is kendi kopyasinda calisir (arayuze giden plan yarim degismez)
         else:
             size = self._art_prefs().get('size') or book_art.DEFAULT_SIZE
             plan = book_art.new_plan(note, preset, density, size, title, identity, modifiers or (), options)
@@ -270,7 +274,7 @@ class ArtMixin:
             if emotion is not None and emotion.is_alive():
                 return _error('Duygu etiketleri oluşturulurken görsel planı çıkarılamaz (ikisi de dil modelini kullanır).')
             if not resume and not openers_only and old:
-                store.clear(book)
+                store.stash(book)   # eski plan yeni plan kaydedilene kadar yedekte (basarisizsa geri gelir)
             cancel = threading.Event()
             self._art_cancel_event, self._art_stage = cancel, 'plan'
 
@@ -298,13 +302,20 @@ class ArtMixin:
                     run = book_art.add_openers if openers_only else book_art.plan_book
                     result = run(sections, ask, plan, cancel, progress, lambda p: store.save(book, p))
                     store.save(book, result)
-                    self._log(f'Kitap görselleri: {len(result["scenes"])} sahne planlandı ({title or book}).')
+                    store.drop_backup(book)
+                    failed = len(result.get('failed') or ())
+                    self._log(f'Kitap görselleri: {len(result["scenes"])} sahne planlandı ({title or book})'
+                              + (f'; {failed} parça okunamadı, "Yeniden dene" ile tekrar sorulur.' if failed else '.'))
                     self._emit('art', {'book': book, 'title': title, 'stage': 'plan', 'finished': True,
                                        'summary': book_art.summary(result)})
                 except book_art.Cancelled:
+                    if store.restore(book):
+                        self._log('Kitap görselleri: yeni plan kaydedilmeden durduruldu; eski plan geri kondu.')
                     self._emit('art', {'book': book, 'title': title, 'stage': 'plan', 'finished': True, 'cancelled': True})
                 except Exception as error:
                     self._log(f'UYARI: Görsel planı çıkarılamadı: {error}')
+                    if store.restore(book):
+                        self._log('Kitap görselleri: eski plan ve görselleri geri kondu.')
                     self._emit('art', {'book': book, 'title': title, 'stage': 'plan', 'finished': True,
                                        'error': str(error)})
                 finally:
@@ -319,6 +330,8 @@ class ArtMixin:
         """Gozden gecirmede degisen stil, karakterler (portreler ada gore korunur), karakter kimligi anahtari; F209
         mekanlar, mekan kimligi ve buyutme katsayisi (gorseller kendiliginden yeniden uretilmez)."""
         values = values or {}
+        if self._art_planning():   # plan isi kendi kopyasini kaydedince bu degisiklik kaybolurdu
+            return _error('Plan çıkarılırken değişiklik yapılamaz; bitmesini bekleyin ya da durdurun.')
 
         def change(plan):
             if 'style' in values:
@@ -348,6 +361,8 @@ class ArtMixin:
     def art_scene_update(self, book, scene_id, values):
         """Sahnenin istemi, basligi ya da atlanmasi; `reseed` yeni seed (Yeniden dene)."""
         values = values or {}
+        if self._art_planning():
+            return _error('Plan çıkarılırken değişiklik yapılamaz; bitmesini bekleyin ya da durdurun.')
 
         def change(plan):
             scene = self._art_store().scene(plan, scene_id)
@@ -544,82 +559,106 @@ class ArtMixin:
                 return comfy_client.generate(url, comfy_client.upscale_workflow(
                     name, scale, f'Aktar/{book[:12]}/{scene_id}-buyuk'), cancel)
 
-            def work():
-                done = 0
+            def portrait(name):
+                current = store.load(book)
+                character = store.character(current, name)
+                self._emit('art', {'book': book, 'title': title, 'stage': 'generate', 'done': state['done'],
+                                   'total': total, 'current': f'Portre: {name}'})
+                seed = (random.randrange(1, 2 ** 31) if name in renew or not character.get('portrait_seed')
+                        else character['portrait_seed'])
+                filled = comfy_client.fill(workflow, book_art.portrait_prompt(character),
+                                           book_art.image_style(current, book_art.medium(current['style'])),
+                                           book_art.image_suffix(current, book_art.PORTRAIT_SUFFIX, False), seed,
+                                           book_art.PORTRAIT_SIZE,
+                                           f'Aktar/{book[:12]}/portre-{book_art.portrait_slug(name)}')
+                updated = store.write_portrait(book, name, comfy_client.generate(url, filled, cancel), seed=seed)
+                return {'character': next(c for c in self._art_view(book, updated)['characters'] if c['name'] == name)}
+
+            def scene_image(scene_id):
+                current = store.load(book)
+                scene = store.scene(current, scene_id)
+                self._emit('art', {'book': book, 'title': title, 'stage': 'generate', 'done': state['done'],
+                                   'total': total, 'current': scene['title']})
+                if upscale_only:
+                    data = store.image_path(book, scene).read_bytes()
+                    updated = store.write_image(book, scene_id, enlarge(scene_id, data, scene.get('upscaled')),
+                                                upscaled=factor)
+                    return {'scene': next(s for s in self._art_view(book, updated)['scenes'] if s['id'] == scene_id)}
+                prefix = f'Aktar/{book[:12]}/{scene_id}'
+                people = []
+                if identity_workflow is not None and current.get('identity'):
+                    people = [c for c in book_art.scene_people(scene, current['characters'])
+                              if (store.portrait_path(book, c) or Path()).is_file()]
+                    people = people[:len(comfy_client.references(identity_workflow))]
+                text = dict(scene, prompt=book_art.scene_text(current, scene))   # F209 mekanin tarifiyle
+                if people:
+                    faces_shown = 'no-faces' not in (current.get('modifiers') or ())
+                    filled = comfy_client.fill(identity_workflow, book_art.image_style(
+                                                   current, book_art.identity_prompt(text, people, current['style'],
+                                                                                     faces_shown)),
+                                               '', book_art.image_suffix(current), scene['seed'], size, prefix,
+                                               images=[upload(c) for c in people])
+                else:   # insanla ilgili son ek yalnizca istemde insan varsa (F213)
+                    filled = comfy_client.fill(workflow, text['prompt'], book_art.image_style(current, current['style']),
+                                               book_art.image_suffix(current, prompt=text['prompt']),
+                                               scene['seed'], size, prefix)
+                data = comfy_client.generate(url, filled, cancel)
+                if factor:
+                    self._emit('art', {'book': book, 'title': title, 'stage': 'generate', 'done': state['done'],
+                                       'total': total, 'current': f'{scene["title"]} · büyütülüyor'})
+                    data = enlarge(scene_id, data, 0)
+                updated = store.write_image(book, scene_id, data, upscaled=factor)
+                return {'scene': next(s for s in self._art_view(book, updated)['scenes'] if s['id'] == scene_id)}
+
+            def failed_scene(scene_id, message):
+                """Uretilemeyen sahne isaretlenir (kartta hata; 'Eksikleri uret' yeniden dener)."""
+                def change(plan):
+                    store.scene(plan, scene_id)['error'] = message[:300]
                 try:
-                    for name in faces:
+                    updated = store.update(book, change)
+                except ValueError:   # sahne plandan kalkmis
+                    return {}
+                return {'scene': next(s for s in self._art_view(book, updated)['scenes'] if s['id'] == scene_id)}
+
+            state = {'done': 0}
+
+            def work():
+                failures, streak = [], 0
+                try:
+                    for kind, item in [('portrait', name) for name in faces] + [('scene', i) for i in targets]:
                         if cancel.is_set():
                             raise comfy_client.Cancelled('durduruldu')
-                        current = store.load(book)
-                        character = store.character(current, name)
-                        self._emit('art', {'book': book, 'title': title, 'stage': 'generate', 'done': done,
-                                           'total': total, 'current': f'Portre: {name}'})
-                        seed = (random.randrange(1, 2 ** 31) if name in renew or not character.get('portrait_seed')
-                                else character['portrait_seed'])
-                        filled = comfy_client.fill(workflow, book_art.portrait_prompt(character),
-                                                   book_art.image_style(current, book_art.medium(current['style'])),
-                                                   book_art.image_suffix(current, book_art.PORTRAIT_SUFFIX, False), seed,
-                                                   book_art.PORTRAIT_SIZE,
-                                                   f'Aktar/{book[:12]}/portre-{book_art.portrait_slug(name)}')
-                        updated = store.write_portrait(book, name, comfy_client.generate(url, filled, cancel), seed=seed)
-                        done += 1
-                        shown = next(c for c in self._art_view(book, updated)['characters'] if c['name'] == name)
-                        self._emit('art', {'book': book, 'title': title, 'stage': 'generate', 'done': done,
-                                           'total': total, 'character': shown})
-                    for scene_id in targets:
-                        if cancel.is_set():
-                            raise comfy_client.Cancelled('durduruldu')
-                        current = store.load(book)
-                        scene = store.scene(current, scene_id)
-                        self._emit('art', {'book': book, 'title': title, 'stage': 'generate', 'done': done,
-                                           'total': total, 'current': scene['title']})
-                        if upscale_only:
-                            data = store.image_path(book, scene).read_bytes()
-                            updated = store.write_image(book, scene_id, enlarge(scene_id, data, scene.get('upscaled')),
-                                                        upscaled=factor)
-                            done += 1
-                            shown = next(s for s in self._art_view(book, updated)['scenes'] if s['id'] == scene_id)
-                            self._emit('art', {'book': book, 'title': title, 'stage': 'generate', 'done': done,
-                                               'total': total, 'scene': shown})
+                        try:
+                            shown = portrait(item) if kind == 'portrait' else scene_image(item)
+                        except comfy_client.Cancelled:
+                            raise
+                        except (comfy_client.ComfyError, OSError, ValueError) as error:
+                            # tek gorselin hatasi kuyrugu durdurmaz; art arda STOP_AFTER hata ComfyUI'nin kendisidir
+                            streak += 1
+                            failures.append(item)
+                            self._log(f'UYARI: Görsel üretilemedi ({item}): {error}')
+                            if streak >= STOP_AFTER:
+                                raise
+                            shown = failed_scene(item, str(error)) if kind == 'scene' else {}
+                            self._emit('art', {'book': book, 'title': title, 'stage': 'generate',
+                                               'done': state['done'], 'total': total, **shown})
                             continue
-                        prefix = f'Aktar/{book[:12]}/{scene_id}'
-                        people = []
-                        if identity_workflow is not None and current.get('identity'):
-                            people = [c for c in book_art.scene_people(scene, current['characters'])
-                                      if (store.portrait_path(book, c) or Path()).is_file()]
-                            people = people[:len(comfy_client.references(identity_workflow))]
-                        text = dict(scene, prompt=book_art.scene_text(current, scene))   # F209 mekanin tarifiyle
-                        if people:
-                            faces_shown = 'no-faces' not in (current.get('modifiers') or ())
-                            filled = comfy_client.fill(identity_workflow, book_art.image_style(
-                                                           current, book_art.identity_prompt(text, people, current['style'],
-                                                                                             faces_shown)),
-                                                       '', book_art.image_suffix(current), scene['seed'], size, prefix,
-                                                       images=[upload(c) for c in people])
-                        else:   # insanla ilgili son ek yalnizca istemde insan varsa (F213)
-                            filled = comfy_client.fill(workflow, text['prompt'], book_art.image_style(current, current['style']),
-                                                       book_art.image_suffix(current, prompt=text['prompt']),
-                                                       scene['seed'], size, prefix)
-                        data = comfy_client.generate(url, filled, cancel)
-                        if factor:
-                            self._emit('art', {'book': book, 'title': title, 'stage': 'generate', 'done': done,
-                                               'total': total, 'current': f'{scene["title"]} · büyütülüyor'})
-                            data = enlarge(scene_id, data, 0)
-                        updated = store.write_image(book, scene_id, data, upscaled=factor)
-                        done += 1
-                        shown = next(s for s in self._art_view(book, updated)['scenes'] if s['id'] == scene_id)
-                        self._emit('art', {'book': book, 'title': title, 'stage': 'generate', 'done': done,
-                                           'total': total, 'scene': shown})
-                    self._log(f'Kitap görselleri: {done} görsel üretildi ({title or book}).')
+                        streak = 0
+                        state['done'] += 1
+                        self._emit('art', {'book': book, 'title': title, 'stage': 'generate', 'done': state['done'],
+                                           'total': total, **shown})
+                    self._log(f'Kitap görselleri: {state["done"]} görsel üretildi ({title or book})'
+                              + (f', {len(failures)} görsel üretilemedi.' if failures else '.'))
                     self._emit('art', {'book': book, 'title': title, 'stage': 'generate', 'finished': True,
-                                       'done': done, 'summary': book_art.summary(store.load(book))})
+                                       'done': state['done'], 'failed': len(failures),
+                                       'summary': book_art.summary(store.load(book))})
                 except comfy_client.Cancelled:
                     self._emit('art', {'book': book, 'title': title, 'stage': 'generate', 'finished': True,
-                                       'cancelled': True, 'done': done})
+                                       'cancelled': True, 'done': state['done']})
                 except Exception as error:
                     self._log(f'UYARI: Görsel üretilemedi: {error}')
                     self._emit('art', {'book': book, 'title': title, 'stage': 'generate', 'finished': True,
-                                       'error': str(error), 'done': done})
+                                       'error': str(error), 'done': state['done']})
 
             self._art_job = threading.Thread(target=work, name='aktar-art-generate', daemon=True)
             self._art_job.start()

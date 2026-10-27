@@ -71,7 +71,7 @@ class FakeComfy:
                     return self._send(200, {'system': {'comfyui_version': '0.9'}, 'devices': [{'name': 'RTX 5080'}]})
                 if self.path.startswith('/history/'):
                     pid = self.path.rsplit('/', 1)[1]
-                    if owner.fail == 'run':
+                    if owner.fail == 'run' or (owner.fail == 'first' and pid == 'p1'):
                         return self._send(200, {pid: {'status': {'status_str': 'error', 'completed': False, 'messages': [
                             ['execution_error', {'exception_message': 'CUDA out of memory'}]]}, 'outputs': {}}})
                     outputs = {'33': {'images': [{'filename': 'a.png', 'subfolder': 'Aktar', 'type': 'output'}]}}
@@ -758,7 +758,7 @@ class StoreTest(unittest.TestCase):
         here, carry = book_art.section_images(plan, 1)
         self.assertEqual((here, carry['id']), ([], '0-0'))
         self.assertEqual(book_art.summary(plan), {'complete': False, 'scenes': 2, 'images': 1,
-                                                  'created': plan['created']})
+                                                  'created': plan['created'], 'failed': 0, 'errors': 0})
         self.assertEqual(self.store.books(), [self.book])
         self.store.clear(self.book)
         self.assertEqual(self.store.books(), [])
@@ -1081,6 +1081,207 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(self.fake.prompts[0]['97']['inputs']['positive'], 'An empty mine shaft. Setting: rusty shaft.')
         cleared = self.bridge.art_scene_update('ab12cd34ef', '1-9', {'place': ''})['plan']['scenes'][1]
         self.assertNotIn('place', cleared)
+
+    def test_one_failed_image_does_not_stop_queue(self):
+        """F214: tek gorselin hatasi kalanlari durdurmaz; hata sahnede kalir, yeniden uretilince silinir."""
+        self.identity_plan(identity=False)
+        self.fake.fail = 'first'
+        self.assertTrue(self.bridge.art_generate('ab12cd34ef')['started'])
+        done = self.finish()
+        self.assertEqual((done['done'], done['failed']), (1, 1), done)
+        scenes = self.bridge.art_plan_get('ab12cd34ef')['plan']['scenes']
+        self.assertIn('out of memory', scenes[0]['error'])
+        self.assertTrue(scenes[1]['url'])
+        self.fake.fail = None
+        self.assertTrue(self.bridge.art_generate('ab12cd34ef')['started'])
+        self.assertEqual(self.finish()['done'], 1)
+        self.assertNotIn('error', self.bridge.art_plan_get('ab12cd34ef')['plan']['scenes'][0])
+        # art arda hatalar ComfyUI'nin kendisidir: is durur
+        from unittest.mock import patch
+        import bridge_art
+        self.fake.fail = 'run'
+        with patch.object(bridge_art, 'STOP_AFTER', 2):
+            self.assertTrue(self.bridge.art_generate('ab12cd34ef', all_scenes=True)['started'])
+            self.assertIn('out of memory', self.finish()['error'])
+
+    def test_failed_replan_keeps_old_images(self):
+        from unittest.mock import patch
+        self.identity_plan(identity=False)
+        self.assertTrue(self.bridge.art_generate('ab12cd34ef', ['1-0'])['started'])
+        self.finish()
+
+        class DeadClient:
+            def __init__(self, cfg, log=None):
+                self.cfg = {'model': 'sohbet'}
+
+            def chat(self, messages, temperature=None, max_tokens=None):
+                raise RuntimeError('Model sunucusuna bağlanılamadı')
+
+        with patch('app_core.Client', DeadClient), patch('app_core.load_config', return_value={}), \
+                patch('app_core.keep_loaded', return_value=[]), patch('app_core.unload_models'):
+            self.assertTrue(self.bridge.art_plan_create('ab12cd34ef', book(2, 50), title='Kitap')['started'])
+            self.assertIn('bağlanılamadı', self.finish()['error'])
+        plan = self.bridge.art_plan_get('ab12cd34ef')['plan']
+        self.assertEqual(plan['scenes'][0]['title'], 'Kurtarma')
+        self.assertTrue(plan['scenes'][0]['url'])
+
+    def test_no_edits_while_planning(self):
+        from unittest.mock import patch
+        self.identity_plan(identity=False)
+        with patch.object(type(self.bridge), '_art_planning', return_value=True):
+            self.assertIn('error', self.bridge.art_plan_save('ab12cd34ef', {'style': 'New.'}))
+            self.assertIn('error', self.bridge.art_scene_update('ab12cd34ef', '1-0', {'title': 'X'}))
+        self.assertEqual(self.bridge.art_plan_save('ab12cd34ef', {'style': 'New.'})['plan']['style'], 'New.')
+
+
+class RobustnessTest(unittest.TestCase):
+    """F214: dil modeli ve ComfyUI hatalarinda plan ve gorseller kaybolmaz."""
+
+    @staticmethod
+    def style_reply(_user=''):
+        return json.dumps({'style': 'Ink drawing.', 'characters': []})
+
+    def test_json_object_tolerates_chatter(self):
+        good = {'scenes': [{'start': 0, 'title': 'a', 'prompt': 'A man.'}]}
+        text = json.dumps(good)
+        self.assertEqual(book_art._json_object(text + '\nNote: I used {start} numbering.'), good)
+        self.assertEqual(book_art._json_object('Here {x}: ' + text), good)
+        self.assertEqual(book_art._json_object(text + ' {"x": 1}'), good)
+        self.assertEqual(book_art._json_object('{"scenes": [{"start": 0, "prompt": "A man."},]}')['scenes'][0]['start'], 0)
+        # kapanmamis dusunme blogundaki ornek nesne sayilmaz; kapanisi olan dusunmeden sonraki yanit alinir
+        self.assertIsNone(book_art._json_object('<think>plan: {"start": 3}'))
+        self.assertEqual(book_art._json_object('thinking {"start": 9} ...</think>' + text), good)
+
+    def test_ask_json_retries(self):
+        replies = iter(['Sorry, here it is', ValueError('Yanıt token sınırında kesildi'), '{"style": "x"}'])
+        asked = []
+
+        def ask(system, user):
+            asked.append(user)
+            reply = next(replies)
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+
+        self.assertEqual(book_art.ask_json(ask, 's', 'u'), '{"style": "x"}')
+        self.assertEqual(asked[0], 'u')
+        self.assertTrue(asked[1].endswith(book_art.JSON_REMINDER))
+        with self.assertRaises(ValueError):
+            book_art.ask_json(lambda s, u: 'no json', 's', 'u')
+        with self.assertRaises(RuntimeError):   # baglanti hatasi yeniden denenmez
+            book_art.ask_json(lambda s, u: (_ for _ in ()).throw(RuntimeError('down')), 's', 'u')
+
+    def test_unreadable_opening_not_skipped_forever(self):
+        sections = book(1, 60)
+        broken = {'on': True}
+
+        def ask(system, user):
+            if 'JSON shape: {"style"' in user:
+                return self.style_reply()
+            if 'first page of a chapter' in user:
+                return 'I cannot decide.' if broken['on'] else json.dumps({'title': 'A', 'prompt': 'A quiet harbour.'})
+            first = int(user.split('number of the sentence where the moment begins (')[1].split(' ')[0])
+            return json.dumps({'scenes': [{'start': first + 5, 'title': 'T', 'prompt': 'p'}]})
+
+        plan = book_art.plan_book(sections, ask, book_art.new_plan(density='low', options={'openers': True}))
+        self.assertNotIn(1, plan.get('opening_skipped') or [])
+        self.assertFalse(any(s.get('opening') for s in plan['scenes']))
+        broken['on'] = False
+        book_art.add_openers(sections, ask, plan)   # sonra yeniden sorulur
+        self.assertEqual([s['id'] for s in plan['scenes'] if s.get('opening')], ['1-open'])
+
+    def test_unreadable_chunk_reported_and_retried(self):
+        sections = book(60, 60)
+        broken = {'on': True}
+
+        def ask(system, user):
+            if 'JSON shape: {"style"' in user:
+                return self.style_reply()
+            first = int(user.split('the first scene starts at ')[1].split(')')[0])
+            if broken['on'] and 'Bölüm 1 ' in user:
+                raise ValueError('Yanıt token sınırında kesildi; eksik çeviri kabul edilmedi.')
+            return json.dumps({'scenes': [{'start': first, 'title': 'T', 'prompt': f'scene {first}'}]})
+
+        plan = book_art.plan_book(sections, ask, book_art.new_plan())
+        self.assertTrue(plan['complete'])   # bir parca plani durdurmaz
+        self.assertEqual([(f['section'], f['start']) for f in plan['failed']], [(1, 0)])
+        self.assertEqual(book_art.summary(plan)['failed'], 1)
+        self.assertEqual({s['section'] for s in plan['scenes']}, {0})
+        broken['on'] = False
+        plan = book_art.plan_book(sections, ask, plan)   # yeniden dene: yalnizca okunamayan parca sorulur
+        self.assertNotIn('failed', plan)
+        self.assertEqual(sorted({s['section'] for s in plan['scenes']}), [0, 1])
+
+    def test_digest_covers_every_section(self):
+        sections = [{'sentences': [f'Bölüm {i} cümlesi. ' + 'x' * 400]} for i in range(200)]
+        sample = book_art.digest(sections)
+        self.assertLessEqual(len(sample), book_art.DIGEST_CHARS + 5 * 200)   # ayraclar
+        self.assertIn('Bölüm 0 ', sample)
+        self.assertIn('Bölüm 199 ', sample)
+        short = book_art.digest(book(3, 4))   # kisa kitap tamamen girer
+        self.assertIn('Bölüm 1 cümle 3', short)
+
+    def test_replan_failure_restores_old_plan(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = book_art.Store(folder)
+            plan = book_art.new_plan()
+            plan.update(complete=True, scenes=[{'id': '0-0', 'section': 0, 'start': 0, 'anchor': 'a', 'title': 'T',
+                                                'prompt': 'p', 'seed': 1, 'image': '', 'skip': False}])
+            store.save('ab12cd34', plan)
+            store.write_image('ab12cd34', '0-0', PNG)
+            store.stash('ab12cd34')
+            self.assertIsNone(store.load('ab12cd34'))
+            self.assertEqual(store.books(), [])   # yedek klasoru kitap sayilmaz
+            self.assertTrue(store.restore('ab12cd34'))   # yeni plan kaydedilmeden basarisiz oldu
+            restored = store.load('ab12cd34')
+            self.assertTrue(store.image_path('ab12cd34', restored['scenes'][0]).is_file())
+            # yeni plan kaydedildiyse eskisi geri gelmez, tamamlaninca yedek silinir
+            store.stash('ab12cd34')
+            store.save('ab12cd34', book_art.new_plan())
+            self.assertFalse(store.restore('ab12cd34'))
+            store.drop_backup('ab12cd34')
+            self.assertFalse(store.backup_folder('ab12cd34').exists())
+
+    def test_cache_not_shared_with_saved_plan(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = book_art.Store(folder)
+            plan = book_art.new_plan()
+            store.save('ab12cd34', plan)
+            plan['scenes'].append({'id': 'x'})   # plan isi kendi nesnesini degistirmeye devam eder
+            self.assertEqual(store.load('ab12cd34')['scenes'], [])
+
+
+class GenerateRobustnessTest(unittest.TestCase):
+    def test_poll_miss_and_queue_wait(self):
+        from unittest.mock import patch
+        calls = {'history': 0, 'queue': 0}
+
+        def fake_json(url, path, body=None, timeout=30):
+            if path == '/prompt':
+                return {'prompt_id': 'p1'}
+            if path == '/queue':
+                calls['queue'] += 1
+                return {'queue_pending': [[1, 'p1', {}]]} if calls['queue'] < 3 else {'queue_pending': []}
+            calls['history'] += 1
+            if calls['history'] == 1:
+                raise comfy_client.ComfyError('zaman aşımı')
+            return {'p1': {'status': {'status_str': 'success', 'completed': True},
+                           'outputs': {'9': {'images': [{'filename': 'a.png', 'type': 'output'}]}}}}
+
+        with patch.object(comfy_client, '_json', fake_json), patch.object(comfy_client, '_request', return_value=PNG), \
+                patch.object(comfy_client, 'POLL', 0.01):
+            self.assertEqual(comfy_client.generate('http://x', WORKFLOW, threading.Event(), timeout=0.001), PNG)
+        self.assertEqual(calls['queue'], 2)
+
+        def dead(url, path, body=None, timeout=30):
+            if path == '/prompt':
+                return {'prompt_id': 'p1'}
+            raise comfy_client.ComfyError('bağlanılamadı')
+
+        with patch.object(comfy_client, '_json', dead), patch.object(comfy_client, 'POLL', 0.01), \
+                patch.object(comfy_client, 'interrupt'):
+            with self.assertRaisesRegex(comfy_client.ComfyError, 'bağlanılamadı'):
+                comfy_client.generate('http://x', WORKFLOW, threading.Event())
 
 
 if __name__ == '__main__':

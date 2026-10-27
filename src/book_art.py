@@ -41,12 +41,14 @@ from __future__ import annotations
 import json
 import random
 import re
+import shutil
 import threading
 from datetime import datetime
 from pathlib import Path
 
 STORE_DIR = 'kitap-gorselleri'
 VERSION = 1
+BACKUP_DIR = '.yedek'   # baştan planlamada eski plan (Store.stash)
 WORKFLOW_FILE = 'is-akisi.json'   # Ayarlar'da secilen is akisinin kopyasi (STORE_DIR altinda)
 IDENTITY_FILE = 'kimlik-is-akisi.json'   # karakter kimligi is akisi (F201)
 
@@ -162,35 +164,68 @@ def _clean(text):
 
 
 def _json_object(raw):
-    """Model yanitindaki ilk JSON nesnesi (dusunme etiketleri ve kod citlari yok sayilir)."""
+    """Model yanitindaki ilk JSON nesnesi (dusunme etiketleri ve kod citlari yok sayilir). Nesneden sonra gelen
+    aciklama ('{start} numarasini kullandim'), ikinci nesne ve sondaki virgul yanitin kendisini bozmaz; kapanmamis
+    dusunme blogundaki ornekler nesne sayilmaz."""
     text = re.sub(r'<think>.*?</think>', ' ', str(raw or ''), flags=re.S)
-    match = re.search(r'\{.*\}', text, re.S)
-    if not match:
-        return None
-    try:
-        value = json.loads(match.group(0))
-    except ValueError:
-        return None
-    return value if isinstance(value, dict) else None
+    text = text.rsplit('</think>', 1)[-1].split('<think>', 1)[0]   # acilisi ya da kapanisi eksik dusunme
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r'\{', text):
+        for candidate in (text[match.start():], re.sub(r',(\s*[}\]])', r'\1', text[match.start():])):
+            try:
+                value = decoder.raw_decode(candidate)[0]
+            except ValueError:
+                continue
+            if isinstance(value, dict):
+                return value
+    return None
+
+
+RETRIES = 2   # gecersiz ya da token sinirinda kesilen yanitta ayni istek bu kadar kez daha
+JSON_REMINDER = '\n\nAnswer with exactly one valid JSON object and nothing else; keep any reasoning short.'
+
+
+def ask_json(ask, system, user, retries=RETRIES):
+    """JSON nesnesi iceren ham yanit: ayristirilamayan ya da dil modelinin reddettigi (ValueError: bos yanit, token
+    sinirinda kesildi) yanit kisa bir hatirlatmayla yeniden istenir. Hepsi basarisizsa ValueError. Baglanti
+    hatalari (RuntimeError) yeniden denenmez."""
+    error = None
+    for attempt in range(retries + 1):
+        try:
+            raw = ask(system, user + (JSON_REMINDER if attempt else ''))
+        except ValueError as failure:
+            error = failure
+            continue
+        if _json_object(raw) is not None:
+            return raw
+        error = ValueError('Dil modeli geçerli JSON vermedi.')
+    raise error
 
 
 # ---------------------------------------------------------------- 1. stil kilavuzu
 def digest(sections, limit=DIGEST_CHARS):
-    """Stil kilavuzu icin kitaptan ornek: her bolumun basindan, uzunluguyla orantili pay (kitap baglama sigmaz)."""
-    sizes = [sum(len(s) for s in section['sentences']) for section in sections]
+    """Stil kilavuzu icin kitaptan ornek: her bolumun basindan, uzunluguyla orantili pay (kitap baglama sigmaz). Her
+    bolumun en az payi bolum sayisiyla kuculur ve paylar sinira sigdirilir: sabit 300 karakterlik taban cok bolumlu
+    kitapta ornegi ilk bolumlerde bitiriyordu, sondakilerin karakterleri stil adiminda hic gorulmuyordu."""
+    sizes = [sum(len(s) + 1 for s in section['sentences']) for section in sections]
     total = sum(sizes) or 1
+    floor = min(300, limit // max(1, sum(1 for size in sizes if size)))
+    shares = [max(floor, limit * size // total) if size else 0 for size in sizes]
+    if sum(shares) > limit:
+        over = sum(shares)
+        shares = [share * limit // over for share in shares]
     parts = []
-    for section, size in zip(sections, sizes):
-        share = max(300, limit * size // total)
+    for section, size, share in zip(sections, sizes, shares):
         taken, text = 0, []
         for sentence in section['sentences']:
-            if taken >= share:
+            sentence = _clean(sentence)
+            if text and taken + len(sentence) > share:
                 break
-            text.append(_clean(sentence))
-            taken += len(sentence) + 1
-        if text:
+            text.append(sentence[:max(share, 1)])   # ilk cumle paydan uzunsa kirpilir
+            taken += len(text[-1]) + 1
+        if text and text[0]:
             parts.append(' '.join(text) + (' …' if taken < size else ''))
-    return '\n\n'.join(parts)[:limit + 2000]
+    return '\n\n'.join(parts)
 
 
 # Yas ve cinsiyet (F211): "small, slight build" gibi yassiz tarif gorsel modelinde cocuk (iri kafali) ciziliyordu
@@ -397,7 +432,7 @@ def fix_ages(characters, ask, sample, asked):
     asked.update(c['name'].lower() for c in todo)
     try:
         fixed = {c['name'].lower(): c for c in
-                 clean_characters((_json_object(ask(*age_prompt(todo, sample))) or {}).get('characters'))}
+                 clean_characters((_json_object(ask_json(ask, *age_prompt(todo, sample))) or {}).get('characters'))}
     except ValueError:
         return characters
     for character in todo:
@@ -855,12 +890,16 @@ def opening_scene(plan, real, sentences, ask, add):
     if real in (plan.get('opening_skipped') or ()):
         return False
     people = 'no-people' not in (plan.get('modifiers') or ())
-    found = parse_opening(ask(*opening_prompt(
-        plan['style'], characters_at(plan['characters'], real, 0) if people else [], sentences, plan.get('note'),
-        plan.get('identity'), plan.get('modifiers'), plan.get('places') if plan.get('place_identity') else None)),
-        plan['style'])
+    try:
+        raw = ask_json(ask, *opening_prompt(
+            plan['style'], characters_at(plan['characters'], real, 0) if people else [], sentences, plan.get('note'),
+            plan.get('identity'), plan.get('modifiers'), plan.get('places') if plan.get('place_identity') else None))
+    except ValueError:   # okunamayan yanit hikaye disi sayfa sayilmaz: sonra (Acilislari ekle) yeniden sorulur
+        return False
+    found = parse_opening(raw, plan['style'])
     if not found:
-        plan.setdefault('opening_skipped', []).append(real)
+        if (_json_object(raw) or {}).get('skip') is True:   # yalnizca modelin acikca atladigi sayfa bir daha sorulmaz
+            plan.setdefault('opening_skipped', []).append(real)
         return False
     entry = {'id': key, 'section': real, 'start': 0, 'anchor': _clean(sentences[0]),
              'title': found['title'] or 'Bölüm açılışı', 'prompt': found['prompt'], 'opening': True}
@@ -918,7 +957,7 @@ def plan_book(sections, ask, plan, cancel=None, progress=None, save=None):
     asked = set()   # yasi yeniden sorulan karakterler (F211)
     if not plan.get('style'):
         sample = digest(sections)
-        raw = ask(*style_prompt(sample, plan.get('note'), plan.get('modifiers'), places))
+        raw = ask_json(ask, *style_prompt(sample, plan.get('note'), plan.get('modifiers'), places))
         plan['style'], plan['characters'] = parse_style(raw)
         if people:
             fix_ages(plan['characters'], ask, sample, asked)
@@ -933,10 +972,19 @@ def plan_book(sections, ask, plan, cancel=None, progress=None, save=None):
         entry.update(seed=plan['seed'] + len(plan['scenes']) + len(plan.get('candidates') or ()), image='', skip=False)
         where.append(entry)
 
-    for number in range(plan.get('next_chunk', 0), len(parts)):
+    # once onceki calismada okunamayan parcalar yeniden sorulur (tamamlanmis planda da), sonra kalinan yerden devam
+    failed = {(item['section'], item['start']) for item in plan.get('failed') or ()}
+    retry = [number for number, (section, start, _stop) in enumerate(parts[:plan.get('next_chunk', 0)])
+             if (sections[section].get('number', section), start) in failed]
+    done -= sum(parts[number][2] - parts[number][1] for number in retry)
+    existing = sum(1 for scene in plan['scenes'] if not scene.get('opening'))   # selective: yeniden denemede secilmisler
+    for number in retry + list(range(plan.get('next_chunk', 0), len(parts))):
         if cancel is not None and cancel.is_set():
             raise Cancelled('Görsel planı durduruldu.')
         section, start, stop = parts[number]
+        if plan.get('failed'):
+            plan['failed'] = [item for item in plan['failed']
+                              if (item['section'], item['start']) != (sections[section].get('number', section), start)]
         sentences = sections[section]['sentences']
         count = scene_count(sum(len(s) + 1 for s in sentences[start:stop]), density)
         real = sections[section].get('number', section)   # okuyucunun bolum numarasi
@@ -946,10 +994,16 @@ def plan_book(sections, ask, plan, cancel=None, progress=None, save=None):
         if count:
             earlier = (plan.get('candidates') or []) + plan['scenes']
             previous = max(earlier, key=lambda s: (s['section'], s['start']))['prompt'] if earlier else None
-            raw = ask(*scene_prompt(plan['style'], characters_at(plan['characters'], real, start), sentences, start,
-                                    stop, count, plan.get('note'), previous, plan.get('identity'),
-                                    plan.get('modifiers'), focus, plan.get('places') if places else None,
-                                    bool(plan.get('look_changes')) and people, opening))
+            try:
+                raw = ask_json(ask, *scene_prompt(
+                    plan['style'], characters_at(plan['characters'], real, start), sentences, start, stop, count,
+                    plan.get('note'), previous, plan.get('identity'), plan.get('modifiers'), focus,
+                    plan.get('places') if places else None, bool(plan.get('look_changes')) and people, opening))
+            except ValueError as error:
+                # yeniden denemelerde de okunamayan parca plani durdurmaz ama sessizce de gecmez: plan sonunda bildirilir
+                raw = ''
+                plan.setdefault('failed', []).append({'section': real, 'start': start, 'stop': stop,
+                                                      'error': str(error)[:200]})
             scenes, extra = parse_scenes(raw, start, stop, sentences, plan['style'], first=not focus)
             extras = parse_extras(raw, plan['style'])
             if people:
@@ -985,14 +1039,16 @@ def plan_book(sections, ask, plan, cancel=None, progress=None, save=None):
                     add(entry, plan.setdefault('candidates', []))
                 else:
                     add(entry, plan['scenes'])
-        plan['next_chunk'] = number + 1
+        plan['next_chunk'] = max(plan.get('next_chunk', 0), number + 1)
+        if not plan.get('failed'):
+            plan.pop('failed', None)
         done += stop - start
         if save:
             save(plan)
         if progress:
             progress(done, total)
     if choose:
-        target = max(1, round(at / per_scene(density)))
+        target = round(at / per_scene(density)) - existing if existing else max(1, round(at / per_scene(density)))
         picked = select_moments(plan.pop('candidates', None) or [], target, per_scene(density) * SPACING)
         for entry in picked:
             entry.pop('pos', None)
@@ -1093,10 +1149,50 @@ class Store:
             folder.mkdir(parents=True, exist_ok=True)
             target = folder / 'plan.json'
             partial = target.with_name('plan.json.part')
-            partial.write_text(json.dumps(plan, ensure_ascii=False, indent=1), encoding='utf-8')
+            text = json.dumps(plan, ensure_ascii=False, indent=1)
+            partial.write_text(text, encoding='utf-8')
             partial.replace(target)
-            self._cache[book] = plan
+            # onbellege kopya: plani yerinde degistiren plan isi okunan (arayuze giden) plani yarim degistirmesin
+            self._cache[book] = json.loads(text)
         return plan
+
+    def backup_folder(self, book):
+        return self.directory / BACKUP_DIR / self.folder(book).name
+
+    def stash(self, book):
+        """Baştan planlamada eski plan ve gorseller silinmez, yedege tasinir: yeni plan hic kaydedilemezse
+        (dil modeli kapali, stil istegi basarisiz) restore geri koyar, plan tamamlaninca drop_backup siler. Onceki
+        yarim kalmis bir yeni planin yerine yedekteki (asil) plan korunur."""
+        with self._lock:
+            plan = self.load(book)
+            self._cache.pop(book, None)
+            folder, backup = self.folder(book), self.backup_folder(book)
+            if not folder.is_dir():
+                return
+            if backup.is_dir() and not (plan and plan.get('complete')):
+                shutil.rmtree(folder, ignore_errors=True)
+                return
+            shutil.rmtree(backup, ignore_errors=True)
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                folder.replace(backup)
+            except OSError:   # tasinamadi (dosya kilitli): eski davranis, silinir
+                shutil.rmtree(folder, ignore_errors=True)
+
+    def restore(self, book):
+        """Yeni plan hic kaydedilmediyse yedekteki eski plan geri gelir. Donen: geri geldi mi."""
+        with self._lock:
+            folder, backup = self.folder(book), self.backup_folder(book)
+            if not backup.is_dir() or (folder / 'plan.json').is_file():
+                return False
+            shutil.rmtree(folder, ignore_errors=True)
+            backup.replace(folder)
+            self._cache.pop(book, None)
+            return True
+
+    def drop_backup(self, book):
+        with self._lock:
+            shutil.rmtree(self.backup_folder(book), ignore_errors=True)
 
     def update(self, book, change):
         """plan.json'u kilit altinda degistirir: `change(plan)`; plan yoksa ValueError."""
@@ -1133,6 +1229,7 @@ class Store:
             partial.replace(folder / name)
             holder['old'] = scene.get('image')
             scene.update(image=name, version=version, upscaled=upscaled)
+            scene.pop('error', None)   # onceki uretim hatasi
 
         plan = self.update(book, change)
         old = holder.get('old')
@@ -1194,6 +1291,7 @@ class Store:
     def clear(self, book):
         with self._lock:
             self._cache.pop(book, None)
+            shutil.rmtree(self.backup_folder(book), ignore_errors=True)
             folder = self.folder(book)
             for path in folder.glob('*') if folder.is_dir() else ():
                 path.unlink(missing_ok=True)
@@ -1209,7 +1307,8 @@ def summary(plan):
         return None
     scenes = [scene for scene in plan['scenes'] if not scene.get('skip')]
     return {'complete': bool(plan.get('complete')), 'scenes': len(scenes),
-            'images': sum(1 for scene in scenes if scene.get('image')), 'created': plan.get('created')}
+            'images': sum(1 for scene in scenes if scene.get('image')), 'created': plan.get('created'),
+            'failed': len(plan.get('failed') or ()), 'errors': sum(1 for scene in scenes if scene.get('error'))}
 
 
 def pending(plan):

@@ -42,9 +42,20 @@
     call('art_section', id, number).then((r) => { if (r && !r.error && id === book && number === section) art = r; });
   });
   const norm = (s) => String(s ?? '').split(/\s+/).filter(Boolean).join(' ');
+  // Sahnenin ilk cumlesi (anchor) plandaki sirasinda degilse aranir: once birebir, sonra cumle bolme ayari degistiyse
+  // anchor'i iceren (birlesen) ya da anchor'in basi olan (bolunen) cumle; birden fazlaysa plandaki sirasina en yakini.
+  const nearest = (scene, test) => {
+    let best = -1;
+    sentences.forEach((s, i) => {
+      if (test(norm(s)) && (best < 0 || Math.abs(i - scene.start) < Math.abs(best - scene.start))) best = i;
+    });
+    return best;
+  };
   const starts = $derived(art.scenes.map((scene) => {
-    if (norm(sentences[scene.start]) === scene.anchor) return { ...scene };
-    const found = sentences.findIndex((s) => norm(s) === scene.anchor);
+    const anchor = scene.anchor;
+    if (!anchor || norm(sentences[scene.start]) === anchor) return { ...scene };
+    let found = nearest(scene, (s) => s === anchor);
+    if (found < 0) found = nearest(scene, (s) => (anchor.length >= 12 && s.includes(anchor)) || (s.length >= 12 && anchor.startsWith(s)));
     return { ...scene, start: found >= 0 ? found : scene.start };
   }).sort((a, b) => a.start - b.start));
   const image = $derived(artOn ? ([...starts].reverse().find((s) => s.start <= range[0])?.url ?? art.carry) : '');

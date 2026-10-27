@@ -305,8 +305,11 @@ export async function init() {
     if (data.error) toast(`${what}: ${data.error}`, 'error');
     else if (data.cancelled) toast(`${what} durduruldu${data.stage === 'plan' ? '; yeniden başlatınca kaldığı yerden sürer' : ''}.`);
     else if (data.stage === 'plan') {
+      const failed = data.summary?.failed ? ` ${data.summary.failed} parça okunamadı; pencerede "Yeniden dene" ile tekrar sorulur.` : '';
       toast(`Görsel planı hazır: ${data.title || 'kitap'} · ${data.summary?.scenes ?? 0} sahne. Kitaplıkta kitaba sağ tıklayıp ` +
-        '"Kitap görselleri" ile gözden geçirip üretebilirsiniz.', 'ok');
+        '"Kitap görselleri" ile gözden geçirip üretebilirsiniz.' + failed, failed ? 'error' : 'ok');
+    } else if (data.failed) {
+      toast(`Görseller: ${data.done ?? 0} görsel üretildi, ${data.failed} görsel üretilemedi (hata kartta; "Eksikleri üret" yeniden dener).`, 'error');
     } else toast(`Görseller hazır: ${data.title || 'kitap'} · ${data.done ?? 0} görsel.`, 'ok');
   });
   // F141: sesli kitap kaydi (okuyucu); bitince dosya/klasor gosterilir.

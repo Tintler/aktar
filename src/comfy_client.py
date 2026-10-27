@@ -30,7 +30,8 @@ import uuid
 DEFAULT_URL = 'http://127.0.0.1:8188'
 TEXT_INPUTS = ('positive', 'text', 'prompt', 'string', 'value')
 POLL = 1.0
-TIMEOUT = 600   # tek gorselin en uzun suresi (sn); ilk istekte model yuklenir
+TIMEOUT = 600   # tek gorselin en uzun suresi (sn, kuyrukta bekleme haric); ilk istekte model yuklenir
+POLL_MISSES = 5   # /history art arda bu kadar kez yanit vermezse is birakilir
 
 
 class ComfyError(RuntimeError):
@@ -343,13 +344,25 @@ def generate(url, workflow, cancel=None, timeout=TIMEOUT):
     if not prompt_id:
         raise ComfyError(_describe(queued) or 'ComfyUI işi kuyruğa almadı.')
     deadline = time.monotonic() + timeout
+    waiting, misses = True, 0
     while True:
         if cancel is not None and cancel.wait(POLL):
             interrupt(url, prompt_id)
             raise Cancelled('Görsel üretimi durduruldu.')
         if cancel is None:
             time.sleep(POLL)
-        entry = _json(url, '/history/' + urllib.parse.quote(prompt_id)).get(prompt_id)
+        if waiting:   # kuyrukta baska isleri beklerken gecen sure gorselin suresine sayilmaz
+            waiting = _pending(url, prompt_id)
+            if waiting:
+                deadline = time.monotonic() + timeout
+        try:
+            entry = _json(url, '/history/' + urllib.parse.quote(prompt_id)).get(prompt_id)
+            misses = 0
+        except ComfyError:   # tek bir yoklamanin zaman asimi isi bozmaz; art arda POLL_MISSES kez ise birakilir
+            misses += 1
+            if misses >= POLL_MISSES:
+                raise
+            continue
         status = (entry or {}).get('status') or {}
         if status.get('status_str') == 'error':
             messages = [item[1].get('exception_message', '') for item in status.get('messages') or ()
@@ -366,6 +379,16 @@ def generate(url, workflow, cancel=None, timeout=TIMEOUT):
         if time.monotonic() > deadline:
             interrupt(url, prompt_id)
             raise ComfyError(f'ComfyUI {timeout} saniyede görseli bitirmedi.')
+
+
+def _pending(url, prompt_id):
+    """Is ComfyUI kuyrugunda baslamayi mi bekliyor (GET /queue; okunamazsa hayir: sure sayilmaya baslar)."""
+    try:
+        data = _json(url, '/queue', timeout=10)
+    except ComfyError:
+        return False
+    pending = data.get('queue_pending') if isinstance(data, dict) else None
+    return any(isinstance(item, list) and len(item) > 1 and item[1] == prompt_id for item in pending or ())
 
 
 def upload_image(url, data, name):

@@ -2,6 +2,16 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.37.4 — 2026-10-27
+
+### Düzeltilen
+- **Kitap görsellerinde dil modeli hataları sahne kaybettiriyordu (F214):** Yanıttaki JSON'dan sonra açıklama, ikinci bir nesne ya da sondaki virgül olunca parça sessizce sahnesiz geçiyordu; okunamayan yanıt bölüm açılış sayfasını kalıcı olarak "hikâye dışı" sayıyordu. JSON artık sağlam ayıklanıyor, okunamayan ya da token sınırında kesilen yanıt iki kez yeniden isteniyor. Yine okunamayan parça planı durdurmuyor; plan sonunda bildiriliyor ve pencerede "Yeniden dene" ile yalnızca o parçalar tekrar soruluyor. Açılış yalnızca model sayfayı açıkça atladıysa bir daha sorulmuyor.
+- "Baştan planla" eski planı ve görselleri iş başlamadan siliyordu; dil modeli kapalıysa elde hiçbir şey kalmıyordu. Eski plan artık yedekte bekliyor, yeni plan kaydedilemezse geri konuyor, yeni plan tamamlanınca siliniyor.
+- Görsel üretiminde tek bir hata bütün kuyruğu durduruyordu: hatalı görsel kartında hatasıyla işaretlenip sıradakine geçiliyor ("Eksikleri üret" yeniden dener); art arda üç hata olursa iş duruyor. ComfyUI'nin tek bir yoklamaya geç yanıt vermesi işi bozmuyor, kuyrukta bekleme süresi görselin süresine sayılmıyor.
+- Plan çıkarılırken yapılan stil, karakter ve sahne düzenlemeleri planın sonraki kaydında kayboluyordu: plan sürerken düzenleme engelleniyor, plan işi kendi kopyasında çalışıyor.
+- Çok bölümlü kitapta stil kılavuzu örneği ilk bölümlerde bitiyordu (200 bölümde ilk 62); artık her bölümden pay alınıyor.
+- Tam ekran okuyucuda cümle bölme ayarı değişince görsel yanlış cümlede açılıyordu; sahnenin ilk cümlesi birleşen ya da bölünen cümlelerde de bulunuyor.
+
 ## 2.37.3 — 2026-10-27
 
 ### Düzeltilen
