@@ -5,6 +5,11 @@ on:
     branches: [master]
   pull_request:
   workflow_dispatch:
+    inputs:
+      ubuntu:
+        description: Ubuntu'da da test et
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -21,8 +26,10 @@ jobs:
       PYTHONIOENCODING: utf-8
     strategy:
       fail-fast: false
+      # Ubuntu isi ~25 dk suruyor; yalnizca istenince calisir: commit mesajinda [ubuntu]
+      # ya da elle calistirmada "Ubuntu'da da test et".
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: ${{ fromJSON((inputs.ubuntu || contains(github.event.head_commit.message, '[ubuntu]')) && '["windows-latest", "ubuntu-latest"]' || '["windows-latest"]') }}
         python: ['3.12', '3.14']
     steps:
       - uses: actions/checkout@v5
