@@ -336,6 +336,17 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(looks['Bo'], 'tall, thin')   # yanit yas vermedi: tarif kalir, istemde yetiskin sayilir
         self.assertIn('- Bo: Adult, tall, thin', book_art.character_lines(plan['characters']))
 
+    def test_same_new_character_in_two_scenes_kept_once(self):
+        """F211: ayni parcadaki iki sahne ayni karakteri tanitinca plan iki kez yaziyordu (arayuz cokuyordu)."""
+        merged = book_art.merge_characters([{'name': 'Ana', 'look': 'a'}],
+                                           [{'name': 'Bo', 'look': '1'}, {'name': 'bo', 'look': '2'},
+                                            {'name': 'ANA', 'look': 'x'}])
+        self.assertEqual(merged, [{'name': 'Ana', 'look': 'a'}, {'name': 'Bo', 'look': '1'}])
+        plan = {'characters': [{'name': 'Jerry', 'look': '1'}, {'name': 'Jerry', 'look': '1'}], 'places': []}
+        self.assertTrue(book_art.dedupe_plan(plan))
+        self.assertEqual(plan['characters'], [{'name': 'Jerry', 'look': '1'}])
+        self.assertFalse(book_art.dedupe_plan(plan))
+
     def test_presets_and_modifiers(self):
         """F202: LoRA'li tarz plana kopyalanir; secenekler dil modeline kural, gorsel istemine olumlu son ek olur."""
         ids = [p['id'] for p in book_art.PRESETS]
@@ -931,6 +942,16 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(shown['scenes'], [])
         self.assertEqual(read.call_count, 1)
         self.assertTrue(json.loads((store.folder('ab12cd34ef') / 'plan.json').read_text(encoding='utf-8'))['numbered'])
+
+    def test_duplicate_characters_repaired_on_read(self):
+        store = self.bridge._art_store()
+        plan = book_art.new_plan()
+        plan['complete'] = True
+        plan['characters'] = [{'name': 'Chooka', 'look': 'Man, 1'}, {'name': 'Chooka', 'look': 'Man, 2'}]
+        store.save('ab12cd34ef', plan)
+        shown = self.bridge.art_plan_get('ab12cd34ef')['plan']
+        self.assertEqual([c['look'] for c in shown['characters']], ['Man, 1'])
+        self.assertEqual(len(store.load('ab12cd34ef')['characters']), 1)
 
     def test_scene_carries_book_chapter_title(self):
         """F211: kartta okuyucunun sira numarasi yerine kitabin icindekilerdeki bolum adi."""

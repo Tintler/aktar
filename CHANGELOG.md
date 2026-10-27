@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.37.2 — 2026-10-27
+
+### Düzeltilen
+- **Kitap görselleri penceresi açılmıyordu (F212):** Bir parçadaki iki sahne aynı yeni karakteri tanıtınca plan o karakteri iki kez yazıyordu; pencere bu planda "Yükleniyor…"da kalıyor, plan bitince de hiç planlanmamış gibi görünüyordu. Karakterler artık tekrarsız birleştiriliyor; tekrarlı eski planlar açılırken kendiliğinden onarılıyor.
+
 ## 2.37.1 — 2026-10-27
 
 ### Düzeltilen

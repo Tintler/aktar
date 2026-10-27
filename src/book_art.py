@@ -656,8 +656,25 @@ def select_moments(candidates, target, spacing):
 
 
 def merge_characters(characters, extra, limit=12):
-    names = {c['name'].lower() for c in characters}
-    return (characters + [c for c in extra if c['name'].lower() not in names])[:limit]
+    """Ada gore tekrarsiz birlestirme (ilk gelen kalir). Ayni parcadaki iki sahne ayni yeni karakteri tanitabilir;
+    tekrar eden ad arayuzu cokertiyordu (Svelte anahtarli liste)."""
+    result, names = [], set()
+    for item in list(characters) + list(extra):
+        if item['name'].lower() not in names:
+            names.add(item['name'].lower())
+            result.append(item)
+    return result[:limit]
+
+
+def dedupe_plan(plan):
+    """Eski plandaki tekrar eden karakter ve mekanlari ayiklar (F211 oncesi merge_characters). Donen: degisti mi."""
+    changed = False
+    for key in ('characters', 'places'):
+        items = plan.get(key) or []
+        unique = merge_characters([], items, len(items))
+        if len(unique) != len(items):
+            plan[key], changed = unique, True
+    return changed
 
 
 def keep_portraits(characters, old):

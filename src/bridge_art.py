@@ -70,6 +70,9 @@ class ArtMixin:
         """Plan; eski (bolumleri bos bolumler atlanarak numaralanmis) plan kitabin metniyle bir kez onarilir."""
         store = self._art_store()
         plan = store.load(book)
+        if plan and book_art.dedupe_plan(dict(plan)):   # tekrar eden karakter arayuzu cokertiyordu (F211)
+            plan = store.update(book, book_art.dedupe_plan)
+            self._log('Kitap görselleri: plandaki tekrar eden karakterler ayıklandı.')
         tried = self.__dict__.setdefault('_art_renumber_tried', set())
         if not plan or plan.get('numbered') or book in tried:
             return plan
