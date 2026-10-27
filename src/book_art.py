@@ -115,10 +115,22 @@ MODIFIERS = (
      'rule': 'Every image is a wide landscape or environment shot: the setting fills the frame; people, if any, are '
              'tiny distant figures.',
      'suffix': 'wide establishing shot, expansive landscape'},
+    # F213: kural ve son ek her sahneye insan ekletiyordu (dil modeli bos odaya "arkadan gorulen adam" yaziyordu);
+    # kural yalnizca metnin sahneye koydugu kisiler icin, son ek ('people') yalnizca istemde insan varsa
     {'id': 'no-faces', 'label': 'Yüz gösterme',
-     'rule': 'Faces are never shown: people are seen from behind, in silhouette, from far away or cropped.',
-     'suffix': 'figures seen from behind or in silhouette'},
+     'rule': 'Faces are never shown. This is only about the people the passage itself puts in the scene: show them '
+             'from behind, from far away or with the face out of frame. Never add a person, figure or silhouette to '
+             'follow this rule; a place, an object or a landscape without people stays without people. Write what is '
+             'visible ("seen from behind"), never "no faces".',
+     'suffix': 'people seen from behind, faces turned away from the viewer', 'people': True},
 )
+# istemde insan var mi (people'li son ek icin; yanlis pozitif yalnizca son eki ekler)
+PEOPLE_WORDS = re.compile(
+    r'\b(?:man|men|woman|women|person|persons|people|figure|figures|silhouett\w*|child|children|boy|boys|girl|girls|'
+    r'kid|kids|baby|crowd|crowds|gentleman|gentlemen|lady|ladies|someone|narrator|he|she|him|his|her|hers|himself|'
+    r'herself|couple|soldier\w*|officer\w*|guard\w*|stranger\w*|passer\w*|traveller\w*|traveler\w*|worker\w*|'
+    r'spectator\w*|onlooker\w*|villager\w*|servant\w*|driver\w*|mourner\w*|pallbearer\w*|pedestrian\w*|youth|'
+    r'teen\w*|elderly|adult\w*|family|families|audience|group of)\b', re.I)
 NO_CAST = ('no-people', 'landscape')   # bu seceneklerle karakter kimligi anlamsiz
 # sahne basina hedef karakter (Turkce sayfa ~2000): cok seyrek ~25 sayfa, seyrek ~10, az ~4, orta ~1,5, cok ~yarim-bir
 # sayfa. Az ve daha seyrekte dil modeli sahne degisimlerini degil onemli anlari secer (focused); bir parcadan seyrek
@@ -234,10 +246,16 @@ def image_style(plan, style):
     return ' '.join(part for part in (trigger, _clean(style)) if part)
 
 
-def image_suffix(plan, base=SUFFIX, modifiers=True):
-    """Gorsel isteminin son eki: LoRA ve seceneklerin olumlu ifadeleri + sabit son ek (portrede secenekler yok)."""
+def shows_people(prompt):
+    return bool(PEOPLE_WORDS.search(str(prompt or '')))
+
+
+def image_suffix(plan, base=SUFFIX, modifiers=True, prompt=None):
+    """Gorsel isteminin son eki: LoRA ve seceneklerin olumlu ifadeleri + sabit son ek (portrede secenekler yok).
+    `prompt` verilirse insanla ilgili secenek ekleri ('people') yalnizca istemde insan varsa eklenir (F213)."""
     parts = [_clean((plan.get('lora') or {}).get('suffix'))]
-    parts += [m['suffix'] for m in MODIFIERS if modifiers and m['id'] in (plan.get('modifiers') or ())]
+    parts += [m['suffix'] for m in MODIFIERS if modifiers and m['id'] in (plan.get('modifiers') or ())
+              and not (m.get('people') and prompt is not None and not shows_people(prompt))]
     return ', '.join(part for part in parts + [base] if part)
 
 
@@ -567,7 +585,7 @@ def opening_prompt(style, characters, sentences, note='', identity=False, modifi
 def parse_opening(raw, style=''):
     """Acilis gorseli {title, prompt[, cast, place]}; hikaye disi sayfa ya da istemsiz yanit None."""
     data = _json_object(raw) or {}
-    prompt = strip_style(_clean(data.get('prompt')), style)
+    prompt = strip_negations(strip_style(_clean(data.get('prompt')), style))
     if data.get('skip') is True or not prompt:
         return None
     entry = {'title': _clean(data.get('title'))[:80], 'prompt': prompt[:1200]}
@@ -576,6 +594,15 @@ def parse_opening(raw, style=''):
     if _clean(data.get('place')):
         entry['place'] = _clean(data['place'])[:60]
     return entry
+
+
+def strip_negations(prompt):
+    """Talimata ragmen yazilan yalin olumsuz cumleler ("No faces are shown.") atilir: olumsuz istem calismayan
+    turbo modelde tersine o seyi ciziyor (F213). Devami olan cumle ("No stars, only blackness.") kalir."""
+    sentences = re.split(r'(?<=[.!?])\s+', prompt)
+    kept = [s for s in sentences if not (re.match(r'(?:no|there (?:is|are) no)\b', s, re.I)
+                                          and not re.search(r',|;|\b(?:only|but|just|except)\b', s, re.I))]
+    return ' '.join(kept) if kept else prompt
 
 
 def strip_style(prompt, style):
@@ -603,7 +630,7 @@ def parse_scenes(raw, start, stop, sentences, style='', first=True):
             index = int(str(item.get('start')).strip())
         except (TypeError, ValueError):
             continue
-        prompt = strip_style(_clean(item.get('prompt')), style)
+        prompt = strip_negations(strip_style(_clean(item.get('prompt')), style))
         if not (start <= index < stop) or not prompt or index in found:
             continue
         found[index] = {'start': index, 'title': _clean(item.get('title'))[:80] or _clean(sentences[index])[:40],
@@ -736,16 +763,20 @@ def portrait_prompt(character):
             f'Plain flat mid-grey studio backdrop with nothing else behind, soft even studio light.')
 
 
-def identity_prompt(scene, people, style):
+def identity_prompt(scene, people, style, faces=True):
     """Kimlik is akisinin istemi (talimat bicimi: LoRA "bu kisiyi ... ciz" diye egitildi). Stil sona eklenir;
-    kimlik is akisinda PRE/POST dugumu yoktur (son ek comfy_client.fill'de '. ' ile eklenir)."""
+    kimlik is akisinda PRE/POST dugumu yoktur (son ek comfy_client.fill'de '. ' ile eklenir). `faces` kapali
+    ("Yuz gosterme", F213): yuz kimligi istenmez (portredeki one bakan yuzu sahneye tasiyordu), sac, beden ve giysi."""
     who = ('this person' if len(people) == 1 else 'these people')
     looks = [_sentence(person_look(c)) for c in people]
     names = ' and '.join(f'the person from reference {n + 1} ({look})' for n, look in enumerate(looks)) \
         if len(people) > 1 else looks[0]
-    return (f'Create an illustration of {who}: {names}. {_sentence(scene["prompt"])}. Preserve the exact facial '
-            f'identity of the reference portrait, but not its pose, framing or background: the pose, gaze and '
-            f'expression follow the scene. Style: {_sentence(style)}')
+    keep = ('the exact facial identity of the reference portrait' if faces else
+            'the hair, build and clothing of the reference portrait')
+    turn = 'the pose, gaze and expression follow the scene' if faces else \
+        'the pose follows the scene and the face is turned away from the viewer'
+    return (f'Create an illustration of {who}: {names}. {_sentence(scene["prompt"])}. Preserve {keep}, but not '
+            f'its pose, framing or background: {turn}. Style: {_sentence(style)}')
 
 
 def scene_people(scene, characters):

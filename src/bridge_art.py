@@ -590,13 +590,16 @@ class ArtMixin:
                             people = people[:len(comfy_client.references(identity_workflow))]
                         text = dict(scene, prompt=book_art.scene_text(current, scene))   # F209 mekanin tarifiyle
                         if people:
+                            faces_shown = 'no-faces' not in (current.get('modifiers') or ())
                             filled = comfy_client.fill(identity_workflow, book_art.image_style(
-                                                           current, book_art.identity_prompt(text, people, current['style'])),
+                                                           current, book_art.identity_prompt(text, people, current['style'],
+                                                                                             faces_shown)),
                                                        '', book_art.image_suffix(current), scene['seed'], size, prefix,
                                                        images=[upload(c) for c in people])
-                        else:
+                        else:   # insanla ilgili son ek yalnizca istemde insan varsa (F213)
                             filled = comfy_client.fill(workflow, text['prompt'], book_art.image_style(current, current['style']),
-                                                       book_art.image_suffix(current), scene['seed'], size, prefix)
+                                                       book_art.image_suffix(current, prompt=text['prompt']),
+                                                       scene['seed'], size, prefix)
                         data = comfy_client.generate(url, filled, cancel)
                         if factor:
                             self._emit('art', {'book': book, 'title': title, 'stage': 'generate', 'done': done,

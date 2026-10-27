@@ -2,6 +2,14 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.37.3 — 2026-10-27
+
+### Düzeltilen
+- **"Yüz gösterme" insansız sahnelere siluet ekliyordu (F213):** Seçeneğin "arkadan ya da siluet olarak görülen figürler" eki her görsel istemine gidiyordu; görsel modeli boş odaya, masaya, manzaraya da arkası dönük biri ekliyordu. Dil modeli de kuralı her sahneye bir kişi koymak gibi anlıyordu. Ek artık yalnızca istemde insan geçen sahnelere gidiyor; kural yalnızca metnin sahneye koyduğu kişiler için ve figür eklenmemesini açıkça söylüyor. Gerçek dil modeliyle (Qwen 3.6, Gemma 4) denendi: insansız sahneler figürsüz kalıyor. Var olan planlarda görselleri yeniden üretmek yetiyor; sahne istemleri için planı yeniden çıkarmak gerekir.
+- Karakter kimliği "Yüz gösterme" ile birlikteyken portrenin yüzü değil saçı, yapısı ve giysisi korunuyor (öne bakan yüz sahneye taşınıyordu).
+- Dil modelinin talimata rağmen yazdığı yalın olumsuz cümleler ("No faces are shown.") istemden atılıyor; olumsuz istem çalışmayan modelde tersine o şeyi çizdiriyordu.
+- ComfyUI: iş akışında önizleme düğümü varsa onun geçici çıktısı yerine kaydedilen görsel alınıyor; stil ile istem birleşirken nokta ikilenmiyor.
+
 ## 2.37.2 — 2026-10-27
 
 ### Düzeltilen

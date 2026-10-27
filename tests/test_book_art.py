@@ -51,6 +51,7 @@ class FakeComfy:
     def __init__(self, fail=None):
         self.prompts, self.calls, self.fail, self.uploads, self.loras = [], [], fail, [], []
         self.rtx = False   # F209 RTX Video Super Resolution dugumu kurulu mu
+        self.preview = False   # F213 is akisinda once gelen PreviewImage ciktisi
         owner = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -73,9 +74,12 @@ class FakeComfy:
                     if owner.fail == 'run':
                         return self._send(200, {pid: {'status': {'status_str': 'error', 'completed': False, 'messages': [
                             ['execution_error', {'exception_message': 'CUDA out of memory'}]]}, 'outputs': {}}})
+                    outputs = {'33': {'images': [{'filename': 'a.png', 'subfolder': 'Aktar', 'type': 'output'}]}}
+                    if owner.preview:
+                        outputs = {'40': {'images': [{'filename': 'onizleme.png', 'subfolder': '', 'type': 'temp'}]},
+                                   **outputs}
                     return self._send(200, {pid: {'status': {'status_str': 'success', 'completed': True},
-                                                  'outputs': {'33': {'images': [{'filename': 'a.png', 'subfolder': 'Aktar',
-                                                                                 'type': 'output'}]}}}})
+                                                  'outputs': outputs}})
                 if self.path.startswith('/view?'):
                     return self._send(200, PNG, raw=True)
                 if self.path == '/object_info/RTXVideoSuperResolution':
@@ -136,6 +140,9 @@ class WorkflowTest(unittest.TestCase):
                  '9': {'inputs': {'filename_prefix': 'x'}, 'class_type': 'SaveImage'}}
         filled = comfy_client.fill(plain, 'scene', 'style', 'suffix')
         self.assertEqual(filled['6']['inputs']['text'], 'style. scene. suffix')
+        # F213: noktayla biten stil ve istem birlesirken nokta ikilenmez
+        filled = comfy_client.fill(plain, 'A desk by a window.', 'Ink drawing, sepia.', 'no text')
+        self.assertEqual(filled['6']['inputs']['text'], 'Ink drawing, sepia. A desk by a window. no text')
 
     def test_ui_format_rejected(self):
         with self.assertRaisesRegex(comfy_client.ComfyError, 'API'):
@@ -210,6 +217,17 @@ class ServerTest(unittest.TestCase):
         filled = comfy_client.fill(WORKFLOW, 'scene', 'style')
         self.assertEqual(comfy_client.generate(fake.url, filled), PNG)
         self.assertEqual(fake.prompts[0]['97']['inputs']['positive'], 'scene')
+
+    def test_generate_prefers_saved_image(self):
+        """F213: PreviewImage'in gecici ciktisi once gelse de SaveImage'inki alinir."""
+        fake = FakeComfy()
+        self.addCleanup(fake.close)
+        fake.preview = True
+        comfy_client.generate(fake.url, comfy_client.fill(WORKFLOW, 'scene'))
+        view = [path for method, path in fake.calls if path.startswith('/view?')]
+        self.assertEqual(len(view), 1)
+        self.assertIn('filename=a.png', view[0])
+        self.assertIn('type=output', view[0])
 
     def test_errors_are_readable(self):
         fake = FakeComfy(fail='queue')
@@ -379,6 +397,29 @@ class PlanTest(unittest.TestCase):
         result = book_art.plan_book(book(60), ask, plan)
         self.assertTrue(all('Hard rule: No people' in p and 'Hard rule: Every image is a wide' in p for p in prompts))
         self.assertEqual(result['characters'], [])   # karakter olmasin: tarif tutulmaz
+
+    def test_no_faces_only_for_people(self):
+        """F213: "Yuz gosterme" insansiz sahneye figur ekletmez: son ek yalnizca istemde insan varsa, kural dil
+        modeline figur eklememesini soyler, yalin olumsuz cumle ("No faces are shown.") atilir."""
+        plan = book_art.new_plan('', 'watercolor', modifiers=['no-faces'])
+        face = 'people seen from behind'
+        self.assertNotIn(face, book_art.image_suffix(plan, prompt='An empty study with a heavy oak desk.'))
+        self.assertIn(face, book_art.image_suffix(plan, prompt='A man in a grey coat reads a letter.'))
+        self.assertIn(face, book_art.image_suffix(plan, prompt='The crowd surges toward the barrier.'))
+        self.assertIn(face, book_art.image_suffix(plan))   # istem verilmezse eskisi gibi
+        self.assertIn('Never add a person', book_art.note_text('', ['no-faces']))
+        self.assertEqual(book_art.strip_negations('A dark room. No faces are shown. Rain on the glass.'),
+                         'A dark room. Rain on the glass.')
+        kept = 'A void. No stars are visible, only blackness.'
+        self.assertEqual(book_art.strip_negations(kept), kept)
+        self.assertEqual(book_art.strip_negations('No people.'), 'No people.')   # istemin tamami atilmaz
+        raw = json.dumps({'scenes': [{'start': 0, 'title': 't', 'prompt': 'A desk by a window. No faces are shown.'}]})
+        self.assertEqual(book_art.parse_scenes(raw, 0, 2, ['a', 'b'])[0][0]['prompt'], 'A desk by a window.')
+        character = {'name': 'A', 'look': 'Man in his forties, grey coat'}
+        hidden = book_art.identity_prompt({'prompt': 'He walks away.'}, [character], 'Ink.', faces=False)
+        self.assertIn('hair, build and clothing', hidden)
+        self.assertNotIn('facial identity', hidden)
+        self.assertIn('facial identity', book_art.identity_prompt({'prompt': 'He walks away.'}, [character], 'Ink.'))
 
     def test_scene_keeps_reader_section_number(self):
         # bos bolumler (kapak, gorsel sayfasi) okuyucuda sayilir ama plana gelmez: sahne okuyucunun numarasini almali
@@ -917,7 +958,8 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(sent['aktar-lora-0-0']['inputs']['lora_name'], 'Krea2/' + file)
         self.assertEqual(sent['aktar-lora-0-0']['inputs']['strength_model'], 0.75)
         self.assertEqual(sent['96']['inputs']['positive'], 'DCC0LFUT. Matte painting.')
-        self.assertEqual(sent['98']['inputs']['positive'], 'figures seen from behind or in silhouette, ' + book_art.SUFFIX)
+        # F213: insansiz sahneye "arkadan gorulen kisiler" son eki gitmez (gorsel modeli siluet ekliyordu)
+        self.assertEqual(sent['98']['inputs']['positive'], book_art.SUFFIX)
 
     def test_old_plan_renumbered_on_read(self):
         from unittest.mock import patch

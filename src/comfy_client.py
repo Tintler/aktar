@@ -198,8 +198,8 @@ def fill(workflow, prompt, style='', suffix='', seed=None, size=None, prefix='Ak
         node = found[key]
         if node is not None:
             node['inputs'][_text_key(node)] = value
-        elif value:
-            text = f'{value}. {text}' if before else f'{text}. {value}'
+        elif value:   # cumle sonu noktasi ikilenmesin ("stil.. sahne")
+            text = (f'{value.rstrip(" .")}. {text}' if before else f'{text.rstrip(" .")}. {value}') if text else value
     found['positive']['inputs'][_text_key(found['positive'])] = text
     if seed is not None and found['sampler'] is not None:
         inputs = found['sampler']['inputs']
@@ -359,7 +359,8 @@ def generate(url, workflow, cancel=None, timeout=TIMEOUT):
             images = [image for output in entry['outputs'].values() for image in (output or {}).get('images') or ()]
             if not images:
                 raise ComfyError('ComfyUI görsel çıktısı vermedi (SaveImage düğümü bağlı mı?).')
-            image = images[0]
+            # is akisinda PreviewImage varsa onun gecici ('temp') ciktisi once gelebilir: SaveImage'inki ('output') alinir
+            image = next((item for item in images if item.get('type') == 'output'), images[0])
             query = urllib.parse.urlencode({key: image.get(key, '') for key in ('filename', 'subfolder', 'type')})
             return _request(url, '/view?' + query, timeout=60)
         if time.monotonic() > deadline:
