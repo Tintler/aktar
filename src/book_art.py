@@ -108,6 +108,26 @@ LORA_KEYS = ('lora', 'strength', 'trigger', 'suffix', 'label')
 
 # Hazir tarzdan bagimsiz secenekler (F202, birlikte secilebilir): 'rule' her iki dil modeli istemine kesin kural
 # olarak girer, 'suffix' gorsel isteminin sonuna (turbo modelde olumsuz istem yok: olumlu ifade).
+# Orta bos (F217): Krea ne istemle ortayi bos birakiyor ne de maskeyle iki ayri kompozisyon kuruyordu (maske tek
+# resmin ortasini sansur gibi kesiyordu). Ust ve alt kenar iki ayri genis seritte uretilir (band_prompts, band_size),
+# band_compose ikisini ortaya dogru `tone` rengine soldurarak birlestirir.
+BAND_RULE = ('Every image is shown with the text read over its middle, so it is made of TWO separate pictures of '
+             'the same moment: write the prompt as "Top: ... Bottom: ...". "Top:" is a wide strip shown along the '
+             'top edge (what is above or in the distance: sky, ceiling, branches, rooftops, hanging objects, a '
+             'distant view); "Bottom:" is a wide strip along the bottom edge (ground level: floor, figures, objects, '
+             'water). Each is a complete composition on its own; together they evoke the scene. The middle of the '
+             'screen stays plain {tone} and needs no description.')
+BAND_SUFFIX = 'wide panoramic strip composition'
+BAND_TOP = 'upper part of the scene, overhead and distant details'
+BAND_BOTTOM = 'lower part of the scene, ground level'
+BAND_HEIGHT = 0.42   # bir seridin ekran yuksekligine orani (gecis payi dahil)
+BAND_SOLID = 0.3     # seridin tam gorunen payi; kalani ortaya dogru `tone` rengine solar
+BAND_ASPECT = 3.5    # serit bu orandan daha genis uretilmez (asiri genis gorselde Krea bozuluyor), sonra kirpilir
+BAND_TONES = {'black': (8, 8, 10), 'white': (240, 240, 236)}
+BAND_LABELS = re.compile(r'\bTop\s*:\s*(?P<top>.*?)\s*\bBottom\s*:\s*(?P<bottom>.*)', re.I | re.S)
+# "The middle is an empty gradient ..." gibi orta cumlesi seritlere gitmez (seritte bos bant cizdiriyordu)
+BAND_MIDDLE = re.compile(r'\b(?:middle|center|centre)\b.*\b(?:empty|void|gradient|plain|blank|fades?|fading|'
+                         r'dissolves?|negative space)\b', re.I)
 MODIFIERS = (
     {'id': 'no-people', 'label': 'Karakter olmasın',
      'rule': 'No people or creatures are visible in any image: show the places, objects, traces and atmosphere of the '
@@ -128,6 +148,12 @@ MODIFIERS = (
              'person in close-up or from the chest up, never have anyone look toward the camera and never describe a '
              'facial expression. Write what is visible ("seen from behind"), never "no faces".',
      'suffix': 'back view, every face turned away from the viewer', 'people': True},
+    # F217 yazi bandi: okuyucu yaziyi ortada gosterir; kompozisyon ust ve alt kenarda, orta bos bir gecis. Ayni
+    # 'group'tan yalnizca biri secilir (clean_modifiers ilkini tutar)
+    {'id': 'band-dark', 'label': 'Orta boş (koyu)', 'group': 'band',
+     'rule': BAND_RULE.format(tone='black'), 'suffix': BAND_SUFFIX, 'band': 'black'},
+    {'id': 'band-light', 'label': 'Orta boş (açık)', 'group': 'band',
+     'rule': BAND_RULE.format(tone='white'), 'suffix': BAND_SUFFIX, 'band': 'white'},
 )
 # "Yuz gosterme" (F215): kameraya bakis "seen from behind" olur; yakin cekim / yuz / ifade anlatan yan cumle atilir.
 # Kisiyi tarif eden "a man with a weary face" yuz gosterimi sayilmaz (yan cumleyle tarifi de atiliyordu)
@@ -293,8 +319,14 @@ def note_text(note, modifiers=()):
 
 
 def clean_modifiers(value):
-    known = [m['id'] for m in MODIFIERS]
-    return [key for key in known if key in (value if isinstance(value, (list, tuple)) else ())]
+    value = value if isinstance(value, (list, tuple)) else ()
+    chosen, groups = [], set()
+    for entry in MODIFIERS:
+        group = entry.get('group')
+        if entry['id'] in value and not (group and group in groups):
+            chosen.append(entry['id'])
+            groups.add(group)
+    return chosen
 
 
 def preset_lora(preset):
@@ -307,6 +339,62 @@ def image_style(plan, style):
     """Gorsel isteminin oneki: LoRA'nin tetik kelimesi en basta, sonra stil."""
     trigger = _clean((plan.get('lora') or {}).get('trigger'))
     return ' '.join(part for part in (trigger, _clean(style)) if part)
+
+
+def band_tone(plan):
+    """Orta bos secenegi aciksa ortanin tonu ('black' / 'white'), yoksa None."""
+    return next((m['band'] for m in MODIFIERS if m.get('band') and m['id'] in (plan.get('modifiers') or ())), None)
+
+
+def band_prompts(prompt):
+    """Orta bos isteminin (ust, alt) seritleri: "Top: ... Bottom: ..." ayrilir, orta cumlesi atilir. Etiketsiz
+    (eski) istemde iki serit de ayni istemi alir (BAND_TOP / BAND_BOTTOM ekleri ayirir)."""
+    prompt = _clean(prompt)
+    match = BAND_LABELS.search(prompt)
+    parts = (match['top'], match['bottom']) if match else (prompt, prompt)
+    parts = [' '.join(s for s in re.split(r'(?<=[.!?])\s+', part) if not BAND_MIDDLE.search(s)).strip()
+             for part in parts]
+    return tuple(part or prompt for part in parts)
+
+
+def band_size(size):
+    """Bir seridin uretim boyutu: genislik ayni, yukseklik seridin payi ama en az genislik / BAND_ASPECT (16'nin
+    kati); fazlasi band_compose'da kirpilir."""
+    width, height = int(size[0]), int(size[1])
+    strip = max(round(height * BAND_HEIGHT), round(width / BAND_ASPECT))
+    return width, -(-strip // 16) * 16
+
+
+def band_compose(top, bottom, size, tone):
+    """Iki seridi (PNG/JPEG baytlari) `size` boyutunda `tone` zeminli tek gorselde birlestirir: ust serit en uste,
+    alt serit en alta; her biri BAND_SOLID payindan sonra ortaya dogru yumusakca zemine solar. PNG doner."""
+    from io import BytesIO
+    from PIL import Image
+    width, height = int(size[0]), int(size[1])
+    strip = round(height * BAND_HEIGHT)
+    solid = round(strip * BAND_SOLID)
+    alpha = []
+    for y in range(strip):
+        t = min(1.0, max(0.0, (strip - 1 - y) / max(1, strip - 1 - solid)))
+        alpha.append(round(255 * t * t * (3 - 2 * t)))
+    fade = Image.new('L', (1, strip))
+    fade.putdata(alpha)
+    fade = fade.resize((width, strip))
+    canvas = Image.new('RGB', (width, height), BAND_TONES[tone])
+    for data, at_top in ((top, True), (bottom, False)):
+        image = Image.open(BytesIO(data)).convert('RGB')
+        scale = max(width / image.width, strip / image.height)
+        image = image.resize((max(width, round(image.width * scale)), max(strip, round(image.height * scale))),
+                             Image.LANCZOS)
+        left, upper = (image.width - width) // 2, (image.height - strip) // 2
+        image = image.crop((left, upper, left + width, upper + strip))
+        if at_top:
+            canvas.paste(image, (0, 0), fade)
+        else:
+            canvas.paste(image, (0, height - strip), fade.transpose(Image.FLIP_TOP_BOTTOM))
+    buffer = BytesIO()
+    canvas.save(buffer, 'PNG')
+    return buffer.getvalue()
 
 
 def shows_people(prompt):

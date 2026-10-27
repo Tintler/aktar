@@ -221,7 +221,11 @@
   }
 
   function toggleModifier(id) {
-    modifiers = modifiers.includes(id) ? modifiers.filter((m) => m !== id) : [...modifiers, id];
+    if (modifiers.includes(id)) { modifiers = modifiers.filter((m) => m !== id); return; }
+    // ayni gruptan (orta bos koyu/acik) yalnizca biri
+    const group = options?.modifiers?.find((m) => m.id === id)?.group;
+    const rivals = group ? options.modifiers.filter((m) => m.group === group).map((m) => m.id) : [];
+    modifiers = [...modifiers.filter((m) => !rivals.includes(m)), id];
   }
 
   async function saveLoraStrength() {
@@ -405,7 +409,7 @@
           {#each options?.modifiers ?? [] as entry (entry.id)}
             <button class="chip" class:on={modifiers.includes(entry.id)} title={entry.rule} onclick={() => toggleModifier(entry.id)}>{entry.label}</button>
           {/each}
-          <span class="dim">Tarzdan bağımsız, birlikte seçilebilir.</span>
+          <span class="dim">Tarzdan bağımsız, birlikte seçilebilir (orta boş koyu ya da açık, biri). Orta boş: üst ve alt kenar iki ayrı görsel olarak üretilir (sahne başına iki görsel), ortası yazı için düz geçiş.</span>
         </div>
         <div class="row">
           <span class="dim">Sıklık</span>

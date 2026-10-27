@@ -51,6 +51,7 @@ class FakeComfy:
     def __init__(self, fail=None):
         self.prompts, self.calls, self.fail, self.uploads, self.loras = [], [], fail, [], []
         self.rtx = False   # F209 RTX Video Super Resolution dugumu kurulu mu
+        self.image = PNG   # /view'in verdigi gorsel (F217 birlestirme gercek PNG ister)
         self.preview = False   # F213 is akisinda once gelen PreviewImage ciktisi
         owner = self
 
@@ -81,7 +82,7 @@ class FakeComfy:
                     return self._send(200, {pid: {'status': {'status_str': 'success', 'completed': True},
                                                   'outputs': outputs}})
                 if self.path.startswith('/view?'):
-                    return self._send(200, PNG, raw=True)
+                    return self._send(200, owner.image, raw=True)
                 if self.path == '/object_info/RTXVideoSuperResolution':
                     return self._send(200, {'RTXVideoSuperResolution': {'input': {}}} if owner.rtx else {})
                 if self.path == '/object_info/LoraLoaderModelOnly':
@@ -192,6 +193,34 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(filled['11']['inputs']['model'], ['8', 0])
         with self.assertRaisesRegex(comfy_client.ComfyError, 'model yükleyici'):
             comfy_client.add_loras(WORKFLOW, [('a.safetensors', 1)])
+
+    def test_band_prompts_and_compose(self):
+        """F217: "Top: ... Bottom: ..." iki seride ayrilir, orta cumlesi atilir; seritler gecisle birlestirilir."""
+        from io import BytesIO
+        from PIL import Image
+        top, bottom = book_art.band_prompts(
+            'Top: Rusted pipes hang from a low ceiling. Bottom: Four people argue on a metal deck. In the center of '
+            'the deck a lamp burns. The middle is an empty smooth gradient fading to black.')
+        self.assertEqual(top, 'Rusted pipes hang from a low ceiling.')
+        self.assertEqual(bottom, 'Four people argue on a metal deck. In the center of the deck a lamp burns.')
+        self.assertEqual(book_art.band_prompts('A mine shaft.'), ('A mine shaft.', 'A mine shaft.'))
+        self.assertEqual(book_art.band_size((1344, 768)), (1344, 384))
+        self.assertEqual(book_art.band_size((100, 1000)), (100, 432))
+
+        def png(color):
+            buffer = BytesIO()
+            Image.new('RGB', (120, 40), color).save(buffer, 'PNG')
+            return buffer.getvalue()
+        image = Image.open(BytesIO(book_art.band_compose(png((255, 0, 0)), png((0, 0, 255)), (60, 100), 'white')))
+        self.assertEqual(image.size, (60, 100))
+        self.assertEqual(image.getpixel((30, 0)), (255, 0, 0))     # ust serit
+        self.assertEqual(image.getpixel((30, 99)), (0, 0, 255))    # alt serit
+        self.assertEqual(image.getpixel((30, 50)), book_art.BAND_TONES['white'])   # orta zemin
+        red = [image.getpixel((30, y))[1] for y in range(0, 40)]
+        self.assertEqual(red, sorted(red))   # ortaya dogru zemine solar
+        self.assertTrue(0 < image.getpixel((30, 30))[1] < 236)
+        self.assertEqual(book_art.band_tone({'modifiers': ['no-faces', 'band-light']}), 'white')
+        self.assertIsNone(book_art.band_tone({'modifiers': ['no-faces']}))
 
     def test_resolve_lora(self):
         names = ['Krea2\\DarkFanKrea2_c1-st3000.safetensors', 'other.safetensors', 'YFG-Fwshn-Krea2_1.8k-v2 (1).safetensors']
@@ -379,6 +408,10 @@ class PlanTest(unittest.TestCase):
         self.assertTrue(book_art.image_suffix(plan).startswith('uninhabited, deserted scene, wide establishing shot'))
         self.assertTrue(book_art.image_suffix(plan).endswith(book_art.SUFFIX))
         self.assertEqual(book_art.image_suffix(plan, book_art.PORTRAIT_SUFFIX, False), book_art.PORTRAIT_SUFFIX)
+        band = book_art.new_plan('', 'watercolor', modifiers=['band-light', 'band-dark', 'no-faces'])
+        self.assertEqual(band['modifiers'], ['no-faces', 'band-dark'])   # gruptan yalnizca biri
+        self.assertIn('wide panoramic strip', book_art.image_suffix(band))
+        self.assertIn('stays plain white', book_art.note_text('', ['band-light']))
         plain = book_art.new_plan('', 'watercolor', identity=True, modifiers=['no-faces'])
         self.assertTrue(plain['identity'])
         self.assertEqual((plain['lora'], book_art.image_style(plain, 'Style.')), (None, 'Style.'))
@@ -1117,6 +1150,33 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(self.fake.prompts[0]['97']['inputs']['positive'], 'An empty mine shaft. Setting: rusty shaft.')
         cleared = self.bridge.art_scene_update('ab12cd34ef', '1-9', {'place': ''})['plan']['scenes'][1]
         self.assertNotIn('place', cleared)
+
+    def test_band_two_strips(self):
+        """F217: orta bos secenegi her sahneyi iki seritte (ust, alt) uretir, gecisle tek gorselde birlestirir."""
+        from io import BytesIO
+        from PIL import Image
+        buffer = BytesIO()
+        Image.new('RGB', (1344, 384), (200, 30, 30)).save(buffer, 'PNG')
+        self.fake.image = buffer.getvalue()
+        store = self.identity_plan(identity=False)
+        store.update('ab12cd34ef', lambda p: p.update(modifiers=['band-dark']))
+        self.bridge.art_scene_update('ab12cd34ef', '1-9', {
+            'prompt': 'Top: Rusted pipes overhead. Bottom: A flooded mine floor. The middle is an empty gradient.'})
+        self.assertTrue(self.bridge.art_generate('ab12cd34ef', ['1-9'])['started'])
+        self.finish()
+        top, bottom = self.fake.prompts
+        self.assertEqual((top['97']['inputs']['positive'], bottom['97']['inputs']['positive']),
+                         ('Rusted pipes overhead.', 'A flooded mine floor.'))
+        self.assertTrue(top['98']['inputs']['positive'].startswith(book_art.BAND_TOP + ', wide panoramic strip'))
+        self.assertTrue(bottom['98']['inputs']['positive'].startswith(book_art.BAND_BOTTOM))
+        self.assertEqual((top['106:10']['inputs']['width'], top['106:10']['inputs']['height']), (1344, 384))
+        self.assertEqual((top['2']['inputs']['seed'], bottom['2']['inputs']['seed']), (6, 7))
+        self.assertTrue(top['33']['inputs']['filename_prefix'].endswith('1-9-ust'))
+        scene = store.scene(store.load('ab12cd34ef'), '1-9')
+        image = Image.open(store.image_path('ab12cd34ef', scene))
+        self.assertEqual(image.size, (1344, 768))
+        self.assertEqual(image.getpixel((600, 5)), (200, 30, 30))
+        self.assertEqual(image.getpixel((600, 384)), book_art.BAND_TONES['black'])
 
     def test_one_failed_image_does_not_stop_queue(self):
         """F214: tek gorselin hatasi kalanlari durdurmaz; hata sahnede kalir, yeniden uretilince silinir."""

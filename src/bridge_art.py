@@ -585,30 +585,45 @@ class ArtMixin:
                                                 upscaled=factor)
                     return {'scene': next(s for s in self._art_view(book, updated)['scenes'] if s['id'] == scene_id)}
                 prefix = f'Aktar/{book[:12]}/{scene_id}'
-                people = []
-                if identity_workflow is not None and current.get('identity'):
-                    people = [c for c in book_art.scene_people(scene, current['characters'])
-                              if (store.portrait_path(book, c) or Path()).is_file()]
-                    people = people[:len(comfy_client.references(identity_workflow))]
-                text = dict(scene, prompt=book_art.scene_text(current, scene))   # F209 mekanin tarifiyle
-                if people:
-                    faces_shown = 'no-faces' not in (current.get('modifiers') or ())
-                    filled = comfy_client.fill(identity_workflow, book_art.image_style(
-                                                   current, book_art.identity_prompt(text, people, current['style'],
-                                                                                     faces_shown)),
-                                               '', book_art.image_suffix(current), scene['seed'], size, prefix,
-                                               images=[upload(c) for c in people])
-                else:   # insanla ilgili son ek yalnizca istemde insan varsa (F213)
-                    filled = comfy_client.fill(workflow, text['prompt'], book_art.image_style(current, current['style']),
-                                               book_art.image_suffix(current, prompt=text['prompt']),
-                                               scene['seed'], size, prefix)
-                data = comfy_client.generate(url, filled, cancel)
+                tone = book_art.band_tone(current)
+                if tone:   # F217 ust ve alt kenar iki ayri kompozisyon, ortasi gecisle birlestirilir
+                    top, bottom = book_art.band_prompts(scene['prompt'])
+                    strip = book_art.band_size(size)
+                    data = book_art.band_compose(
+                        picture(current, dict(scene, prompt=top), scene['seed'], strip, prefix + '-ust',
+                                book_art.BAND_TOP),
+                        picture(current, dict(scene, prompt=bottom), scene['seed'] + 1, strip, prefix + '-alt',
+                                book_art.BAND_BOTTOM), size, tone)
+                else:
+                    data = picture(current, scene, scene['seed'], size, prefix)
                 if factor:
                     self._emit('art', {'book': book, 'title': title, 'stage': 'generate', 'done': state['done'],
                                        'total': total, 'current': f'{scene["title"]} · büyütülüyor'})
                     data = enlarge(scene_id, data, 0)
                 updated = store.write_image(book, scene_id, data, upscaled=factor)
                 return {'scene': next(s for s in self._art_view(book, updated)['scenes'] if s['id'] == scene_id)}
+
+            def picture(current, scene, seed, image_size, prefix, extra=''):
+                """Sahnenin (orta bosta: bir seridin) tek gorseli; karakterli sahne kimlik is akisiyla."""
+                people = []
+                if identity_workflow is not None and current.get('identity'):
+                    people = [c for c in book_art.scene_people(scene, current['characters'])
+                              if (store.portrait_path(book, c) or Path()).is_file()]
+                    people = people[:len(comfy_client.references(identity_workflow))]
+                text = dict(scene, prompt=book_art.scene_text(current, scene))   # F209 mekanin tarifiyle
+                suffix = ', '.join(part for part in (extra, book_art.image_suffix(
+                    current, prompt=None if people else text['prompt'])) if part)
+                if people:
+                    faces_shown = 'no-faces' not in (current.get('modifiers') or ())
+                    filled = comfy_client.fill(identity_workflow, book_art.image_style(
+                                                   current, book_art.identity_prompt(text, people, current['style'],
+                                                                                     faces_shown)),
+                                               '', suffix, seed, image_size, prefix,
+                                               images=[upload(c) for c in people])
+                else:   # insanla ilgili son ek yalnizca istemde insan varsa (F213)
+                    filled = comfy_client.fill(workflow, text['prompt'], book_art.image_style(current, current['style']),
+                                               suffix, seed, image_size, prefix)
+                return comfy_client.generate(url, filled, cancel)
 
             def failed_scene(scene_id, message):
                 """Uretilemeyen sahne isaretlenir (kartta hata; 'Eksikleri uret' yeniden dener)."""

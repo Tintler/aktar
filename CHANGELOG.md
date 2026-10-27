@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.38.0 — 2026-10-27
+
+### Eklenen
+- **Kitap görsellerinde "Orta boş" seçeneği (F217):** Yeni planda "Orta boş (koyu)" ya da "Orta boş (açık)" seçilince görselin ortası yazı için boş kalır. Krea ortayı istemle boş bırakmadığı için her sahne iki ayrı geniş şeritte üretilir: dil modeli aynı an için iki kompozisyon yazar ("Top:" üstte görünen gökyüzü, tavan, uzak manzara; "Bottom:" zemin, figürler, nesneler), Aktar ikisini ayrı ayrı üretip üst ve alt kenara yerleştirir, her birini ortaya doğru siyaha ya da beyaza yumuşakça soldurur. Sahne başına iki görsel üretildiği için süre uzar. Eski istemler ("Top:/Bottom:" yoksa) iki şeride de aynı istemle, üst/alt ekiyle gider. İki seçenekten yalnızca biri seçilebilir.
+
 ## 2.37.5 — 2026-10-27
 
 ### Düzeltilen
