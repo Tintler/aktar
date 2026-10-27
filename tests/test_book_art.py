@@ -431,6 +431,26 @@ class PlanTest(unittest.TestCase):
         self.assertTrue(all('Hard rule: No people' in p and 'Hard rule: Every image is a wide' in p for p in prompts))
         self.assertEqual(result['characters'], [])   # karakter olmasin: tarif tutulmaz
 
+    def test_extra_loras(self):
+        """F218: ek LoRA tarzdan bagimsiz plana kopyalanir; tetigi tarzinkinden sonra, son eki yalnizca insanli
+        istemde, portrede (extras=False / modifiers=False) hic yok."""
+        ids = [p['id'] for p in book_art.PRESETS] + [e['id'] for e in book_art.EXTRA_LORAS]
+        self.assertEqual(len(ids), len(set(ids)))
+        plan = book_art.new_plan('', 'retro-anime', options={'extras': ['dynamic-poses', 'yok']})
+        self.assertEqual([e['id'] for e in plan['extras']], ['dynamic-poses'])
+        self.assertEqual([lora['lora'] for lora in book_art.plan_loras(plan)],
+                         [plan['lora']['lora'], plan['extras'][0]['lora']])
+        self.assertEqual(book_art.image_style(plan, 'Anime.'),
+                         'retro_scifi_90s, retro_artstyle, retro, cyberpunk, PoseDaal, Anime.')
+        self.assertEqual(book_art.image_style(plan, 'Anime.', False), 'retro_scifi_90s, retro_artstyle, retro, cyberpunk, Anime.')
+        self.assertIn('dynamic pose', book_art.image_suffix(plan, prompt='A woman runs through the rain.'))
+        self.assertNotIn('dynamic pose', book_art.image_suffix(plan, prompt='An empty street at night.'))
+        self.assertNotIn('dynamic pose', book_art.image_suffix(plan, book_art.PORTRAIT_SUFFIX, False))
+        plan['extras'][0]['strength'] = 0.6
+        self.assertEqual(book_art.extra_loras(['dynamic-poses'], plan['extras'])[0]['strength'], 0.6)
+        self.assertEqual(book_art.new_plan('', 'neon-vhs')['extras'], [])
+        self.assertEqual(book_art.image_style(book_art.new_plan('', 'neon-vhs'), 'Style.'), 'Style.')
+
     def test_no_faces_only_for_people(self):
         """F213: "Yuz gosterme" insansiz sahneye figur ekletmez: son ek yalnizca istemde insan varsa, kural dil
         modeline figur eklememesini soyler, yalin olumsuz cumle ("No faces are shown.") atilir."""
@@ -1029,6 +1049,40 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(sent['96']['inputs']['positive'], 'DCC0LFUT. Matte painting.')
         # F213: insansiz sahneye "arkadan gorulen kisiler" son eki gitmez (gorsel modeli siluet ekliyordu)
         self.assertEqual(sent['98']['inputs']['positive'], book_art.SUFFIX)
+
+    def test_extra_lora_generation(self):
+        """F218: ek LoRA tarzin LoRA'sinin arkasina eklenir; dosyasi yoksa uretim baslamaz; plan kaydinda acilir,
+        kapanir, gucu degisir."""
+        main = dict(WORKFLOW, **{'2': dict(WORKFLOW['2'], inputs=dict(WORKFLOW['2']['inputs'], model=['1', 0])),
+                                 '1': {'inputs': {'unet_name': 'krea2.safetensors'}, 'class_type': 'UNETLoader'}})
+        source = Path(self.tmp.name) / 'akis-lora.json'
+        source.write_text(json.dumps(main), encoding='utf-8')
+        self.assertTrue(self.bridge.art_set_workflow(str(source))['ok'])
+        store = self.bridge._art_store()
+        plan = book_art.new_plan('', '80s-fantasy', options={'extras': ['dynamic-poses']})
+        plan.update(complete=True, style='Film still.')
+        plan['scenes'] = [{'id': '1-0', 'section': 1, 'start': 0, 'anchor': 'a', 'title': 'Dövüş', 'seed': 5,
+                           'prompt': 'A knight swings his sword.', 'image': '', 'skip': False}]
+        store.save('ab12cd34ef', plan)
+        style_file, extra_file = plan['lora']['lora'], plan['extras'][0]['lora']
+        self.fake.loras = [style_file]
+        error = self.bridge.art_generate('ab12cd34ef')['error']
+        self.assertIn('Dinamik pozlar', error)
+        self.assertFalse(self.bridge.art_lora_check('dynamic-poses')['ok'])
+        self.fake.loras = [style_file, extra_file]
+        self.assertTrue(self.bridge.art_lora_check('dynamic-poses')['ok'])
+        saved = self.bridge.art_plan_save('ab12cd34ef', {'extra_strength': ['dynamic-poses', 0.6]})['plan']
+        self.assertEqual(saved['extras'][0]['strength'], 0.6)
+        self.assertTrue(self.bridge.art_generate('ab12cd34ef')['started'])
+        self.assertEqual(self.finish()['done'], 1)
+        sent = self.fake.prompts[0]
+        self.assertEqual(sent['2']['inputs']['model'], ['aktar-lora-0-1', 0])
+        self.assertEqual(sent['aktar-lora-0-0']['inputs']['lora_name'], style_file)
+        self.assertEqual(sent['aktar-lora-0-1']['inputs']['lora_name'], extra_file)
+        self.assertEqual(sent['aktar-lora-0-1']['inputs']['strength_model'], 0.6)
+        self.assertEqual(sent['96']['inputs']['positive'], 'ArsMovieStill, 80s Fantasy Movie Still, PoseDaal, Film still.')
+        self.assertTrue(sent['98']['inputs']['positive'].startswith('dynamic pose'))
+        self.assertEqual(self.bridge.art_plan_save('ab12cd34ef', {'extras': []})['plan']['extras'], [])
 
     def test_old_plan_renumbered_on_read(self):
         from unittest.mock import patch

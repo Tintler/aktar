@@ -103,8 +103,41 @@ PRESETS = (
      'strength': 1.0, 'trigger': 'DCC0LFUT.', 'url': 'https://civitai.com/models/3019065',
      'note': 'Bilimkurgu: devasa uzay gemileri, göğe uzanan megayapılar, ayrıntılı mekanik mimari, atmosferik '
              'derinlik ve olağanüstü ölçek; geniş ve alçak açılı çekimler.'},
+    # F218: tetik dosya adindaki ve aciklamadaki "DCS1F1." (sayfanin tetik alani ve ornekler "DCSC1F1." yaziyor)
+    {'id': 'dc-sci-fi', 'label': 'Sinematik bilimkurgu',
+     'lora': 'DC_SCI-FI_[Krea2Raw][Gpt4.1Captioned][Trigger=DCS1F1.][Rank64]_v1.safetensors',
+     'strength': 1.0, 'trigger': 'DCS1F1.', 'url': 'https://civitai.com/models/2976222',
+     'note': 'Sinematik bilimkurgu: siberpunk şehirler, sibernetik insanlar ve androidler, dev gemiler; geniş açılı '
+             'çekimler, atmosferik pus, sinema filmi renk düzenlemesi.'},
+    {'id': 'retro-anime', 'label': '90\'lar retro anime',
+     'lora': 'Retro_Sci-fi_90_s_anime_style_Krea2_krea2_3339257_epoch_4.safetensors', 'strength': 1.0,
+     'trigger': 'retro_scifi_90s, retro_artstyle, retro, cyberpunk,',
+     'suffix': '90s retro futuristic anime style, high contrast, vibrant colors',
+     'url': 'https://civitai.com/models/912942',
+     'note': '90\'ların retro fütüristik anime çizimi: canlı, yüksek kontrastlı renkler, yarı gerçekçi karakterler, '
+             'neon ışıklı şehirler, hafif analog gren.'},
+    {'id': '80s-fantasy', 'label': '80\'ler fantastik film', 'lora': '80sFantasyKrea2Raw_000004500.safetensors',
+     'strength': 1.0, 'trigger': 'ArsMovieStill, 80s Fantasy Movie Still,', 'url': 'https://civitai.com/models/789313',
+     'note': '80\'lerin başındaki fantastik filmlerden bir kare: pratik efektler, elle yapılmış kostüm ve dekorlar, '
+             'sisli ve sıcak film ışığı, film greni.'},
+    {'id': 'neon-vhs', 'label': 'Neon VHS', 'lora': 'retro-80s.safetensors', 'strength': 0.85, 'trigger': '',
+     'suffix': '1980s cinematic film still, analog film grain, neon lighting', 'url': 'https://civitai.com/models/2987989',
+     'note': '1980\'ler sineması ve VHS dönemi: cesur renkler, dramatik film ışığı, neon parıltı, yumuşak analog doku, '
+             'dönemin giyimi ve saçları.'},
 )
 LORA_KEYS = ('lora', 'strength', 'trigger', 'suffix', 'label')
+
+# Tarza eklenen LoRA'lar (F218, tarzdan bagimsiz, birlikte secilebilir): plan['extras'] kopyasi; tetik kelimesi
+# tarzin tetiginden sonra, son ek yalnizca istemde insan varsa ('people'). Portreye eklenmez (portre sade kalmali).
+# Guc: sayfa tek basina 1.0, baska LoRA'yla 0.5-0.8 oneriyor.
+EXTRA_LORAS = (
+    {'id': 'dynamic-poses', 'label': 'Dinamik pozlar', 'lora': 'More Dynamic Poses - Krea2_000002500.safetensors',
+     'strength': 0.8, 'trigger': 'PoseDaal,', 'suffix': 'dynamic pose, dynamic camera angle', 'people': True,
+     'url': 'https://civitai.com/models/2914130',
+     'note': 'Karakterlere hareket katar: durağan, kameraya dik bakan pozlar yerine çeşitli duruşlar, beden dili, '
+             'alçak, yüksek ve yandan kamera açıları.'},
+)
+EXTRA_KEYS = ('id', 'lora', 'strength', 'trigger', 'suffix', 'label', 'people')
 
 # Hazir tarzdan bagimsiz secenekler (F202, birlikte secilebilir): 'rule' her iki dil modeli istemine kesin kural
 # olarak girer, 'suffix' gorsel isteminin sonuna (turbo modelde olumsuz istem yok: olumlu ifade).
@@ -335,10 +368,30 @@ def preset_lora(preset):
     return {key: entry.get(key, '') for key in LORA_KEYS} if entry and entry.get('lora') else None
 
 
-def image_style(plan, style):
-    """Gorsel isteminin oneki: LoRA'nin tetik kelimesi en basta, sonra stil."""
-    trigger = _clean((plan.get('lora') or {}).get('trigger'))
-    return ' '.join(part for part in (trigger, _clean(style)) if part)
+def extra_loras(ids, old=()):
+    """Secilen ek LoRA'lar (EXTRA_LORAS sirasiyla, plana kopyalanir); `old` planda olanlarin gucu korunur."""
+    ids = ids if isinstance(ids, (list, tuple)) else ()
+    kept = {entry.get('id'): entry for entry in old or ()}
+    return [dict({key: entry.get(key, '') for key in EXTRA_KEYS}, **({'strength': kept[entry['id']]['strength']}
+                                                                    if entry['id'] in kept else {}))
+            for entry in EXTRA_LORAS if entry['id'] in ids]
+
+
+def extra_lora(extra):
+    """Ek LoRA'nin kopyasi ya da None (ComfyUI denetimi icin)."""
+    return next(iter(extra_loras([extra])), None)
+
+
+def plan_loras(plan, extras=True):
+    """Uretimde is akisina eklenecek LoRA'lar: tarzinki, `extras` ise ek LoRA'lar da."""
+    return [lora for lora in [plan.get('lora')] + (list(plan.get('extras') or ()) if extras else [])
+            if lora and lora.get('lora')]
+
+
+def image_style(plan, style, extras=True):
+    """Gorsel isteminin oneki: LoRA'nin tetik kelimesi en basta, ek LoRA'larinki ardindan, sonra stil."""
+    triggers = [_clean(lora.get('trigger')) for lora in plan_loras(plan, extras)]
+    return ' '.join(part for part in triggers + [_clean(style)] if part)
 
 
 def band_tone(plan):
@@ -404,9 +457,10 @@ def shows_people(prompt):
 def image_suffix(plan, base=SUFFIX, modifiers=True, prompt=None):
     """Gorsel isteminin son eki: LoRA ve seceneklerin olumlu ifadeleri + sabit son ek (portrede secenekler yok).
     `prompt` verilirse insanla ilgili secenek ekleri ('people') yalnizca istemde insan varsa eklenir (F213)."""
+    people = lambda entry: not (entry.get('people') and prompt is not None and not shows_people(prompt))
     parts = [_clean((plan.get('lora') or {}).get('suffix'))]
-    parts += [m['suffix'] for m in MODIFIERS if modifiers and m['id'] in (plan.get('modifiers') or ())
-              and not (m.get('people') and prompt is not None and not shows_people(prompt))]
+    parts += [_clean(e.get('suffix')) for e in plan.get('extras') or () if modifiers and people(e)]
+    parts += [m['suffix'] for m in MODIFIERS if modifiers and m['id'] in (plan.get('modifiers') or ()) and people(m)]
     return ', '.join(part for part in parts + [base] if part)
 
 
@@ -995,7 +1049,7 @@ def clean_upscale(value):
 def new_plan(note='', preset='', density='medium', size=DEFAULT_SIZE, title='', identity=False, modifiers=(),
              options=None):
     """Yeni plan. `options` (F209): openers (bolum acilis gorseli), places (mekan kimligi), changes (gorunus
-    degisimi), upscale (RTX buyutme katsayisi, 0 kapali)."""
+    degisimi), upscale (RTX buyutme katsayisi, 0 kapali); F218 extras (ek LoRA kimlikleri, EXTRA_LORAS)."""
     modifiers, options = clean_modifiers(modifiers), options or {}
     people = 'no-people' not in modifiers
     return {'version': VERSION, 'created': datetime.now().isoformat(timespec='seconds'), 'title': title,
@@ -1003,7 +1057,8 @@ def new_plan(note='', preset='', density='medium', size=DEFAULT_SIZE, title='', 
             'size': size if size in SIZES else DEFAULT_SIZE, 'seed': random.randrange(1, 2 ** 31),
             'style': '', 'characters': [], 'scenes': [], 'complete': False, 'next_chunk': 0, 'numbered': True,
             'identity': bool(identity) and not set(modifiers) & set(NO_CAST), 'modifiers': modifiers,
-            'lora': preset_lora(preset), 'openers': bool(options.get('openers')),
+            'lora': preset_lora(preset), 'extras': extra_loras(options.get('extras')),
+            'openers': bool(options.get('openers')),
             'place_identity': bool(options.get('places')), 'places': [],
             'look_changes': bool(options.get('changes')) and people, 'upscale': clean_upscale(options.get('upscale'))}
 

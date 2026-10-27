@@ -8,6 +8,7 @@ Ayarlar ui.json 'art' altinda: comfy_url, size. Is akisi APP_DIR/kitap-gorseller
 Karakter kimligi (F201, plan['identity'] acikken): ikinci is akisi kimlik-is-akisi.json; art_generate once eksik ya da
 istenen portreleri ana is akisiyla uretir, sonra karakterli sahneyi portre(ler) yuklenerek kimlik is akisiyla.
 LoRA'li tarz (F202, plan['lora']): uretim basinda dosya ComfyUI'nin LoRA listesinde aranir, iki is akisina eklenir.
+Ek LoRA'lar (F218, plan['extras'], ornegin dinamik pozlar) sahnelere eklenir, portreye eklenmez.
 F209: art_restyle tarzi degistirir (istemler kalir), plan['upscale'] aciksa her gorsel RTX ile buyutulur.
 """
 from __future__ import annotations
@@ -135,7 +136,8 @@ class ArtMixin:
     def art_options(self):
         """Hazir tarzlar, siklik, boyutlar ve kayitli ayarlar (pencere ve Ayarlar icin)."""
         prefs = self._art_prefs()
-        return {'presets': list(book_art.PRESETS), 'modifiers': list(book_art.MODIFIERS),
+        return {'presets': list(book_art.PRESETS), 'extras': list(book_art.EXTRA_LORAS),
+                'modifiers': list(book_art.MODIFIERS),
                 'no_cast': list(book_art.NO_CAST), 'densities': list(book_art.DENSITY), 'sizes': list(book_art.SIZES),
                 'upscales': list(book_art.UPSCALES),
                 'url': self._art_url(), 'size': prefs.get('size') if prefs.get('size') in book_art.SIZES
@@ -178,28 +180,32 @@ class ArtMixin:
         self._art_identity_path().unlink(missing_ok=True)
         return self.art_identity_workflow_info()
 
-    def _art_loras(self, url, lora):
-        """Planin LoRA'si [(ComfyUI'deki adi, guc)]; dosya ComfyUI'de yoksa ComfyError."""
-        if not lora or not lora.get('lora'):
+    def _art_loras(self, url, loras):
+        """LoRA'lar (book_art.plan_loras) [(ComfyUI'deki adi, guc)]; dosyasi ComfyUI'de olmayan varsa ComfyError."""
+        loras = [lora for lora in loras or () if lora and lora.get('lora')]
+        if not loras:
             return []
         try:
             available = comfy_client.lora_names(url)
         except comfy_client.ComfyError as error:
             raise comfy_client.ComfyError(f'ComfyUI\'nin LoRA listesi alınamadı: {error}') from None
-        found = comfy_client.resolve_lora(available, lora['lora'])
-        if not found:
-            raise comfy_client.ComfyError(f'"{lora.get("label") or lora["lora"]}" tarzının LoRA dosyası ComfyUI\'de yok: '
-                                          f'{lora["lora"]} dosyasını ComfyUI\'nin models/loras klasörüne koyun ve '
-                                          f'ComfyUI\'yi yenileyin.')
-        return [(found, float(lora.get('strength') or 1.0))]
+        result = []
+        for lora in loras:
+            found = comfy_client.resolve_lora(available, lora['lora'])
+            if not found:
+                raise comfy_client.ComfyError(f'"{lora.get("label") or lora["lora"]}" LoRA dosyası ComfyUI\'de yok: '
+                                              f'{lora["lora"]} dosyasını ComfyUI\'nin models/loras klasörüne koyun ve '
+                                              f'ComfyUI\'yi yenileyin.')
+            result.append((found, float(lora['strength'] if lora.get('strength') not in (None, '') else 1.0)))
+        return result
 
     def art_lora_check(self, preset):
-        """Hazir tarzin LoRA dosyasi ComfyUI'de var mi: {'ok', 'message'} (LoRA'siz tarzda ok)."""
-        lora = book_art.preset_lora(preset)
+        """Hazir tarzin ya da ek LoRA'nin (F218) dosyasi ComfyUI'de var mi: {'ok', 'message'} (LoRA'siz tarzda ok)."""
+        lora = book_art.preset_lora(preset) or book_art.extra_lora(preset)
         if not lora:
             return {'ok': True, 'message': ''}
         try:
-            name = self._art_loras(self._art_url(), lora)[0][0]
+            name = self._art_loras(self._art_url(), [lora])[0][0]
         except comfy_client.ComfyError as error:
             return {'ok': False, 'message': str(error)}
         return {'ok': True, 'message': f'LoRA hazır: {name}'}
@@ -346,6 +352,13 @@ class ArtMixin:
                 plan['identity'] = bool(values['identity'])
             if 'lora_strength' in values and plan.get('lora'):   # LoRA'nin gucu (0-2)
                 plan['lora']['strength'] = round(min(2.0, max(0.0, float(values['lora_strength']))), 2)
+            if 'extras' in values:   # F218 ek LoRA'lar: kimlik listesi (planda olanlarin gucu kalir)
+                plan['extras'] = book_art.extra_loras(values['extras'], plan.get('extras'))
+            if 'extra_strength' in values:   # [kimlik, guc]
+                extra, value = values['extra_strength']
+                for entry in plan.get('extras') or ():
+                    if entry.get('id') == extra:
+                        entry['strength'] = round(min(2.0, max(0.0, float(value))), 2)
             if 'places' in values:
                 plan['places'] = book_art.clean_places(values['places'])
             if 'place_identity' in values:
@@ -514,8 +527,12 @@ class ArtMixin:
             comfy_client.health(url)
             if factor and targets and not comfy_client.has_node(url, comfy_client.UPSCALE_NODE):
                 raise comfy_client.ComfyError(comfy_client.UPSCALE_MISSING)
+            portrait_workflow = None
             if workflow is not None:
-                loras = self._art_loras(url, plan.get('lora'))   # tarzin LoRA'si iki is akisina da
+                # tarzin LoRA'si iki is akisina da; ek LoRA'lar (F218) yalnizca sahnelere, portre sade kalir
+                loras = self._art_loras(url, book_art.plan_loras(plan))
+                style_only = loras[:len(book_art.plan_loras(plan, False))]
+                portrait_workflow = comfy_client.add_loras(workflow, style_only)
                 workflow = comfy_client.add_loras(workflow, loras)
                 if identity_workflow is not None:
                     identity_workflow = comfy_client.add_loras(identity_workflow, loras)
@@ -566,8 +583,8 @@ class ArtMixin:
                                    'total': total, 'current': f'Portre: {name}'})
                 seed = (random.randrange(1, 2 ** 31) if name in renew or not character.get('portrait_seed')
                         else character['portrait_seed'])
-                filled = comfy_client.fill(workflow, book_art.portrait_prompt(character),
-                                           book_art.image_style(current, book_art.medium(current['style'])),
+                filled = comfy_client.fill(portrait_workflow, book_art.portrait_prompt(character),
+                                           book_art.image_style(current, book_art.medium(current['style']), False),
                                            book_art.image_suffix(current, book_art.PORTRAIT_SUFFIX, False), seed,
                                            book_art.PORTRAIT_SIZE,
                                            f'Aktar/{book[:12]}/portre-{book_art.portrait_slug(name)}')

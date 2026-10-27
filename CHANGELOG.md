@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.39.0 — 2026-10-27
+
+### Eklenen
+- **Kitap görsellerinde dört yeni LoRA tarzı ve "Ek LoRA" (F218):** LoRA tarzlarına Sinematik bilimkurgu (DC Sci-Fi), 90'lar retro anime, 80'ler fantastik film ve Neon VHS eklendi; tetik kelimeleri ve güçleri Civitai sayfalarından. Tarzın altındaki yeni "Ek LoRA" satırında "Dinamik pozlar" (More Dynamic Poses, tetik PoseDaal, güç 0,8) herhangi bir tarzla birlikte seçilebiliyor: karakterlere hareketli duruşlar ve farklı kamera açıları katar. Ek LoRA yalnızca sahnelere eklenir, karakter portreleri sade kalır; "dynamic pose" son eki yalnızca istemde insan varsa eklenir. Plan inceleme ekranında ek LoRA açılıp kapatılabilir, gücü değiştirilebilir (görsellere yeniden üretince yansır). LoRA dosyaları ComfyUI'nin models/loras klasörüne konmalı.
+
 ## 2.38.0 — 2026-10-27
 
 ### Eklenen

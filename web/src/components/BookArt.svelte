@@ -44,6 +44,8 @@
   let modifiers = $state([]);       // F202 tarzdan bagimsiz secenekler (karakter olmasin, yalnizca manzara ...)
   let loraCheck = $state(null);     // secilen LoRA'li tarzin dosyasi ComfyUI'de var mi
   let loraStrength = $state(1);
+  let extras = $state([]);          // F218 tarza eklenen LoRA'lar (dinamik pozlar ...), kimlikler
+  let extraCheck = $state(null);    // son secilen ek LoRA'nin dosyasi ComfyUI'de var mi
   // F209 plan secenekleri: bolum acilis gorseli, mekan kimligi, gorunus degisimi, RTX buyutme
   let openers = $state(false);
   let placeIdentity = $state(false);
@@ -75,6 +77,7 @@
   const modifierLabels = $derived((plan?.modifiers ?? []).map((id) => options?.modifiers?.find((m) => m.id === id)?.label ?? id));
   const noPeople = $derived(modifiers.includes('no-people'));
   const unscaled = $derived(plan?.upscale ? shown.filter((s) => s.url && s.upscaled !== plan.upscale).length : 0);
+  const planExtras = $derived((plan?.extras ?? []).map((e) => e.id));
   const placeNames = $derived((plan?.places ?? []).map((p) => p.name));
 
   async function load() {
@@ -96,6 +99,7 @@
     identity = Boolean(value.identity);
     modifiers = value.modifiers ?? modifiers;
     loraStrength = value.lora?.strength ?? 1;
+    extras = (value.extras ?? []).map((e) => e.id);
     openers = Boolean(value.openers);
     placeIdentity = Boolean(value.place_identity);
     lookChanges = Boolean(value.look_changes);
@@ -228,6 +232,31 @@
     modifiers = [...modifiers.filter((m) => !rivals.includes(m)), id];
   }
 
+  // F218 ek LoRA: secilince dosyasi ComfyUI'de aranir; `save` inceleme ekraninda plana kaydeder (yeniden uretince yansir)
+  async function toggleExtra(entry, save = false) {
+    const current = save ? planExtras : extras;   // inceleme ekrani plani gosterir (kurulumdaki secim degil)
+    const on = !current.includes(entry.id);
+    const list = on ? [...current, entry.id] : current.filter((id) => id !== entry.id);
+    extraCheck = null;
+    if (save) {
+      const result = await act('art_plan_save', book, { extras: list });
+      if (!result) return;
+      applyPlan(result.plan);
+      toast('Kaydedildi. Görsellere yansıması için yeniden üretin.');
+    } else extras = list;
+    if (!on) return;
+    extraCheck = { pending: true, message: 'LoRA dosyası ComfyUI\'de aranıyor…' };
+    const result = await call('art_lora_check', entry.id);
+    if ((save ? planExtras : extras).includes(entry.id)) extraCheck = result;
+  }
+
+  async function saveExtraStrength(entry, value) {
+    value = Number(value);
+    if (!Number.isFinite(value) || value === entry.strength) return;
+    const result = await act('art_plan_save', book, { extra_strength: [entry.id, value] });
+    if (result) { applyPlan(result.plan); toast('LoRA gücü kaydedildi. Görsellere yansıması için yeniden üretin.'); }
+  }
+
   async function saveLoraStrength() {
     const value = Number(loraStrength);
     if (!plan?.lora || !Number.isFinite(value) || value === plan.lora.strength) return;
@@ -257,7 +286,7 @@
     }
     if (app.artJob?.reading !== reading) return;   // bolumler okunurken durduruldu
     const result = await act('art_plan_create', book, sections, note, preset, density, title, resume, identity && !noCast, modifiers,
-      { openers, places: placeIdentity, changes: lookChanges && !noPeople, upscale }, openersOnly);
+      { openers, places: placeIdentity, changes: lookChanges && !noPeople, upscale, extras }, openersOnly);
     if (!result?.started) { if (app.artJob?.reading === reading) app.artJob = null; return; }
     if (app.artJob?.reading === reading) app.artJob = { book, title, stage: 'plan', done: 0, total: result.total };
     replanning = false;
@@ -401,6 +430,21 @@
           {#if loraCheck}
             <div class="lora-note" class:bad={loraCheck.ok === false}>
               <Icon name={loraCheck.ok === false ? 'alert' : 'check'} size={14} /><span>{loraCheck.message}</span>
+            </div>
+          {/if}
+        {/if}
+        {#if options?.extras?.length}
+          <div class="row">
+            <span class="dim lead">Ek LoRA</span>
+            {#each options.extras as entry (entry.id)}
+              <button class="chip" class:on={extras.includes(entry.id)} title={`${entry.note}\nLoRA: ${entry.lora}\nTetik: ${entry.trigger}`}
+                onclick={() => toggleExtra(entry)}>{entry.label}</button>
+            {/each}
+            <span class="dim">Herhangi bir tarzla birlikte kullanılır. Yalnızca sahnelere eklenir, karakter portrelerine eklenmez.</span>
+          </div>
+          {#if extraCheck}
+            <div class="lora-note" class:bad={extraCheck.ok === false}>
+              <Icon name={extraCheck.ok === false ? 'alert' : 'check'} size={14} /><span>{extraCheck.message}</span>
             </div>
           {/if}
         {/if}
@@ -569,6 +613,27 @@
             <span><b>LoRA:</b> {plan.lora.label}{#if plan.lora.trigger} · tetik <code>{plan.lora.trigger}</code>{/if}</span>
             <label class="dim">Güç <input class="field num" type="number" min="0" max="2" step="0.05" bind:value={loraStrength} onchange={saveLoraStrength} /></label>
           </div>
+        {/if}
+        {#if options?.extras?.length}
+          <div class="row">
+            <span class="dim">Ek LoRA</span>
+            {#each options.extras as entry (entry.id)}
+              <button class="chip" class:on={planExtras.includes(entry.id)} disabled={Boolean(app.artJob)} title={entry.note}
+                onclick={() => toggleExtra(entry, true)}>{entry.label}</button>
+            {/each}
+          </div>
+          {#each plan.extras ?? [] as entry (entry.id)}
+            <div class="row lora">
+              <span><b>{entry.label}</b>{#if entry.trigger} · tetik <code>{entry.trigger}</code>{/if}</span>
+              <label class="dim">Güç <input class="field num" type="number" min="0" max="2" step="0.05" value={entry.strength}
+                onchange={(e) => saveExtraStrength(entry, e.currentTarget.value)} /></label>
+            </div>
+          {/each}
+          {#if extraCheck}
+            <div class="lora-note left" class:bad={extraCheck.ok === false}>
+              <Icon name={extraCheck.ok === false ? 'alert' : 'check'} size={14} /><span>{extraCheck.message}</span>
+            </div>
+          {/if}
         {/if}
         {#if modifierLabels.length}<div class="dim">Seçenekler: {modifierLabels.join(', ')}</div>{/if}
         {#if plan.note}<div class="dim">Kitap notu: {plan.note}</div>{/if}
