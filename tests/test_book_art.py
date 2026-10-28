@@ -399,7 +399,15 @@ class PlanTest(unittest.TestCase):
         """F202: LoRA'li tarz plana kopyalanir; secenekler dil modeline kural, gorsel istemine olumlu son ek olur."""
         ids = [p['id'] for p in book_art.PRESETS]
         self.assertEqual(len(ids), len(set(ids)))
+        # F224: gruplanmamis on LoRA'siz tarz hep gorunur; LoRA'li tarz gruplanmaz; hicbir not digerinin parcasi
+        # degil (arayuz tarz degisince eski notu metinden ayiklar)
+        plain = [p for p in book_art.PRESETS if not p.get('lora')]
+        self.assertEqual(len([p for p in plain if not p.get('group')]), 10)
+        self.assertFalse([p['id'] for p in book_art.PRESETS if p.get('lora') and p.get('group')])
+        notes = [p['note'] for p in book_art.PRESETS]
+        self.assertFalse([(a, b) for a in notes for b in notes if a != b and a in b])
         self.assertIsNone(book_art.preset_lora('watercolor'))
+        self.assertIsNone(book_art.preset_lora('noir'))
         plan = book_art.new_plan('', 'dc-dark-fantasy', identity=True, modifiers=['landscape', 'bilinmeyen', 'no-people'])
         self.assertEqual(plan['modifiers'], ['no-people', 'landscape'])
         self.assertFalse(plan['identity'])   # karakter cizilmeyen secenekte kimlik kapali

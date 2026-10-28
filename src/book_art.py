@@ -60,7 +60,13 @@ BACKUP_DIR = '.yedek'   # baştan planlamada eski plan (Store.stash)
 WORKFLOW_FILE = 'is-akisi.json'   # Ayarlar'da secilen is akisinin kopyasi (STORE_DIR altinda)
 IDENTITY_FILE = 'kimlik-is-akisi.json'   # karakter kimligi is akisi (F201)
 
+def _grouped(group, *entries):
+    return tuple(dict(entry, group=group) for entry in entries)
+
+
 # Kitap notuna yazilan hazir tarzlar (kullanici duzenleyebilir; dil modeli Turkce notu anlar).
+# F224: 'group'suz LoRA'siz tarzlar (on tane) arayuzde hep gorunur, gruplular "Daha fazla" altinda. Notlar
+# birbirinin parcasi olmamali: arayuz tarz degisince eski notu metinden ayiklar (test denetler).
 PRESETS = (
     {'id': 'cinematic', 'label': 'Sinematik', 'note': 'Sinematik dijital resim, dramatik ışık, zengin ayrıntı.'},
     {'id': 'watercolor', 'label': 'Suluboya', 'note': 'Dokulu kâğıt üstüne yumuşak suluboya: hafif renk geçişleri, '
@@ -71,6 +77,163 @@ PRESETS = (
                                                    'veren nesneler; insan figürü az ya da hiç, yüz gösterme.'},
     {'id': 'minimal', 'label': 'Sade', 'note': 'Sade ve sakin kompozisyonlar: geniş boşluk, tek bir konu, '
                                                  'az renk.'},
+    {'id': 'oil-painting', 'label': 'Yağlıboya', 'note': 'Klasik yağlıboya tablo: görünür fırça izleri, kalın boya '
+                                                           'katmanları, derin ve sıcak renkler, müze tablosu havası.'},
+    {'id': 'noir', 'label': 'Kara film', 'note': 'Siyah beyaz kara film: sert kontrast, panjurlardan düşen gölge '
+                                                  'şeritleri, ıslak sokaklar, tek kaynaktan gelen sert ışık.'},
+    {'id': 'fairy-tale-book', 'label': 'Masal kitabı',
+     'note': 'Altın Çağ masal kitabı illüstrasyonu (Rackham, Dulac): ince mürekkep kontur, soluk ve eskimiş suluboya '
+             'renkler, kıvrımlı ağaçlar, masalsı hava.'},
+    {'id': 'childrens-book', 'label': 'Çocuk kitabı', 'note': 'Çocuk kitabı resmi: opak guaj, sıcak ve yumuşak '
+                                                               'renkler, yuvarlak sade biçimler, sevimli ve sakin hava.'},
+    {'id': 'pen-ink', 'label': 'Kalem ve mürekkep', 'note': 'Kalem ve mürekkep çizimi: yalnızca siyah çizgi ve '
+                                                             'tarama, beyaz kâğıt, editoryal illüstrasyon netliği.'},
+) + _grouped(
+    'Klasik resim ve baskı',
+    {'id': 'fresco', 'label': 'Fresk', 'note': 'Rönesans freski: kireçli mat duvar yüzeyi, soluk toprak renkleri, '
+                                                'okre ve terakota, sakin anıtsal figürler.'},
+    {'id': 'baroque', 'label': 'Barok ışık', 'note': 'Barok chiaroscuro yağlıboya (Caravaggio): zifiri karanlık fon, '
+                                                      'tek kaynaktan gelen sert ışık, dramatik ten tonları.'},
+    {'id': 'romantic-landscape', 'label': 'Romantik manzara',
+     'note': 'Romantik dönem manzara resmi (Turner, Friedrich): sisli, yüce doğa, ışık dolu gökyüzü, uçsuz manzara '
+             'içinde küçük insan figürleri.'},
+    {'id': 'impressionist', 'label': 'Empresyonist', 'note': 'Empresyonist resim: kısa ve kırık fırça vuruşları, '
+                                                              'titreşen gün ışığı, yumuşak konturlar, canlı renkler.'},
+    {'id': 'pre-raphaelite', 'label': 'Ön-Rafaelit', 'note': 'Ön-Rafaelit resim: parlak mücevher renkleri, ayrıntılı '
+                                                              'çiçek ve bitkiler, akan kumaşlar, şiirsel figürler.'},
+    {'id': 'ukiyo-e', 'label': 'Ukiyo-e', 'note': 'Japon ukiyo-e ağaç baskısı: düz renk alanları, kalın kontur, '
+                                                   'stilize dalga ve bulut desenleri, washi kâğıt dokusu.'},
+    {'id': 'linocut', 'label': 'Linol baskı', 'note': 'Linol baskı: kalın oyma çizgiler, iki ya da üç düz renk, '
+                                                       'pürüzlü el baskısı kenarları, yüksek kontrast.'},
+    {'id': 'woodcut', 'label': 'Tahta baskı', 'note': 'Ortaçağ tahta baskısı: kaba ve kalın siyah çizgiler, basit '
+                                                       'perspektif, yer yer elle boyanmış soluk renkler.'},
+    {'id': 'mezzotint', 'label': 'Mezzotint', 'note': 'Mezzotint baskı: kadifemsi koyu fondan beliren yumuşak ışık, '
+                                                       'tek renk, ince geçişler, gizemli hava.'},
+    {'id': 'engraving-color', 'label': 'Renkli gravür',
+     'note': '19. yüzyıl doğa tarihi levhası: ince gravür çizgileri üstüne elle sürülmüş açık suluboya renkler, '
+             'krem kâğıt.'},
+) + _grouped(
+    'Kitap illüstrasyonu',
+    {'id': 'victorian', 'label': 'Viktorya kitabı', 'note': 'Viktorya dönemi kitap resmi (Tenniel, Doré): yoğun tarama '
+                                                             've çapraz tarama, siyah beyaz mürekkep, klasik roman '
+                                                             'baskısı.'},
+    {'id': 'art-nouveau', 'label': 'Art Nouveau', 'note': 'Art Nouveau (Mucha): süslü kıvrımlı çerçeveler, akan saçlar '
+                                                           've kumaşlar, bitki motifleri, pastel ve altın tonlar.'},
+    {'id': 'art-deco', 'label': 'Art Deco', 'note': 'Art Deco: geometrik simetri, altın, siyah ve fildişi, şık '
+                                                     '1920\'ler afiş zarafeti.'},
+    {'id': 'colored-pencil', 'label': 'Renkli kalem', 'note': 'Renkli kurşun kalem çizimi: kâğıt dokusu görünen katman '
+                                                               'katman renkler, yumuşak tarama, el yapımı his.'},
+    {'id': 'pastel', 'label': 'Pastel tebeşir', 'note': 'Toz pastel çizim: renkli kâğıt üstünde yumuşak, tozlu '
+                                                         'geçişler, bulanık kenarlar.'},
+    {'id': 'sumi-e', 'label': 'Sumi-e', 'note': 'Mürekkep ve fırça (sumi-e): tek renk siyah mürekkep, akıcı fırça '
+                                                 'vuruşları, bol boşluk, sade ve şiirsel.'},
+    {'id': 'miniature', 'label': 'Minyatür', 'note': 'Osmanlı ve İran minyatürü: perspektifsiz düz düzlemler, zengin '
+                                                      'desenler, canlı mineral renkler, altın varak ayrıntılar.'},
+    {'id': 'manuscript', 'label': 'El yazması', 'note': 'Ortaçağ tezhipli el yazması: parşömen dokusu, lapis mavisi, '
+                                                         'kırmızı ve altın, süslü kenar motifleri.'},
+) + _grouped(
+    'Çizgi roman ve animasyon',
+    {'id': 'ligne-claire', 'label': 'Ligne claire', 'note': 'Fransız-Belçika çizgi romanı (ligne claire): eşit '
+                                                             'kalınlıkta temiz kontur, düz renkler, gölgesiz çizim.'},
+    {'id': 'silver-age', 'label': 'Klasik çizgi roman', 'note': 'Amerikan Gümüş Çağ çizgi romanı: Ben-Day noktaları, '
+                                                                 'canlı ana renkler, kalın mürekkep konturlar.'},
+    {'id': 'graphic-novel', 'label': 'Grafik roman', 'note': 'Modern grafik roman: büyük siyah gölge kütleleri, '
+                                                              'sınırlı palet, sinematik çerçeveleme.'},
+    {'id': 'manga', 'label': 'Manga', 'note': 'Siyah beyaz manga: screentone taramalar, hız çizgileri, net mürekkep '
+                                               'konturlar, ifadeli yüzler.'},
+    {'id': 'pastoral-anime', 'label': 'Pastoral anime',
+     'note': 'Ghibli esintili el çizimi anime: yumuşak suluboya fonlar, kabarık bulutlu gökyüzü, sıcak ve sakin '
+             'gündelik anlar.'},
+    {'id': 'classic-animation', 'label': 'Klasik animasyon',
+     'note': '1950\'lerin klasik animasyon arka planları: boyanmış stilize ağaçlar ve yapılar, masalsı yumuşak ışık.'},
+    {'id': 'cel-shaded', 'label': 'Cel-shaded 3B', 'note': 'Cel-shaded 3B: düz gölgeli oyun ve animasyon modelleri, '
+                                                            'net konturlar, canlı renkler.'},
+    {'id': 'claymation', 'label': 'Kil animasyon', 'note': 'Kil animasyon (stop-motion): plastilin dokusu, parmak '
+                                                            'izleri, minyatür dekorlar, stüdyo ışığı.'},
+) + _grouped(
+    'Fotoğraf ve sinema',
+    {'id': 'documentary', 'label': 'Belgesel fotoğraf', 'note': 'Siyah beyaz belgesel fotoğraf: grenli 35 mm film, '
+                                                                 'doğal ışık, gerçekçi ve anlık gazeteci bakışı.'},
+    {'id': 'daguerreotype', 'label': 'Eski fotoğraf',
+     'note': '19. yüzyıl fotoğrafı (dagerreyotip, tintip): sepya ton, kararmış kenarlar, kusurlu emülsiyon, durağan '
+             'pozlar.'},
+    {'id': 'film-70s', 'label': '70\'ler filmi', 'note': '1970\'ler film fotoğrafı: sıcak ve hafif solmuş renkler, '
+                                                          'belirgin gren, yumuşak lens parlaması.'},
+    {'id': 'polaroid', 'label': 'Polaroid', 'note': 'Anlık fotoğraf: soluk, hafif yeşilimsi renkler, yumuşak odak, '
+                                                     'nostaljik anı havası.'},
+    {'id': 'symmetry', 'label': 'Simetrik pastel', 'note': 'Wes Anderson esintisi: tam ortalanmış simetrik '
+                                                            'kompozisyon, pastel palet, diorama gibi düzenli sahneler.'},
+    {'id': 'golden-hour', 'label': 'Altın saat', 'note': 'Altın saat ışığı: alçak güneş, uzun gölgeler, sıcak altın '
+                                                          'tonlar, yumuşak ve duygusal hava.'},
+    {'id': 'infrared', 'label': 'Kızılötesi', 'note': 'Kızılötesi fotoğraf: beyaz ve pembe yapraklar, koyu gökyüzü, '
+                                                       'rüya gibi gerçek dışı görüntü.'},
+    {'id': 'tilt-shift', 'label': 'Minyatür maket', 'note': 'Tilt-shift fotoğraf: yukarıdan bakış, dar netlik alanı, '
+                                                             'dünya oyuncak maket gibi.'},
+) + _grouped(
+    'Tür',
+    {'id': 'cosmic-horror', 'label': 'Kozmik korku',
+     'note': 'Kozmik korku (Lovecraft): kavranamayacak ölçekte varlıklar, yeşilimsi sis, deniz karanlığı, tekinsiz '
+             'geometri.'},
+    {'id': 'gothic', 'label': 'Gotik romantizm', 'note': 'Gotik romantizm: mum ışığı, harabe şatolar, ay ışığı, '
+                                                          'Viktorya dönemi kasveti.'},
+    {'id': 'steampunk', 'label': 'Steampunk', 'note': 'Steampunk: pirinç ve bakır, buhar, dişliler, Viktorya dönemi '
+                                                       'mühendisliği, sıcak sepya ışık.'},
+    {'id': 'dieselpunk', 'label': 'Dieselpunk', 'note': 'Dieselpunk: 1930-40\'ların endüstrisi, zeplinler, yağ ve '
+                                                         'çelik, kurşuni gökyüzü, afiş tonları.'},
+    {'id': 'solarpunk', 'label': 'Solarpunk', 'note': 'Solarpunk: yeşille kaplı mimari, güneş panelleri, aydınlık ve '
+                                                       'umutlu gelecek, doğal ışık.'},
+    {'id': 'cyberpunk', 'label': 'Cyberpunk', 'note': 'Cyberpunk: yağmurlu gece, neon tabelalar, ıslak asfalttaki '
+                                                       'yansımalar, kalabalık megakent, keskin dijital görüntü.'},
+    {'id': 'post-apocalyptic', 'label': 'Kıyamet sonrası', 'note': 'Kıyamet sonrası: toz, pas, terk edilmiş şehirler, '
+                                                                    'soluk turuncu gökyüzü.'},
+    {'id': 'western', 'label': 'Western', 'note': 'Western: kavrulmuş toprak tonları, geniş ufuk, tozlu güneş, sıcak '
+                                                   've sert ışık.'},
+    {'id': 'pulp-sci-fi', 'label': 'Pulp bilimkurgu',
+     'note': '1950-70\'ler bilimkurgu dergi kapağı: parlak roketler, doygun renkler, boyalı ve iyimser retro gelecek.'},
+    {'id': 'fairy-forest', 'label': 'Peri ormanı', 'note': 'Büyülü peri ormanı: yumuşak parıltı, ışık huzmeleri, '
+                                                            'mantarlar ve yosun, ince büyülü sis.'},
+    {'id': 'greek-vase', 'label': 'Antik vazo', 'note': 'Antik Yunan vazo resmi: pişmiş toprak üstünde siyah '
+                                                         'figürler, profilden çizim, meander bordürler.'},
+) + _grouped(
+    'Deneysel ve dekoratif',
+    {'id': 'papercut', 'label': 'Kâğıt kesme', 'note': 'Katmanlı kâğıt kesme: üst üste siluet katmanları, aralarında '
+                                                        'derinlik gölgeleri, düz renkler.'},
+    {'id': 'stained-glass', 'label': 'Vitray', 'note': 'Vitray: kalın kurşun çizgiler, ışık geçiren parlak cam '
+                                                       'renkleri, ışıltılı hava.'},
+    {'id': 'mosaic', 'label': 'Mozaik', 'note': 'Bizans mozaiği: küçük taş ve cam parçaları, altın fon, stilize '
+                                                 'figürler.'},
+    {'id': 'collage', 'label': 'Kolaj', 'note': 'Kolaj: eski gazete, fotoğraf ve doku parçaları, yırtık kenarlar, '
+                                                 'gerçeküstü yan yana getirme.'},
+    {'id': 'surreal', 'label': 'Sürrealist', 'note': 'Sürrealist resim (Dalí, Magritte): mantık dışı ölçekler, eriyen '
+                                                      'nesneler, ıssız ufuklar, keskin berrak ışık.'},
+    {'id': 'silhouette', 'label': 'Siluet', 'note': 'Gölge oyunu: arkadan aydınlatılmış siyah siluetler, tek renkli '
+                                                     'parlak fon, Karagöz perdesi esintisi.'},
+    {'id': 'cyanotype', 'label': 'Siyanotip', 'note': 'Siyanotip baskı: Prusya mavisi üstüne beyaz, botanik baskı gibi '
+                                                       'fotogram dokusu.'},
+    {'id': 'blueprint', 'label': 'Teknik çizim', 'note': 'Teknik çizim (blueprint): mavi zemin üstüne beyaz çizgiler, '
+                                                          'ölçü çizgileri, kesitler ve notlar.'},
+    {'id': 'pixel-art', 'label': 'Piksel sanat', 'note': '16-bit piksel sanat: sınırlı palet, belirgin pikseller, '
+                                                          'retro oyun ekranı.'},
+    {'id': 'low-poly', 'label': 'Düşük poligon', 'note': 'Düşük poligonlu 3B: düz renkli üçgen yüzeyler, geometrik '
+                                                          'sade biçimler.'},
+    {'id': 'duotone', 'label': 'Duotone afiş', 'note': 'Duotone afiş: iki renk, yüksek kontrast, sade ve modern kitap '
+                                                        'kapağı görünümü.'},
+    {'id': 'risograph', 'label': 'Risograf', 'note': 'Risograf baskı: kaymış renk katmanları, gren, sınırlı mürekkep '
+                                                      'renkleri, bağımsız yayın havası.'},
+    {'id': 'constructivism', 'label': 'Konstrüktivizm', 'note': 'Sovyet konstrüktivist afişi: kırmızı, siyah ve krem, '
+                                                                 'diyagonal kompozisyon, geometrik biçimler.'},
+    {'id': 'bauhaus', 'label': 'Bauhaus', 'note': 'Bauhaus: ana renklerde geometrik şekiller, düzenli ızgara, sade '
+                                                   'modernist kompozisyon.'},
+) + _grouped(
+    'Ruh hâli',
+    {'id': 'melancholy', 'label': 'Melankolik', 'note': 'Melankolik ve soluk: desatüre mavi-gri tonlar, yağmur, '
+                                                         'yalnızlık hissi, yumuşak dağınık ışık.'},
+    {'id': 'nostalgia', 'label': 'Sıcak nostalji', 'note': 'Sıcak nostalji: kehribar tonlar, yumuşak ışık, çocukluk '
+                                                            'anısı gibi tanıdık hava.'},
+    {'id': 'dreamy', 'label': 'Rüya gibi', 'note': 'Rüya gibi: düşük kontrast, ışık saçılması, eriyen kenarlar, '
+                                                    'bulanık ve hafif.'},
+    {'id': 'dread', 'label': 'Kasvetli gerilim', 'note': 'Kasvetli gerilim: yeşil-sarı floresan ışık, dar ve sıkışık '
+                                                          'kadrajlar, klostrofobik hava.'},
 ) + (
     # LoRA'li tarzlar (F202, Krea 2; dosyalar ComfyUI'nin models/loras klasorunde). 'trigger' gorsel isteminin en basina
     # (stil kilavuzundan once), 'suffix' sona eklenir; tetik kelimeleri ve guc LoRA sayfalarindaki ornek istemlerden.

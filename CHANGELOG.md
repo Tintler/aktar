@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.45.0 — 2026-10-28
+
+### Eklenen
+- **Kitap görsellerinde 68 yeni hazır tarz (F224):** LoRA gerektirmeyen tarzlar 73'e çıktı. Yağlıboya, Kara film, Masal kitabı, Çocuk kitabı ve Kalem ve mürekkep, mevcut beş tarzla birlikte her zaman görünür. Kalan 63 tarz "Daha fazla" ile açılır ve yedi başlık altında gruplanır: Klasik resim ve baskı, Kitap illüstrasyonu, Çizgi roman ve animasyon, Fotoğraf ve sinema, Tür, Deneysel ve dekoratif, Ruh hâli. Açık listenin başındaki arama kutusu tarzın adında ve açıklamasında arar. Liste kapalıyken seçili tarz görünür kalır, açık ya da kapalı olması hatırlanır. Aynı liste "Tarzı değiştir" panelinde de kullanılır.
+
 ## 2.44.0 — 2026-10-28
 
 ### Eklenen

@@ -9,6 +9,7 @@
   // "Tarzi degistir" (istemler kalir, stil kilavuzu + LoRA degisir, hepsi yeniden uretilir; Bastan planla'dan ayri).
   import Modal from './Modal.svelte';
   import Toggle from './Toggle.svelte';
+  import PresetPicker from './PresetPicker.svelte';
   import Icon from '../lib/Icon.svelte';
   import { app, act, go, toast, refreshArtBooks } from '../lib/state.svelte.js';
   import { call, on } from '../lib/api.js';
@@ -479,12 +480,7 @@
         <label class="l" for="art-note">Kitap notu <small>Dil modeline verilen yönerge: tarz, ton, neyin gösterilip gösterilmeyeceği.</small></label>
         <textarea id="art-note" class="field" rows="3" bind:value={note}
           placeholder="Örn. daha soyut ol, insan yüzü gösterme, suluboya tarzında, dönemin mimarisini öne çıkar"></textarea>
-        <div class="row">
-          <span class="dim lead">Hazır tarz</span>
-          {#each plainPresets as entry (entry.id)}
-            <button class="chip" class:on={preset === entry.id} title={entry.note} onclick={() => pickPreset(entry)}>{entry.label}</button>
-          {/each}
-        </div>
+        <PresetPicker presets={plainPresets} selected={preset} onpick={(entry) => pickPreset(entry)} />
         {#if loraPresets.length}
           <div class="row">
             <span class="dim lead">LoRA tarzı</span>
@@ -606,12 +602,7 @@
           <b>Tarzı değiştir</b>
           <p class="dim">Plan ve sahne istemleri aynen kalır; yalnızca her görselin başına eklenen stil kılavuzu ve tarzın LoRA'sı değişir.
             Görseller aynı seed'lerle yeni tarzda yeniden üretilir (karakter kimliği açıksa portreler de).</p>
-          <div class="row">
-            <span class="dim lead">Hazır tarz</span>
-            {#each plainPresets as entry (entry.id)}
-              <button class="chip" class:on={restylePreset === entry.id} title={entry.note} onclick={() => pickPreset(entry, true)}>{entry.label}</button>
-            {/each}
-          </div>
+          <PresetPicker presets={plainPresets} selected={restylePreset} onpick={(entry) => pickPreset(entry, true)} />
           {#if loraPresets.length}
             <div class="row">
               <span class="dim lead">LoRA tarzı</span>
