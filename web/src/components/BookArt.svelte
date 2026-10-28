@@ -171,6 +171,10 @@
       const index = plan.characters.findIndex((c) => c.name === data.character.name);
       if (index >= 0) plan.characters[index] = data.character;
     }
+    if (data.place && plan) {
+      const index = (plan.places ?? []).findIndex((p) => p.name === data.place.name);
+      if (index >= 0) plan.places[index] = data.place;
+    }
     if (data.finished) call('art_plan_get', book).then((r) => { if (r?.plan !== undefined) applyPlan(r.plan); });
   });
   $effect(() => stop);
@@ -325,9 +329,9 @@
     act('art_cancel');
   }
 
-  async function generate(ids = null, all = false, portraits = null, bodies = null) {
+  async function generate(ids = null, all = false, portraits = null, bodies = null, spots = null) {
     if (otherJob) { toast('Başka bir kitabın görselleri için iş sürüyor.'); return; }
-    const result = await act('art_generate', book, ids, title, all, portraits, false, bodies);
+    const result = await act('art_generate', book, ids, title, all, portraits, false, bodies, spots);
     if (result?.started) app.artJob = { book, title, stage: 'generate', done: 0, total: result.total, current: '' };
   }
 
@@ -380,6 +384,11 @@
 
   async function setIdentity(value) {
     const result = await act('art_plan_save', book, { identity: value });
+    if (result) applyPlan(result.plan);
+  }
+
+  async function setPlaceImages(value) {
+    const result = await act('art_plan_save', book, { place_images: value });
     if (result) applyPlan(result.plan);
   }
 
@@ -625,6 +634,32 @@
         {#if plan.place_identity}
           <label class="l" for="art-places">Mekânlar <small>Satır başına "Ad: kalıcı görünüş". Tarifi değiştirmek o mekândaki görsellere yeniden üretince yansır.</small></label>
           <textarea id="art-places" class="field" rows="3" bind:value={places} onchange={savePlaces}></textarea>
+          <div class="row">
+            <Toggle checked={Boolean(plan.place_images)} disabled={Boolean(app.artJob)} label="Mekân görseli" onchange={setPlaceImages} />
+            <span class="dim">Her mekânın boş, geniş bir görseli üretilir; o mekândaki kişisiz ve tek kişilik sahneler bu görsel referans verilerek
+              kimlik iş akışıyla çizilir (mimari ve renkler korunur, kamera açısı sahneden). İki kişilik sahnede mekân yalnızca tarifle kalır.</span>
+          </div>
+          {#if plan.place_images && !identityReady}
+            <div class="warn"><Icon name="alert" size={16} /><span>Mekân görseli kimlik iş akışıyla çizilir: {options?.identity_workflow?.message ?? 'Kimlik iş akışı seçilmedi.'}</span>
+              <button class="btn sm" onclick={openSettings}><Icon name="settings" size={14} />Ayarlar</button></div>
+          {/if}
+          {#if plan.place_images && plan.places?.length}
+            <div class="spots">
+              {#each plan.places as place (place.name)}
+                <div class="spot card">
+                  <div class="img">
+                    {#if place.image_url}<img src={place.image_url} alt={place.name} loading="lazy" />
+                    {:else}<span class="dim">{generating && job.current === `Mekân: ${place.name}` ? 'Üretiliyor…' : 'Görsel yok'}</span>{/if}
+                  </div>
+                  <div class="acts">
+                    <b class="ellipsis" title={place.look}>{place.name}</b>
+                    <button class="btn sm ghost" disabled={Boolean(app.artJob) || !options?.workflow.ok} title="Mekân görselini yeni seed ile üret"
+                      onclick={() => generate(null, false, null, null, [place.name])}><Icon name="refresh" size={13} />{place.image_url ? '' : 'Üret'}</button>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
         {/if}
         <div class="row">
           <span class="dim">RTX büyütme</span>
@@ -840,6 +875,9 @@
   .portrait { aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: var(--surface); display: grid; place-items: center; font-size: 12px; }
   .portrait img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .face .acts { flex-wrap: nowrap; }
+  .spots { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+  .spot { display: flex; flex-direction: column; gap: 6px; padding: 8px; min-width: 0; font-size: 13px; }
+  .spot .acts { flex-wrap: nowrap; align-items: center; justify-content: space-between; }
   .bodies { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
   .bodies img { width: 30px; aspect-ratio: 832 / 1216; object-fit: cover; border-radius: 4px; background: var(--surface); }
   .cast { display: flex; gap: 4px; flex-wrap: wrap; }

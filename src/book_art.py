@@ -529,6 +529,16 @@ def clean_places(value, limit=12):
     return [{'name': c['name'], 'look': c['look']} for c in clean_characters(value, limit)]
 
 
+def keep_place_images(places, old):
+    """Mekanlar elle duzenlenince gorselleri (F222) ada gore korunur; tarif degistiyse anahtar tutmaz, yenilenir."""
+    by_name = {p['name'].lower(): p for p in old or ()}
+    for place in places:
+        before = by_name.get(place['name'].lower(), {})
+        place.update({key: before[key] for key in ('image', 'image_key', 'image_seed', 'image_version')
+                      if key in before})
+    return places
+
+
 # ---------------------------------------------------------------- gorunus degisimi (F209)
 def clean_changes(value, key='look'):
     """Karakterin kalici gorunus degisimleri [{section, start, look}] okuma sirasiyla (ayni yerde sonuncusu);
@@ -1270,13 +1280,46 @@ def body_keys(plan, name):
             if person['name'].lower() == str(name).lower() and person.get('outfit')}
 
 
-def identity_prompt(scene, people, style, faces=True, clothing=False, bodies=False):
+PLACE_VERSION = 1   # place_prompt degisince artir: eski mekan gorselleri yeniden uretilir (F222)
+
+
+def place_key(place):
+    """Mekan gorselinin anahtari (F222): tarif degisince yeni gorsel gerekir."""
+    return hashlib.sha1(f'{_sentence(place.get("look") or "")}|{PLACE_VERSION}'.lower().encode('utf-8')).hexdigest()[:10]
+
+
+def place_prompt(place):
+    """Mekanin referans gorseli ana is akisiyla: bos, butun mekan gorunur (kisi sahneden gelir)."""
+    return (f'Establishing wide shot of a location: {_sentence(place["look"])}. The place is empty with nobody in '
+            f'it, the whole space visible at eye level.')
+
+
+def scene_place(plan, scene):
+    """Sahnenin mekan gorseli kullanilacak mekani (F222 'place_images' acik, mekan kimligi acik, sahnenin mekani
+    listede) ya da None."""
+    if not (plan.get('place_images') and plan.get('place_identity') and scene.get('place')):
+        return None
+    return next((p for p in plan.get('places') or () if p['name'].lower() == str(scene['place']).lower()), None)
+
+
+def place_ready(place):
+    """Mekanin gecerli gorsel dosya adi (tarifi degismemis) ya da None."""
+    return place.get('image') if place and place.get('image') and place.get('image_key') == place_key(place) else None
+
+
+def identity_prompt(scene, people, style, faces=True, clothing=False, bodies=False, place=False):
     """Kimlik is akisinin istemi (talimat bicimi: LoRA "bu kisiyi ... ciz" diye egitildi). Stil sona eklenir;
     kimlik is akisinda PRE/POST dugumu yoktur (son ek comfy_client.fill'de '. ' ile eklenir). `faces` kapali
     ("Yuz gosterme", F213): yuz kimligi istenmez (portredeki one bakan yuzu sahneye tasiyordu), sac, beden ve giysi.
     `clothing` (F219): kisinin o anki kiyafeti tarifine eklenir, giysi portreden alinmaz (Identity Edit referanstaki
     giysiyi tasir; gecelik, zirh gibi o ana ait kiyafet ezilmesin). `bodies` (F220): referanslar o anki kiyafetin tam
-    boy gorselleri, giysi de referanstan korunur."""
+    boy gorselleri, giysi de referanstan korunur. `place` (F222): ilk referans sahnenin mekaninin gorseli (Krea2Edit
+    egitim sirasi: once sahne, sonra kisi); mimari ve malzeme korunur, kamera acisi sahneden."""
+    setting = ('Keep the architecture, materials and colours of the place from reference 1, but not its camera '
+               'angle or framing: they follow the scene.')
+    if place and not people:
+        return (f'Create an illustration set in the place from the reference image. {_sentence(scene["prompt"])}. '
+                f'{setting.replace(" from reference 1", "")} Style: {_sentence(style)}')
     who = ('this person' if len(people) == 1 else 'these people')
     looks = [_wearing(c) if clothing else _sentence(person_look(c)) for c in people]
     names = ' and '.join(f'the person from reference {n + 1} ({look})' for n, look in enumerate(looks)) \
@@ -1293,9 +1336,14 @@ def identity_prompt(scene, people, style, faces=True, clothing=False, bodies=Fal
     turn = 'the pose, gaze and facial expression follow the scene, not the reference' if faces else \
         'the pose follows the scene and the face is turned away from the viewer'
     dress = ' The clothing follows the description above, not the reference.' if clothing and not bodies else ''
-    return (f'Create an illustration of {who}: {names}. {_sentence(scene["prompt"])}. Preserve {keep}, but not '
-            f'its pose, framing or background: {turn}.{dress} Each person from the references appears only once. '
-            f'Style: {_sentence(style)}')
+    if place:   # tek kisi: iki yuvanin ilki mekanin
+        head = f'Create an illustration of the person from reference 2 ({looks[0]}) in the place from reference 1.'
+        keep = re.sub(r'of the reference (?:portrait|image)', 'of reference 2', keep)
+        setting = f' {setting}'
+    else:
+        head, setting = f'Create an illustration of {who}: {names}.', ''
+    return (f'{head} {_sentence(scene["prompt"])}.{setting} Preserve {keep}, but not its pose, framing or '
+            f'background: {turn}.{dress} Each person from the references appears only once. Style: {_sentence(style)}')
 
 
 def scene_people(scene, characters):
@@ -1838,6 +1886,40 @@ class Store:
         """Karakterin `key` icin gecerli tam boy referansi (F220) ya da None."""
         entry = body_of(character, key)
         return self.folder(book) / entry['file'] if entry and entry.get('file') else None
+
+    def place(self, plan, name):
+        found = next((p for p in plan.get('places') or () if p['name'].lower() == str(name or '').lower()), None)
+        if found is None:
+            raise ValueError('Mekân bulunamadı.')
+        return found
+
+    def place_image_path(self, book, place):
+        """Mekanin gecerli gorseli (F222; tarifi degistiyse None)."""
+        file = place_ready(place)
+        return self.folder(book) / file if file else None
+
+    def write_place_image(self, book, name, data, seed=None):
+        """Mekan gorseli mekan-<ad>-<surum>.png (F222); eskisi silinir, anahtar o anki tarife gore."""
+        folder = self.folder(book)
+        folder.mkdir(parents=True, exist_ok=True)
+        holder = {}
+
+        def change(plan):
+            place = self.place(plan, name)
+            version = int(place.get('image_version', 0)) + 1
+            file = f'mekan-{portrait_slug(place["name"])}-{version}.png'
+            partial = folder / (file + '.part')
+            partial.write_bytes(data)
+            partial.replace(folder / file)
+            holder['old'] = place.get('image')
+            place.update(image=file, image_key=place_key(place), image_version=version)
+            if seed is not None:
+                place['image_seed'] = int(seed)
+
+        plan = self.update(book, change)
+        if holder.get('old') and holder['old'] != self.place(plan, name)['image']:
+            (folder / holder['old']).unlink(missing_ok=True)
+        return plan
 
     def write_body(self, book, name, key, data, seed=None):
         """Tam boy referans boy-<ad>-<anahtar>-<surum>.png (F220). Ayni anahtarin eskisi, baska portreden

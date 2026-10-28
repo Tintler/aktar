@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.43.0 — 2026-10-28
+
+### Eklenen
+- **Kitap görsellerinde mekân görseli (F222):** "Mekân kimliği" açıkken altındaki yeni "Mekân görseli" seçeneğiyle her mekânın boş, geniş bir referans görseli üretilir. O mekânda geçen kişisiz ve tek kişilik sahneler bu görsel referans verilerek kimlik iş akışıyla çizilir: mimari, malzemeler ve renkler korunur, kamera açısı ve çerçeve sahneden gelir. Tek kişilik sahnede kimlik iş akışına ikinci bir referans yuvası kendiliğinden eklenir (ilk yuva mekân, ikincisi kişi; yalnızca Krea2Edit iş akışında). İki kişilik sahnelerde ve orta boş şeritlerde mekân eskisi gibi yalnızca tarifle verilir. Mekân görselleri sahne üretilirken eksik olanlar için kendiliğinden üretilir, tarif değişince yenilenir; kartta küçük görselleri gösterilir ve yeni seed ile yeniden üretilebilir. Seçenek kapalıyken mekân kimliği eskisi gibi çalışır.
+
 ## 2.42.0 — 2026-10-28
 
 ### Düzeltilen

@@ -168,6 +168,42 @@ def references(workflow):
     return found
 
 
+EDIT_PATCH = 'Krea2EditModelPatch'
+EDIT_ENCODE = 'Krea2EditGroundedEncode'
+
+
+def with_second_reference(workflow):
+    """Tek referansli kimlik is akisinin iki referansli kopyasi (F222 mekan + kisi): REFERENCE-B LoadImage eklenir,
+    Krea2EditModelPatch'in source_latent_b/source_image_b ve Krea2EditGroundedEncode'larin image_b girislerine
+    baglanir (comfyui-krea2edit egitim sirasi: ilk referans sahne, ikincisi kisi). Zaten iki referansliysa aynen;
+    Krea2Edit dugumleri yoksa None (baska bir is akisinda iki referansin nasil baglanacagi bilinmez)."""
+    if len(references(workflow)) > 1:
+        return workflow
+    found = references(workflow)
+    patch = next((node for node in workflow.values() if node.get('class_type') == EDIT_PATCH), None)
+    if not found or patch is None or not _link(patch['inputs'].get('source_latent')):
+        return None
+    workflow = copy.deepcopy(workflow)
+    patch = next(node for node in workflow.values() if node.get('class_type') == EDIT_PATCH)
+    first = next(key for key, node in workflow.items() if _title(node) == 'reference'
+                 and isinstance((node.get('inputs') or {}).get('image'), str))
+    encoder = workflow.get(patch['inputs']['source_latent'][0]) or {}
+    vae = (encoder.get('inputs') or {}).get('vae') or patch['inputs'].get('vae')
+    if not _link(vae):
+        return None
+    workflow['aktar_ref_b'] = {'inputs': dict(workflow[first]['inputs']), 'class_type': 'LoadImage',
+                               '_meta': {'title': 'REFERENCE-B'}}
+    workflow['aktar_ref_b_latent'] = {'inputs': {'pixels': ['aktar_ref_b', 0], 'vae': vae},
+                                      'class_type': 'VAEEncode', '_meta': {'title': 'VAE Encode B'}}
+    patch['inputs']['source_latent_b'] = ['aktar_ref_b_latent', 0]
+    if _link(patch['inputs'].get('source_image')):
+        patch['inputs']['source_image_b'] = ['aktar_ref_b', 0]
+    for node in workflow.values():
+        if node.get('class_type') == EDIT_ENCODE and _link(node['inputs'].get('image')):
+            node['inputs']['image_b'] = ['aktar_ref_b', 0]
+    return workflow
+
+
 def describe_identity_workflow(workflow):
     """Kimlik is akisi: ana is akisinin dugumleri + 'REFERENCE' LoadImage."""
     info = describe_workflow(workflow)

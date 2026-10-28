@@ -1488,6 +1488,70 @@ class BridgeTest(unittest.TestCase):
         self.bridge.art_portrait_clear('ab12cd34ef', 'Sekai')
         self.assertFalse(list(store.folder('ab12cd34ef').glob('boy-*')))
 
+    def test_place_image_reference(self):
+        """F222: mekan gorseli once ana is akisiyla uretilir; tek kisilik sahnede ilk yuvaya mekan, ikinciye kisi
+        (tek referansli Krea2Edit is akisina ikinci yuva eklenir), kisisiz sahnede yalnizca mekan; tarif degisince
+        yenilenir; mekan kimligi tarifi istemde kalir."""
+        store = self.identity_plan()
+        edit = dict(IDENTITY)
+        edit['6'] = {'inputs': {'pixels': ['5', 0], 'vae': ['3', 0]}, 'class_type': 'VAEEncode', '_meta': {'title': 'E'}}
+        edit['8'] = {'inputs': {'model': ['4', 0], 'source_latent': ['6', 0], 'vae': ['3', 0], 'source_image': ['5', 0],
+                                'ref_position_a': 'aligned (trained)'}, 'class_type': 'Krea2EditModelPatch',
+                     '_meta': {'title': 'Patch'}}
+        source = Path(self.tmp.name) / 'kimlik.json'
+        source.write_text(json.dumps(edit), encoding='utf-8')
+        self.bridge.art_set_workflow(str(source), 'identity')
+        store.update('ab12cd34ef', lambda p: (
+            p.update(place_identity=True, place_images=True,
+                     places=[{'name': 'Maden', 'look': 'Rusty steel catwalks over a dark shaft'}]),
+            p['scenes'][0].update(place='Maden', cast=['Sekai']), p['scenes'][1].update(place='maden')))
+        self.assertEqual(self.bridge.art_generate('ab12cd34ef')['total'], 4)   # mekan + portre + iki sahne
+        self.assertEqual(self.finish()['done'], 4)
+        place, portrait, scene, empty = self.fake.prompts
+        self.assertTrue(place['97']['inputs']['positive'].startswith(
+            'Establishing wide shot of a location: Rusty steel catwalks over a dark shaft.'))
+        plan = store.load('ab12cd34ef')
+        spot = plan['places'][0]
+        self.assertTrue((store.folder('ab12cd34ef') / spot['image']).is_file())
+        sekai = plan['characters'][0]
+        self.assertEqual(scene['5']['inputs']['image'], f'aktar-ab12cd34ef-{spot["image"]}')   # ilk yuva mekan
+        self.assertEqual(scene['aktar_ref_b']['inputs']['image'], f'aktar-ab12cd34ef-{sekai["portrait"]}')
+        self.assertEqual(scene['8']['inputs']['source_latent_b'], ['aktar_ref_b_latent', 0])
+        self.assertEqual(scene['8']['inputs']['source_image_b'], ['aktar_ref_b', 0])
+        self.assertEqual(scene['9']['inputs']['image_b'], ['aktar_ref_b', 0])
+        self.assertTrue(scene['9']['inputs']['prompt'].startswith('Create an illustration of the person from '
+                                                                  'reference 2 (a young woman'))
+        self.assertIn('Setting: Rusty steel catwalks', scene['9']['inputs']['prompt'])   # tarif de kalir
+        self.assertNotIn('aktar_ref_b', empty)
+        self.assertEqual(empty['5']['inputs']['image'], f'aktar-ab12cd34ef-{spot["image"]}')
+        self.assertTrue(empty['9']['inputs']['prompt'].startswith('Create an illustration set in the place'))
+        self.assertTrue(self.bridge.art_plan_get('ab12cd34ef')['plan']['places'][0]['image_url'])
+
+        # tarif elle degisince gorsel kalir ama gecersiz: sonraki uretim yeniler; places=[ad] yeni seed
+        saved = self.bridge.art_plan_save('ab12cd34ef', {'places': [{'name': 'Maden', 'look': 'Flooded mine hall'}]})
+        self.assertEqual(saved['plan']['places'][0]['image_url'], '')
+        self.assertEqual(self.bridge.art_generate('ab12cd34ef', ['1-9'])['total'], 2)
+        self.finish()
+        old = store.load('ab12cd34ef')['places'][0]
+        self.assertFalse((store.folder('ab12cd34ef') / spot['image']).exists())
+        self.assertEqual(self.bridge.art_generate('ab12cd34ef', places=['maden'])['total'], 1)
+        self.finish()
+        new = store.load('ab12cd34ef')['places'][0]
+        self.assertNotEqual((new['image'], new['image_seed']), (old['image'], old['image_seed']))
+
+        # kapaliyken eski akis: mekan yalnizca tarifle, kisi tek referansla
+        self.bridge.art_plan_save('ab12cd34ef', {'place_images': False})
+        self.bridge.art_generate('ab12cd34ef', ['1-0'])
+        self.finish()
+        self.assertNotIn('aktar_ref_b', self.fake.prompts[-1])
+        self.assertEqual(self.fake.prompts[-1]['5']['inputs']['image'], f'aktar-ab12cd34ef-{sekai["portrait"]}')
+        self.assertNotIn('image_url', self.bridge.art_plan_get('ab12cd34ef')['plan']['places'][0])
+
+    def test_second_reference_needs_krea2edit(self):
+        self.assertIsNone(comfy_client.with_second_reference(IDENTITY))   # Krea2Edit dugumu yok
+        two = dict(IDENTITY, b={'inputs': {'image': 'x.png'}, 'class_type': 'LoadImage', '_meta': {'title': 'REFERENCE-B'}})
+        self.assertIs(comfy_client.with_second_reference(two), two)
+
     def test_body_reference_follows_slots(self):
         """F220: tek referansli is akisinda yalnizca ilk kisi kimlikle cizilir, ikinciye tam boy uretilmez;
         kiyafeti olmayan (giysisi tarifinde) portresiyle kalir."""
