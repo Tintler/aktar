@@ -51,6 +51,8 @@ export const app = $state({
   // F178 Metinden ses: yazilan metin, cikti adi, suren kayit {done, total, loading} ve son kaydedilen dosya {path, url, duration}.
   speech: { text: '', name: '', job: null, last: null },
   // F194 Oyun Cevirisi: canli durum (bridge_game._game_status; 'game' olayiyla gelir).
+  // F225 Gazete: suren is {stage, done, total} ve son biten isin sonucu (bridge_gazete 'gazete' olayi).
+  gazete: { job: null, finished: null, pageDone: 0 },
   game: { status: { running: false, overlay: true, error: '', recent: [], info: {}, capture_safe: true } },
   ttsPrefs: { device: 'auto', speed: 1, voices: {}, options: {} },
   // Komut satirindan ya da baska sayfadan acilmak uzere bekleyen video (Translate acilinca alir).
@@ -88,7 +90,7 @@ export function setThink(value) {
   savePref({ think: app.think });
 }
 
-const VIEWS = ['chat', 'library', 'files', 'translate', 'books', 'reading', 'speech', 'game', 'subscriptions', 'console'];
+const VIEWS = ['chat', 'library', 'files', 'translate', 'books', 'reading', 'speech', 'gazete', 'game', 'subscriptions', 'console'];
 
 // F189: focus_* tam ekran okumanin yazi boyutu, renkleri ve gecisi.
 export const READER_DEFAULTS = { size: 19, font: 'serif', leading: 1.75, width: 680, paper: 'theme',
@@ -258,6 +260,17 @@ export async function init() {
     for (const message of errors ?? []) toast(message, 'error');
   });
   on('game', (status) => (app.game.status = status));
+  on('gazete', (data) => {
+    if (data.finished) {
+      app.gazete.job = null;
+      app.gazete.finished = data;
+      if (data.error) toast(data.error, 'error');
+      else if (data.cancelled) toast('Gazete işi durduruldu.');
+      return;
+    }
+    if (data.page_done || data.article_done) { app.gazete.pageDone += 1; return; }
+    app.gazete.job = { ...(app.gazete.job ?? {}), ...data };
+  });
   on('tts', (status) => {
     app.tts = status;
     // Yuklenirken bir ses inmis olabilir: "indirildi" isaretleri yenilenir.

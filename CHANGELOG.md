@@ -2,6 +2,12 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.46.0 — 2026-10-28
+
+### Eklenen
+- **Gazete (F225):** Sol menüdeki yeni **Gazete** sayfası günlük e-gazeteyi, gözü az gören birinin basılı gazeteyi telefonla gösterip dinleyebileceği hâle getirir. Sayfa görüntüleri klasörü ya da PDF eklenince her sayfa için makaleler önerilir. Başlıklar yazı boyundan bulunur, fotoğraf üstündeki büyük başlıklar için küçültülmüş ikinci bir tarama yapılır, gövde sütunları ayırıcı çizgileri aşmadan en yakın başlığa bağlanır. Her makale kendi çerçevesi kırpılarak okunur (Tesseract sütunları çerçeve içinde kendisi ayırır; tam sayfa okuma gazetede sütunları karıştırıyordu), satır sonu tirelemeleri birleştirilir. Öneriler sayfa görüntüsünün üzerinde düzeltilir: makalenin tamamını çerçeveleyerek yeni makale, kutu ekleme, başlık kutusu, birleştirme, kutu sırası, başlık ve metin düzeltme. "Tamam, sonraki" ile gözden geçirilen makaleler, sayfa yeniden bölünse de korunur. **Seslendir** sesi olmayan ya da metni değişen makaleleri seçilen sesle (varsayılan EMA Lightning) MP3 olarak kaydeder.
+- **Telefon sunucusu (F225):** Gazete sayfasından açılan yerel ağ sunucusu, ayrı yazılan Android uygulamasının gönderdiği kamera karesinin hangi sayfanın hangi makalesi olduğunu bulur ve makalenin metnini ve sesini verir. Eşleştirme SIFT ve homografiyle yapılır; yazının okunması gerekmez, bulanık ve eğik kare de olur. Yalnızca yerel ağdan erişilir; telefon bir kez Aktar'da görünen altı haneli kodla eşlenir. Örnek sayıda benzetilmiş eğik, bulanık, karanlık 100 karenin 98'i doğru sayfada bulundu, yanlış sayfa yok. Sayfa eşleştirme için `opencv-python-headless` gerekir.
+
 ## 2.45.0 — 2026-10-28
 
 ### Eklenen
