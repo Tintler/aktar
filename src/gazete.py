@@ -9,7 +9,8 @@ Calisma klasoru: APP_DIR/gazete/<sayi>/
   sayi.json         ad, sayfalar ve makaleler (kutular sayfa goruntusunun piksel koordinatlarinda)
   sayfalar/0001.jpg sayfa goruntuleri (PDF'den ya da goruntu klasorunden)
   ocr/0001.tsv      tam sayfa Tesseract kelime konumlari (onbellek; makale onerisi icin)
-  ocr/0001.low.tsv  1/4 boyutta seyrek tarama (fotograf ustundeki buyuk basliklar)
+  ocr/0001.half.tsv 1/2 boyutta seyrek tarama (buyuk ve serif basliklar; tam taramada kaciyor)
+  ocr/0001.<model>.json OCR modelinin blok okumalari (F226, gazete_model)
   ses/<makale>-<anahtar>.mp3
 
 Tam sayfa OCR gazete sayfasinda sutunlari ve fotograf ici yazilari karistirir; makale metni bu yuzden
@@ -37,7 +38,7 @@ ISSUE_FILE = 'sayi.json'
 IMAGE_TYPES = ('.jpg', '.jpeg', '.png', '.webp', '.tif', '.tiff')
 PAGE_LONG_SIDE = 3400        # PDF sayfasi bu boyda cizilir; daha buyuk goruntuler kucultulur
 MAX_LONG_SIDE = 4200
-LOW_FACTOR = 4               # buyuk baslik taramasi icin kucultme
+LOW_FACTOR = 2               # buyuk baslik taramasi icin kucultme (1/4'te serif basliklar kaciyordu)
 HEAD_RATIO = 1.7             # govde yazisinin bu katindan buyuk satir baslik sayilir
 LOW_HEAD_RATIO = 1.9
 MIN_CONF = 30
@@ -233,7 +234,9 @@ def lines_of(rows, split=True, min_conf=MIN_CONF):
         part = [words[0]]
         for word in words[1:]:
             last = part[-1]
-            if split and word[0] - (last[0] + last[2]) > 1.6 * height:
+            # dev baslik ile yanindaki govde sutunu tek satir okunabilir: yukseklik iki kattan cok degisirse bolunur
+            jump = len(word[4]) > 2 and len(last[4]) > 2 and max(word[3], last[3]) > 2 * min(word[3], last[3])
+            if split and (word[0] - (last[0] + last[2]) > 1.6 * height or jump):
                 parts.append(part)
                 part = []
             part.append(word)
@@ -287,15 +290,35 @@ def _overlaps(a, b):
     return min(a[2], b[2]) > max(a[0], b[0]) and min(a[3], b[3]) > max(a[1], b[1])
 
 
-def add_low_heads(blocks, lines, body):
-    """Kucuk taramada bulunan buyuk satirlardan, tam taramadaki bir basligin ustune binmeyenler baslik olur."""
+def _area(box):
+    return max(0, box[2] - box[0]) * max(0, box[3] - box[1])
+
+
+def _common(a, b):
+    return _area([max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3])])
+
+
+def add_low_heads(blocks, lines, body, prefer=False):
+    """Kucuk taramada bulunan buyuk satirlardan, tam taramadaki bir basligin ustune binmeyenler baslik olur.
+    Seyrek tarama alt alta govde satirlarini tek buyuk satir sanabilir: alaninin ucte birinden fazlasi govde
+    bloguyla ortusen satir baslik sayilmaz."""
+    ratio = HEAD_RATIO if prefer else LOW_HEAD_RATIO   # modelle okunurken yanlis baslik dil modelinde elenir
     for line in lines:
-        if line['size'] <= LOW_HEAD_RATIO * body or len(line['text']) < 4:
+        if line['size'] <= ratio * body or len(line['text']) < 4:
             continue
-        if any(block['head'] and _overlaps(block['box'], line['box']) for block in blocks):
+        covered = sum(_common(block['box'], line['box']) for block in blocks if not block['head'])
+        if covered > _area(line['box']) / 3:
             continue
+        clash = [block for block in blocks if block['head'] and _overlaps(block['box'], line['box'])]
+        if clash and not prefer:
+            continue
+        # prefer: tam taramanin baslik blogu dev basligi yanindaki sutunlarla birlestirebiliyor; seyrek taramanin
+        # satiri yerine gecer (seyrek taramanin alt alta iki satiri birbirine hafifce binebilir, ikisi de kalir)
+        for block in clash:
+            if not block.get('low'):
+                blocks.remove(block)
         blocks.append({'box': list(line['box']), 'size': line['size'], 'lines': [line], 'head': True,
-                       'text': line['text']})
+                       'text': line['text'], 'low': True})
     return blocks
 
 
@@ -383,10 +406,15 @@ def _union(boxes):
     return [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
 
 
-def propose(name, page, reader=None, low_reader=None, log=print):
+def propose(name, page, reader=None, low_reader=None, log=print, read=None, read_name='', ask=None):
     """Sayfanin otomatik makale onerisi (OCR onbellekli). Govde metni 120 harften kisa olan oneriler
-    (fotograf ici yazilar, reklam) atilir."""
+    (fotograf ici yazilar, reklam) atilir.
+
+    F226: read (png -> metin, OCR modeli; read_name onbellek adi) verilirse bloklar modelle okunur; ask (istem ->
+    yanit, dil modeli) verilirse bloklar basliklara modelle baglanir (gazete_model). Model yaniti
+    kullanilamazsa kurallara donulur. Modelle bulunan onerilerde 'titled': baslik modelden, yeniden okunmaz."""
     from PIL import Image
+    import gazete_model
     folder = issue_dir(name)
     with Image.open(page_path(name, page)) as opened:
         image = opened.convert('RGB')
@@ -396,10 +424,28 @@ def propose(name, page, reader=None, low_reader=None, log=print):
     lines = lines_of(parse_tsv(text))
     body = body_size(lines)
     blocks = blocks_of(lines, body)
-    small = image.resize((image.width // LOW_FACTOR, image.height // LOW_FACTOR))
-    low = _cached(folder / 'ocr' / f'{page:04d}.low.tsv', lambda: low_reader(_png(small)))
-    add_low_heads(blocks, lines_of(parse_tsv(low, LOW_FACTOR), split=False, min_conf=10), body)
-    found = articles_of(blocks, body, separators(image, body))
+    small = image.resize((image.width // LOW_FACTOR, image.height // LOW_FACTOR), Image.LANCZOS)
+    low = _cached(folder / 'ocr' / f'{page:04d}.half.tsv', lambda: low_reader(_png(small)))
+    add_low_heads(blocks, lines_of(parse_tsv(low, LOW_FACTOR), split=False, min_conf=10), body, prefer=bool(read))
+    seps = separators(image, body)
+    if read:
+        path = folder / 'ocr' / f'{page:04d}.{slug(read_name or "model")}.json'
+        try:
+            cache = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            cache = {}
+        try:
+            gazete_model.read_blocks(image, blocks, read, cache)
+        finally:
+            app_core.save_json(path, cache)
+    found = None
+    if ask:
+        try:
+            found = gazete_model.articles(blocks, body, image.size, ask, seps, log, image)
+        except (ValueError, RuntimeError, KeyError, TypeError) as error:
+            log(f'UYARI: Gazete {page}. sayfa: dil modelinin bağlaması kullanılamadı, kurallarla bölünüyor ({error}).')
+    if found is None:
+        found = articles_of(blocks, body, seps)
     return [item for item in found if item['chars'] >= 120]
 
 
@@ -464,29 +510,36 @@ def tidy(text):
     return '\n\n'.join(merged)
 
 
-def read_box(image, box, reader):
+def read_box(image, box, reader, model=False):
     """Kutuyu kirpip okur. Kutu birden cok sutun kapsayabilir: Tesseract (psm 3) sutunlari kendisi ayirir;
-    kenar payi, satir kutusunun kestigi harfleri geri getirir."""
+    kenar payi, satir kutusunun kestigi harfleri geri getirir. model: OCR modeli (kirpinti uc kata kadar buyutulur)."""
+    from PIL import Image
     x1, y1, x2, y2 = box
     margin = 12
     crop = image.crop((max(0, x1 - margin), max(0, y1 - margin), min(image.width, x2 + margin),
                        min(image.height, y2 + margin)))
-    if crop.height < 60:     # tek satirlik kucuk kutu: Tesseract buyutulunce daha iyi okur
+    if model:
+        import gazete_model
+        factor = gazete_model.scale_for(None, crop.size)
+        crop = crop.resize((round(crop.width * factor), round(crop.height * factor)), Image.LANCZOS)
+    elif crop.height < 60:     # tek satirlik kucuk kutu: Tesseract buyutulunce daha iyi okur
         crop = crop.resize((crop.width * 2, crop.height * 2))
     return reader(_png(crop))
 
 
-def read_article(name, article, reader=None, log=print):
+def read_article(name, article, reader=None, log=print, model=False, title=True):
     """Makalenin basligini ve kutularini ayri ayri okur; article['title'] (elle verilmediyse) ve
-    article['text'] guncellenir."""
+    article['text'] guncellenir. model: reader OCR modelidir. title=False: baslik okunmaz (modelin duzelttigi
+    baslik kalir)."""
     from PIL import Image
     reader = reader or ocr_reader(log=log, psm='3', tsv=False)
     with Image.open(page_path(name, article['page'])) as opened:
         image = opened.convert('RGB')
-    if article.get('head') and not article.get('title_edited'):
-        title = ' '.join(read_box(image, article['head'], reader).split())
-        article['title'] = re.sub(r'^[^\wÇĞİÖŞÜçğıöşü“"‘\']+', '', title)
-    article['text'] = '\n\n'.join(part for part in (tidy(read_box(image, box, reader)) for box in article['boxes']) if part)
+    if title and article.get('head') and not article.get('title_edited'):
+        heading = ' '.join(read_box(image, article['head'], reader, model).split())
+        article['title'] = re.sub(r'^[^\wÇĞİÖŞÜçğıöşü“"‘\']+', '', heading)
+    article['text'] = '\n\n'.join(part for part in (tidy(read_box(image, box, reader, model))
+                                                    for box in article['boxes']) if part)
     article.pop('audio', None)
     return article
 

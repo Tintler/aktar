@@ -130,33 +130,124 @@ class GazeteMixin:
         self._gazete_job.start()
         return {'started': True}
 
+    # ------------------------------------------------------------------ okuma modelleri (F226)
+    def _gazete_model_names(self, cfg):
+        """(OCR modeli, dil modeli): ui.json gazete.ocr_model / layout_model; yoksa Ayarlar'daki OCR modeli ve
+        sohbet modeli. Bos metin: o adim modelsiz (Tesseract / kurallar)."""
+        prefs = self._gazete_prefs()
+        ocr = prefs.get('ocr_model')
+        layout = prefs.get('layout_model')
+        ocr = str(cfg.get('ocr_model') or '' if ocr is None else ocr).strip()
+        layout = str(cfg.get('model') or '' if layout is None else layout).strip()
+        return ocr, layout
+
+    def _gazete_models(self, keep=False):
+        """Sunucuda bulunan modellerle okuyucular: {read, read_name, ask, client, loaded}. Sunucuya
+        ulasilamazsa ya da model yoksa o adim Tesseract'a / kurallara kalir (gunluge yazilir).
+        keep: modeller LM Studio'da yuklu degilse bir kez yuklenir (sayfalar arasinda bosaltilip yeniden
+        yuklenmesin); loaded yalnizca bu cagrinin yukledikleri, is bitince bunlar bosaltilir."""
+        import gazete_model
+        from app_core import Client, keep_loaded, load_config
+        result = {'read': None, 'read_name': '', 'ask': None, 'client': None, 'loaded': []}
+        try:
+            cfg = load_config()
+            ocr, layout = self._gazete_model_names(cfg)
+            if not ocr and not layout:
+                return result
+            client = Client(dict(cfg, disable_thinking=True), log=self._log)
+            available = set(client.models())
+        except (RuntimeError, ValueError, OSError) as error:
+            self._log(f'Gazete: model sunucusuna ulaşılamadı, Tesseract ile okunuyor ({error}).')
+            return result
+        for model, what in ((ocr, 'OCR modeli'), (layout, 'Dil modeli')):
+            if model and model not in available:
+                self._log(f'Gazete: {what} sunucuda yok ({model}); bu adım modelsiz yapılıyor.')
+        ocr = ocr if ocr in available else ''
+        layout = layout if layout in available else ''
+        result['client'] = client
+        if keep:
+            result['loaded'] = keep_loaded(client, [ocr, layout], self._log)
+        if ocr:
+            result['read'] = gazete_model.reader(client, ocr, str(cfg.get('ocr_model_prompt') or 'Text Recognition:'))
+            result['read_name'] = ocr
+
+        if layout:
+            def ask(prompt, png=None):
+                if png:
+                    return client.vision(prompt, png, model=layout, max_tokens=gazete_model.MAX_TOKENS)
+                return client.chat([{'role': 'user', 'content': prompt}], temperature=0,
+                                   max_tokens=gazete_model.MAX_TOKENS)
+            if layout != client.cfg.get('model'):
+                client.cfg = dict(client.cfg, model=layout)   # chat() cfg['model'] ile ister
+            result['ask'] = ask
+        return result
+
+    def gazete_reading(self):
+        """Okuma modelleri: {ocr_model, layout_model}; bos metin = modelsiz (Tesseract / kurallar)."""
+        from app_core import load_config
+        try:
+            ocr, layout = self._gazete_model_names(load_config())
+        except (ValueError, OSError) as error:
+            return _error(error)
+        return {'ocr_model': ocr, 'layout_model': layout}
+
+    def gazete_set_reading(self, ocr_model=None, layout_model=None):
+        values = {key: ' '.join(str(value).split()) for key, value in
+                  (('ocr_model', ocr_model), ('layout_model', layout_model)) if value is not None}
+        self._gazete_set_prefs(**values)
+        return self.gazete_reading()
+
+    def _gazete_read(self, name, article):
+        """Elle duzeltmeden sonra makaleyi okur: OCR modeli varsa onunla, yoksa Tesseract."""
+        models = self._gazete_models()
+        if models['read']:
+            return gazete.read_article(name, article, models['read'], self._log, model=True)
+        return gazete.read_article(name, article, log=self._log)
+
     def _propose_pages(self, name, pages, stop, emit):
         """Verilen sayfalar (None: makalesi olmayan tum sayfalar) icin oneri + OCR. Gozden gecirilmis
         (reviewed) makalelere dokunulmaz; o sayfadaki diger otomatik makaleler yenilenir."""
+        from app_core import unload_models
         data = gazete.load(name)
         if pages is None:
             taken = {a['page'] for a in data.get('articles', [])}
             pages = [p['page'] for p in data.get('pages', []) if p['page'] not in taken]
+        if not pages:
+            return
         reader = gazete.ocr_reader(log=self._log)
         low = gazete.ocr_reader(log=self._log, psm='11')
-        boxes = gazete.ocr_reader(log=self._log, psm='3', tsv=False)
-        for done, page in enumerate(pages):
-            if stop.is_set():
-                raise GracefulStop('Durduruldu.')
-            emit(stage='Makaleler bulunup okunuyor', done=done, total=len(pages), page=page)
-            found = gazete.propose(name, page, reader, low, self._log)
-            data = gazete.load(name)   # arayuzde bu arada yapilan duzeltmeler kaybolmasin
-            data['articles'] = [a for a in data.get('articles', []) if a['page'] != page or a.get('reviewed')]
-            keep = [a for a in data['articles'] if a['page'] == page]
-            for item in found:
-                if any(gazete._overlaps(item['head'], a.get('head') or a['boxes'][0]) for a in keep):
-                    continue
-                article = {'id': gazete.new_id(data), 'page': page, 'head': item['head'], 'boxes': item['boxes'],
-                           'title': item['title'], 'auto': True}
-                gazete.read_article(name, article, boxes, self._log)
-                data['articles'].append(article)
-            gazete.save(name, data)
-            emit(page_done=page, name=name)
+        emit(stage='Okuma modelleri hazırlanıyor', done=0, total=len(pages))
+        models = self._gazete_models(keep=True)
+        read = models['read']
+        boxes = read or gazete.ocr_reader(log=self._log, psm='3', tsv=False)
+        try:
+            for done, page in enumerate(pages):
+                if stop.is_set():
+                    raise GracefulStop('Durduruldu.')
+                emit(stage='Makaleler bulunup okunuyor', done=done, total=len(pages), page=page)
+                found = gazete.propose(name, page, reader, low, self._log, read, models['read_name'], models['ask'])
+                articles = []
+                for item in found:
+                    if stop.is_set():
+                        raise GracefulStop('Durduruldu.')
+                    article = {'page': page, 'head': item['head'], 'boxes': item['boxes'], 'title': item['title'],
+                               'auto': True}
+                    gazete.read_article(name, article, boxes, self._log, model=bool(read), title=not item.get('titled'))
+                    articles.append(article)
+                data = gazete.load(name)   # arayuzde bu arada yapilan duzeltmeler kaybolmasin
+                data['articles'] = [a for a in data.get('articles', []) if a['page'] != page or a.get('reviewed')]
+                keep = [a for a in data['articles'] if a['page'] == page]
+                for article in articles:
+                    if any(gazete._overlaps(article['head'] or article['boxes'][0], a.get('head') or a['boxes'][0])
+                           for a in keep):
+                        continue
+                    article['id'] = gazete.new_id(data)
+                    data['articles'].append(article)
+                gazete.save(name, data)
+                emit(page_done=page, name=name)
+        finally:
+            if models['loaded']:
+                unload_models(models['client'], models['loaded'])
         emit(stage='Makaleler bulunup okunuyor', done=len(pages), total=len(pages))
 
     def gazete_propose(self, name, page):
@@ -257,7 +348,7 @@ class GazeteMixin:
             if not article['boxes'] and not article['head']:
                 raise ValueError('Makalede en az bir kutu olmalı.')
             article.pop('auto', None)
-            gazete.read_article(name, article, log=self._log)
+            self._gazete_read(name, article)
         return self._gazete_edit(name, change)
 
     def gazete_add_article(self, name, page, box):
@@ -266,7 +357,7 @@ class GazeteMixin:
             info = self._page_info(data, page)
             article = {'id': gazete.new_id(data), 'page': int(page), 'head': None,
                        'boxes': [gazete.clean_box(box, info)], 'title': ''}
-            gazete.read_article(name, article, log=self._log)
+            self._gazete_read(name, article)
             first, _sep, rest = article['text'].partition('\n\n')
             if len(first) <= 90 and rest:
                 article['title'], article['text'] = first, rest
@@ -285,7 +376,7 @@ class GazeteMixin:
             target['boxes'] = target['boxes'] + ([source['head']] if source.get('head') else []) + source['boxes']
             target.pop('auto', None)
             data['articles'].remove(source)
-            gazete.read_article(name, target, log=self._log)
+            self._gazete_read(name, target)
         return self._gazete_edit(name, change)
 
     def gazete_delete_article(self, name, article_id):
@@ -296,7 +387,7 @@ class GazeteMixin:
 
     def gazete_reread(self, name, article_id):
         def change(data):
-            gazete.read_article(name, self._gazete_article(data, article_id), log=self._log)
+            self._gazete_read(name, self._gazete_article(data, article_id))
         return self._gazete_edit(name, change)
 
     # ------------------------------------------------------------------ ses

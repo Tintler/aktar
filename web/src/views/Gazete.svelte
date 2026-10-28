@@ -24,6 +24,10 @@
   let svg = $state(null);
   let audio = $state(null);
   let showPhone = $state(false);
+  let showReading = $state(false);
+  let reading = $state(null);       // {ocr_model, layout_model}; bos: Tesseract / kurallar
+  const models = $derived(app.models.names ?? []);
+  const withCurrent = (list, value) => (value && !list.includes(value) ? [value, ...list] : list);
 
   const pageInfo = $derived(issue?.pages.find((p) => p.page === page) ?? null);
   const pageArticles = $derived((issue?.articles ?? []).filter((a) => a.page === page)
@@ -292,6 +296,19 @@
     ]);
   }
 
+  // ---- okuma modelleri (F226)
+  async function toggleReading() {
+    showReading = !showReading;
+    if (!showReading) return;
+    if (!models.length) act('refresh_models');
+    const result = await act('gazete_reading');
+    if (result) reading = result;
+  }
+  async function setReading(key, value) {
+    const result = await act('gazete_set_reading', key === 'ocr_model' ? value : null, key === 'layout_model' ? value : null);
+    if (result) reading = result;
+  }
+
   // ---- telefon sunucusu
   async function toggleServer() {
     const result = await act(server?.running ? 'gazete_server_stop' : 'gazete_server_start');
@@ -334,9 +351,32 @@
       {#if !issue.current}<button class="btn" onclick={makeCurrent} title="Telefon bu sayıyı görsün"><Icon name="smartphone" size={16} />Telefona ver</button>{/if}
       <button class="btn" onclick={voice} disabled={!!job} title="Sesi olmayan ya da metni değişen makaleleri seslendir"><Icon name="waveform" size={16} />Seslendir</button>
     {/if}
+    <button class="btn" class:on={showReading} onclick={toggleReading} title="Sayfaları okuyan ve makalelere ayıran modeller"><Icon name="eye" size={16} />Okuma</button>
     <button class="btn" class:primary={server?.running} onclick={() => (showPhone = !showPhone)}>
       <Icon name="smartphone" size={16} />Telefon{server?.running ? ': açık' : ''}</button>
   </div>
+
+  {#if showReading && reading}
+    <div class="phone card">
+      <div class="row">
+        <b>Okuma</b>
+        <span class="dim">Konumları Tesseract bulur; metni OCR modeli okur, hangi sütunun hangi başlığa ait olduğunu dil modeli seçer. Yeni sayılarda ve "Yeniden böl"de kullanılır.</span>
+      </div>
+      <div class="row pair">
+        <div><small>OCR modeli (ör. glm-ocr)</small>
+          <select class="field" value={reading.ocr_model} onchange={(e) => setReading('ocr_model', e.currentTarget.value)}>
+            <option value="">Tesseract (model yok)</option>
+            {#each withCurrent(models.filter((m) => !m.toLowerCase().includes('embed')), reading.ocr_model) as m}<option value={m}>{m}</option>{/each}
+          </select></div>
+        <div><small>Dil modeli, görsel destekli (ör. gemma-4-26b)</small>
+          <select class="field" value={reading.layout_model} onchange={(e) => setReading('layout_model', e.currentTarget.value)}>
+            <option value="">Kurallarla böl (model yok)</option>
+            {#each withCurrent(models.filter((m) => !m.toLowerCase().includes('embed') && !m.toLowerCase().includes('ocr')), reading.layout_model) as m}<option value={m}>{m}</option>{/each}
+          </select></div>
+      </div>
+      {#if app.models.state === 'failed'}<small class="dim selectable">{app.models.message}</small>{/if}
+    </div>
+  {/if}
 
   {#if showPhone && server}
     <div class="phone card">

@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.47.0 — 2026-10-28
+
+### Eklenen
+- **Gazeteyi yerel modelle okuma (F226):** Gazete sayfasındaki yeni **Okuma** paneli bir OCR modeli (örneğin GLM-OCR) ve bir dil modeli (örneğin Gemma 4) seçtirir; ikisi de LM Studio'dan gelir. OCR modeli her yazı bloğunu ve makale sütununu ayrı ayrı okur, böylece Türkçe karakterler ve satır sonları Tesseract'tan çok daha doğru çıkar. Dil modeli sayfa görüntüsünü, başlıkları ve her gövde bloğunun yakınındaki aday başlıkları görür. Hangi gövdenin hangi başlığa ait olduğunu, hangi büyük yazının başlık olmadığını ve iki satıra bölünmüş başlıkları o seçer. Spotlar, üstlerindeki başlıkla kendiliğinden birleştirilir. Kutu konumları yine Tesseract ve kodla bulunur, çünkü dil modelinin verdiği koordinatlar uydurmaydı. Fotoğraf üstündeki serif başlıklar için ikinci tarama artık yarım boyutta yapılıyor. Modelin yanıtı okunamazsa sayfa eskisi gibi kurallarla bölünür. Modeller yalnızca yüklü değillerse yüklenir ve iş bitince boşaltılır. Örnek sayının 20 sayfasında sayfa başına çoğunlukla 25–45 sn sürdü (tablolu at yarışı sayfası 2 dk). Haber sayfalarında makalelerin çoğu doğru başlığa bağlandı. Siyah ya da renkli zemin üstündeki açık renkli başlıklar hâlâ bulunamıyor. TV programı, bulmaca ve at yarışı tablosu gibi makale olmayan sayfalarda öneriler elle temizlenmeli.
+
 ## 2.46.0 — 2026-10-28
 
 ### Eklenen
