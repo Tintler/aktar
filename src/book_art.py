@@ -923,7 +923,9 @@ CAST_TASK = (
     '- "cast": names of the recurring characters visible in the image (exact names from the list above or from '
     '"characters"), the most important first, at most {limit}; [] if none. Each of them is drawn from a reference '
     'portrait, so for them describe pose, action, gaze direction and expression clearly (people are caught in the '
-    'middle of the action, not posing or looking at the camera unless the text says so).\n')
+    'middle of the action, not posing or looking at the camera unless the text says so); when a face is visible, '
+    'name the facial expression in concrete terms ("eyes wide, mouth open in a shout", "half-closed eyes, a tired '
+    'frown"), otherwise the face copies the calm look of the portrait.\n')
 # kiyafet (F219): sahnedeki karakterlerin o anki kiyafeti uretimde kodla eklenir, bunun icin kim gorunuyor bilinmeli
 CAST_PLAIN = ('- "cast": names of the recurring characters visible in the image (exact names from the list above or '
               'from "characters"), the most important first; [] if none.\n')
@@ -1216,11 +1218,12 @@ def portrait_prompt(character):
 
 
 BODY_SIZE = (832, 1216)   # tam boy kiyafet referansi (F220): dik, bas ve ayaklar kadraja sigsin
+BODY_VERSION = 2          # body_prompt degisince artir: eski referanslar yeniden uretilir (F221 basi acik)
 
 
 def body_key(character):
     """Tam boy referansin anahtari (F220): o yerdeki gorunus + kiyafet; biri degisince yeni referans gerekir."""
-    text = f'{_sentence(person_look(character))}|{_sentence(character.get("outfit") or "")}'
+    text = f'{_sentence(person_look(character))}|{_sentence(character.get("outfit") or "")}|{BODY_VERSION}'
     return hashlib.sha1(text.lower().encode('utf-8')).hexdigest()[:10]
 
 
@@ -1231,9 +1234,13 @@ def body_of(character, key):
 
 
 def body_prompt(character, style):
-    """Tam boy kiyafet referansi kimlik is akisiyla, portre referans verilerek (yuz korunur, kiyafet tariften)."""
-    return (f'Create a full-body character reference of this person: {_wearing(character)}. Standing upright, '
-            f'front view, the whole figure from head to feet visible, arms relaxed at the sides, neutral expression. '
+    """Tam boy kiyafet referansi kimlik is akisiyla, portre referans verilerek (yuz korunur, kiyafet tariften). Basi
+    acik ve esyasiz (F221): Identity Edit referanstaki her seyi tasir; kemerdeki kask sahnede bastaki kaskin yanina
+    ikinci kask olarak ciziliyordu (aktar-krea/kagit.py denemesi)."""
+    return (f'Create a full-body character reference of this person: {_wearing(character)}. Bare head: no helmet, '
+            f'hat, hood or mask, and nothing held in the hands or hanging from the belt (such items come from each '
+            f'scene). Standing upright, front view, the whole figure from head to feet visible, arms relaxed at the '
+            f'sides, relaxed natural expression. '
             f'Plain flat mid-grey studio backdrop with nothing else behind, soft even studio light. Preserve the exact '
             f'facial identity and hair of the reference portrait; the clothing follows the description above, not '
             f'the reference. Style: {_sentence(medium(style))}')
@@ -1281,11 +1288,14 @@ def identity_prompt(scene, people, style, faces=True, clothing=False, bodies=Fal
         keep = ('the exact facial identity of the reference portrait' if faces else
                 'the hair and build of the reference portrait' if clothing else
                 'the hair, build and clothing of the reference portrait')
-    turn = 'the pose, gaze and expression follow the scene' if faces else \
+    # F221: "not the reference" olmadan yuz her sahnede portredeki notr ifadeyle kaliyordu; "only once" olmadan
+    # referanstaki kisi sahnede ikinci kez ciziliyordu (aktar-krea/ifade.py denemesi)
+    turn = 'the pose, gaze and facial expression follow the scene, not the reference' if faces else \
         'the pose follows the scene and the face is turned away from the viewer'
     dress = ' The clothing follows the description above, not the reference.' if clothing and not bodies else ''
     return (f'Create an illustration of {who}: {names}. {_sentence(scene["prompt"])}. Preserve {keep}, but not '
-            f'its pose, framing or background: {turn}.{dress} Style: {_sentence(style)}')
+            f'its pose, framing or background: {turn}.{dress} Each person from the references appears only once. '
+            f'Style: {_sentence(style)}')
 
 
 def scene_people(scene, characters):

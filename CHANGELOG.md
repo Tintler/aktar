@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.42.0 — 2026-10-28
+
+### Düzeltilen
+- **Kitap görsellerinde kimlikli sahneler (F221):** Gerçek Krea 2 denemelerinde görülen üç sorun giderildi. Tam boy kıyafet referansı artık başı açık ve eşyasız üretiliyor: kemerde kask olan referans, sahnede başta ikinci bir kask çizdiriyordu. Var olan tam boy referanslar bir sonraki üretimde kendiliğinden yenilenir. Kimlik istemi yüz ifadesinin referanstan değil sahneden gelmesini ve referanstaki her kişinin sahnede yalnızca bir kez çizilmesini söylüyor: yüz her sahnede portredeki sakin ifadeyle kalıyor, kişi kimi sahnede iki kez çiziliyordu. Plan çıkarılırken dil modelinden görünen yüzlerin ifadesini somut olarak yazması isteniyor. Çok açılı karakter kâğıdı (QuadView ve Identity Edit) da denendi; kişiyi sahnede çoğalttığı için eklenmedi.
+
 ## 2.41.0 — 2026-10-27
 
 ### Eklenen

@@ -8,6 +8,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+from unittest import mock
 
 import book_art
 import comfy_client
@@ -952,7 +953,14 @@ class OutfitTest(unittest.TestCase):
         self.assertIn('Preserve the hair and build of the reference portrait', text)
         worn = book_art.identity_prompt({'prompt': 'p'}, [bo], 's', False, True, True)   # F220 tam boy referans
         self.assertIn('Preserve the hair, build and clothing of the reference image', worn)
-        self.assertNotIn('not the reference', worn)
+        self.assertNotIn('clothing follows the description', worn)
+        self.assertIn('Each person from the references appears only once.', worn)   # F221
+        self.assertIn('facial expression follow the scene, not the reference.',
+                      book_art.identity_prompt({'prompt': 'p'}, [bo], 's', True, True, True))
+        self.assertIn('Bare head: no helmet', book_art.body_prompt(bo, 's'))
+        key = book_art.body_key(bo)
+        with mock.patch.object(book_art, 'BODY_VERSION', book_art.BODY_VERSION + 1):
+            self.assertNotEqual(book_art.body_key(bo), key)   # istem degisince eski referans yenilenir
         self.assertNotEqual(book_art.body_key(bo), book_art.body_key(dict(bo, outfit='pyjamas')))
         self.assertIn('The clothing follows the description above, not the reference.', text)
         old = book_art.identity_prompt({'prompt': 'p'}, [bo], 's', False)
@@ -1444,7 +1452,7 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(scene['5']['inputs']['image'], f'aktar-ab12cd34ef-{entry["file"]}')
         self.assertIn('Preserve the exact facial identity, hair, build and clothing of the reference image',
                       scene['9']['inputs']['prompt'])
-        self.assertNotIn('not the reference', scene['9']['inputs']['prompt'])
+        self.assertNotIn('clothing follows the description', scene['9']['inputs']['prompt'])
         view = self.bridge.art_plan_get('ab12cd34ef')['plan']
         self.assertEqual(len(view['characters'][0]['body_urls']), 1)
 
