@@ -8,7 +8,7 @@ Is mantigi app_core / library / qa modullerinde kalir; burada yalnizca arayuz ak
 Bolumler: bu dosyada genel (ayarlar, tema, pencere), bridge_translate.py'de Altyazi Cevir,
 bridge_library.py'de Kutuphane (bridge_mail.py'de e-postadan iceri aktarma), bridge_player.py'de oynatici ve videoya soru sor,
 bridge_document.py'de belge goruntuleyici, bridge_assistant.py'de genel sohbet ve tekil dosyalar,
-bridge_subscriptions.py'de abonelik takibi, bridge_game.py'de oyun ekran cevirisi, bridge_art.py'de kitap gorselleri, bridge_gazete.py'de Gazete, bridge_book.py'de Kitap Cevir, bridge_reader.py'de Okuma (EPUB kitapligi), bridge_tts.py'de sesli okuma, bridge_pdf.py'de PDF'den kitap, bridge_voice.py'de sesle soru sorma, bridge_watch.py'de
+bridge_subscriptions.py'de abonelik takibi, bridge_game.py'de oyun ekran cevirisi, bridge_art.py'de kitap gorselleri, bridge_book.py'de Kitap Cevir, bridge_reader.py'de Okuma (EPUB kitapligi), bridge_tts.py'de sesli okuma, bridge_pdf.py'de PDF'den kitap, bridge_voice.py'de sesle soru sorma, bridge_watch.py'de
 klasor izleme, bridge_subtitles.py'de altyazi araclari (zamanlama, disa aktarma, OCR) ve klip.
 """
 from __future__ import annotations
@@ -35,7 +35,6 @@ from bridge_art import ArtMixin
 from bridge_assistant import AssistantMixin, FilesMixin
 from bridge_book import BookMixin
 from bridge_game import GameMixin
-from bridge_gazete import GazeteMixin
 from bridge_reader import ReaderMixin
 from bridge_tts import TtsMixin
 from bridge_pdf import PdfMixin
@@ -70,8 +69,7 @@ def _error(error):
 
 
 class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin, AssistantMixin, FilesMixin,
-             SubscriptionsMixin, VoiceMixin, WatchMixin, SubtitleToolsMixin, NativePlayerMixin, GameMixin, ArtMixin,
-             GazeteMixin):
+             SubscriptionsMixin, VoiceMixin, WatchMixin, SubtitleToolsMixin, NativePlayerMixin, GameMixin, ArtMixin):
     def __init__(self, emit=None, dialogs=None):
         self._emit = emit or (lambda _event, _data: None)
         self._dialogs = dialogs          # desktop.Dialogs: open_file(), open_folder() ...
@@ -416,7 +414,6 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         self._stop_watch_for_close()
         self._stop_game_for_close()
         self._stop_art_for_close()
-        self._stop_gazete_for_close()
         self._release_models()
         if close:
             threading.Timer(0.1, close).start()
@@ -437,5 +434,4 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         self._stop_watch_for_close()
         self._stop_game_for_close()
         self._stop_art_for_close()
-        self._stop_gazete_for_close()
         self._release_models()

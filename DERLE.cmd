@@ -45,10 +45,7 @@ py -3 -m PyInstaller ^
     --add-data "web\dist;web\dist" ^
     --exclude-module faster_whisper --exclude-module ctranslate2 --exclude-module sherpa_onnx ^
     --exclude-module PySide6 --exclude-module PyQt5 --exclude-module PyQt6 ^
-    --exclude-module setuptools ^
-    --exclude-module torch --exclude-module scipy --exclude-module onnx ^
-    --exclude-module onnxruntime.transformers --exclude-module onnxruntime.quantization ^
-    --exclude-module onnxruntime.tools ^
+    --exclude-module numpy --exclude-module setuptools ^
     desktop.py
 
 if errorlevel 1 (

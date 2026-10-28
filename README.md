@@ -47,10 +47,6 @@ Videolarınızı, belgelerinizi ve kitaplarınızı **yerel bir yapay zeka model
 - **Sesli okuma ve sesli kitap:** Kitaplar yerel ses motorlarıyla (EMA Lightning, VoxCPM) cümle cümle okunur; tarifle tasarlanan ya da kayıttan klonlanan sesler kullanılabilir. **Drama 3 (Türkçe)** motoru, kendi başlattığınız bir SGLang-Omni sunucusuna bağlanıp Fish Audio Drama 3 ile klon sesle okur (Built with Fish Audio; rızası olmadan tanınabilir kişilerin sesini klonlamak yasaktır). Kitabın tamamı bölüm işaretli M4B ya da bölüm başına MP3 olarak kaydedilir.
 - **PDF'den kitap:** Metin katmanı olan PDF'ler doğrudan, taranmış PDF'ler OCR ile (kitabın diliyle) okunur, üst/alt bilgilerden ve bölünmüş kelimelerden temizlenir, bölümlere ayrılır ve EPUB'a dönüştürülür; sonuç **Gözden geçir** ekranında sayfa görüntüsünün yanında düzeltilir.
 
-**Gazete**
-
-- **Gazeteyi telefonla dinleme:** Günlük e-gazetenin sayfaları makalelere ayrılır, okunur ve seslendirilir; kutular sayfa görüntüsü üzerinde düzeltilir. Gözü az gören biri basılı gazetedeki makaleyi ayrı Android uygulamasıyla kameraya gösterince, yerel ağdaki Aktar makaleyi bulur ve sesini çalar (yalnızca yerel ağ, kodla eşleme).
-
 **Genel**
 
 - **Arka plan işleri:** Çeviri, hazırlık, OCR ve ses işleri sağ üstteki listede ilerlemesiyle görünür (yalnızca uygulama açıkken çalışır).

@@ -2,30 +2,10 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
-## 2.48.0 — 2026-10-28
+## 2.49.0 — 2026-10-28
 
-### Eklenen
-- **Gazetede sayfa yerleşim modeli (F227):** Başlık, gövde, resim ve tablo bölgelerini artık belge yerleşimi için eğitilmiş PP-DocLayoutV3 modeli buluyor; GLM-OCR'ın resmî akışı da aynı modeli kullanıyor. Model ilk kullanımda bir kez iner (134 MB) ve CPU'da sayfa başına yaklaşık 1 saniyede çalışır. Okuma panelindeki "Sayfa yerleşimi" seçeneğiyle eski Tesseract yoluna dönülebilir. Örnek sayıda şunlar değişti:
-  - Renkli zemindeki başlıklar ("Sahnenin ışığında bir efsane") ve iki satırlık başlıklar bulunuyor.
-  - Makalelerin bütün sütunları alınıyor.
-  - Tablo, TV programı ve fikstür listeleri makaleye karışmıyor; at yarışı sayfasındaki öneriler 12'den 3'e indi.
-  - Fotoğraf üstüne basılmış başlıkları model resmin parçası saydığı için bunlar yarım boyutlu Tesseract taramasından ekleniyor.
-
-  Dil modelinin başlık listesinde numaraları kaydırdığı yanıtlar ve fotoğraf içi yazıya bağlanan gövdeler de düzeltiliyor. Hâlâ kalan sorunlar:
-  - Dil modeli bazen gerçek bir başlığı fotoğraf yazısı sayıp atlıyor.
-  - Uzun yazıların ara başlıkları ayrı makale olabiliyor.
-  - Bulmaca sayfaları elle temizlenmeli.
-
-## 2.47.0 — 2026-10-28
-
-### Eklenen
-- **Gazeteyi yerel modelle okuma (F226):** Gazete sayfasındaki yeni **Okuma** paneli bir OCR modeli (örneğin GLM-OCR) ve bir dil modeli (örneğin Gemma 4) seçtirir; ikisi de LM Studio'dan gelir. OCR modeli her yazı bloğunu ve makale sütununu ayrı ayrı okur, böylece Türkçe karakterler ve satır sonları Tesseract'tan çok daha doğru çıkar. Dil modeli sayfa görüntüsünü, başlıkları ve her gövde bloğunun yakınındaki aday başlıkları görür. Hangi gövdenin hangi başlığa ait olduğunu, hangi büyük yazının başlık olmadığını ve iki satıra bölünmüş başlıkları o seçer. Spotlar, üstlerindeki başlıkla kendiliğinden birleştirilir. Kutu konumları yine Tesseract ve kodla bulunur, çünkü dil modelinin verdiği koordinatlar uydurmaydı. Fotoğraf üstündeki serif başlıklar için ikinci tarama artık yarım boyutta yapılıyor. Modelin yanıtı okunamazsa sayfa eskisi gibi kurallarla bölünür. Modeller yalnızca yüklü değillerse yüklenir ve iş bitince boşaltılır. Örnek sayının 20 sayfasında sayfa başına çoğunlukla 25–45 sn sürdü (tablolu at yarışı sayfası 2 dk). Haber sayfalarında makalelerin çoğu doğru başlığa bağlandı. Siyah ya da renkli zemin üstündeki açık renkli başlıklar hâlâ bulunamıyor. TV programı, bulmaca ve at yarışı tablosu gibi makale olmayan sayfalarda öneriler elle temizlenmeli.
-
-## 2.46.0 — 2026-10-28
-
-### Eklenen
-- **Gazete (F225):** Sol menüdeki yeni **Gazete** sayfası günlük e-gazeteyi, gözü az gören birinin basılı gazeteyi telefonla gösterip dinleyebileceği hâle getirir. Sayfa görüntüleri klasörü ya da PDF eklenince her sayfa için makaleler önerilir. Başlıklar yazı boyundan bulunur, fotoğraf üstündeki büyük başlıklar için küçültülmüş ikinci bir tarama yapılır, gövde sütunları ayırıcı çizgileri aşmadan en yakın başlığa bağlanır. Her makale kendi çerçevesi kırpılarak okunur (Tesseract sütunları çerçeve içinde kendisi ayırır; tam sayfa okuma gazetede sütunları karıştırıyordu), satır sonu tirelemeleri birleştirilir. Öneriler sayfa görüntüsünün üzerinde düzeltilir: makalenin tamamını çerçeveleyerek yeni makale, kutu ekleme, başlık kutusu, birleştirme, kutu sırası, başlık ve metin düzeltme. "Tamam, sonraki" ile gözden geçirilen makaleler, sayfa yeniden bölünse de korunur. **Seslendir** sesi olmayan ya da metni değişen makaleleri seçilen sesle (varsayılan EMA Lightning) MP3 olarak kaydeder.
-- **Telefon sunucusu (F225):** Gazete sayfasından açılan yerel ağ sunucusu, ayrı yazılan Android uygulamasının gönderdiği kamera karesinin hangi sayfanın hangi makalesi olduğunu bulur ve makalenin metnini ve sesini verir. Eşleştirme SIFT ve homografiyle yapılır; yazının okunması gerekmez, bulanık ve eğik kare de olur. Yalnızca yerel ağdan erişilir; telefon bir kez Aktar'da görünen altı haneli kodla eşlenir. Örnek sayıda benzetilmiş eğik, bulanık, karanlık 100 karenin 98'i doğru sayfada bulundu, yanlış sayfa yok. Sayfa eşleştirme için `opencv-python-headless` gerekir.
+### Kaldırılan
+- **Gazete (F228):** Gazete sayfası, makale önerisi, yerel model ve sayfa yerleşim modeliyle okuma, seslendirme ve telefon sunucusu (2.46.0–2.48.0) kaldırıldı; uygulama 2.45.0 durumuna döndü. `onnxruntime` gereksinimlerden çıktı.
 
 ## 2.45.0 — 2026-10-28
 
