@@ -14,3 +14,5 @@ winrt-Windows.Media.Ocr==4!10.0.28000.2705; sys_platform == "win32"
 winrt-Windows.Storage.Streams==4!10.0.28000.2705; sys_platform == "win32"
 # Gazete (F225): telefon karesini sayfayla eslestirme (SIFT). Yoksa Gazete sayfasi calisir, telefon sunucusu acilmaz.
 opencv-python-headless==5.0.0.93
+# Gazete (F227): sayfa yerlesim modeli (PP-DocLayoutV3 ONNX). Yoksa sayfa Tesseract satirlarindan bolunur.
+onnxruntime==1.31.0

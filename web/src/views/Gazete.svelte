@@ -305,7 +305,8 @@
     if (result) reading = result;
   }
   async function setReading(key, value) {
-    const result = await act('gazete_set_reading', key === 'ocr_model' ? value : null, key === 'layout_model' ? value : null);
+    const pick = (name) => (key === name ? value : null);
+    const result = await act('gazete_set_reading', pick('ocr_model'), pick('layout_model'), pick('page_layout'));
     if (result) reading = result;
   }
 
@@ -360,7 +361,15 @@
     <div class="phone card">
       <div class="row">
         <b>Okuma</b>
-        <span class="dim">Konumları Tesseract bulur; metni OCR modeli okur, hangi sütunun hangi başlığa ait olduğunu dil modeli seçer. Yeni sayılarda ve "Yeniden böl"de kullanılır.</span>
+        <span class="dim">Başlık ve sütunları yerleşim modeli bulur, metni OCR modeli okur, hangi sütunun hangi başlığa ait olduğunu dil modeli seçer. Yeni sayılarda ve "Yeniden böl"de kullanılır.</span>
+      </div>
+      <div class="row pair">
+        <div><small>Sayfa yerleşimi</small>
+          <select class="field" value={reading.page_layout} onchange={(e) => setReading('page_layout', e.currentTarget.value)}>
+            <option value="model">Yerleşim modeli (PP-DocLayoutV3, ilk kullanımda 134 MB iner)</option>
+            <option value="tesseract">Tesseract satırlarından kurallarla</option>
+          </select>
+          {#if reading.page_layout === 'model' && !reading.layout_available}<small class="dim">onnxruntime yok: Tesseract kullanılır.</small>{/if}</div>
       </div>
       <div class="row pair">
         <div><small>OCR modeli (ör. glm-ocr)</small>

@@ -406,13 +406,17 @@ def _union(boxes):
     return [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
 
 
-def propose(name, page, reader=None, low_reader=None, log=print, read=None, read_name='', ask=None):
+def propose(name, page, reader=None, low_reader=None, log=print, read=None, read_name='', ask=None, layout=None):
     """Sayfanin otomatik makale onerisi (OCR onbellekli). Govde metni 120 harften kisa olan oneriler
     (fotograf ici yazilar, reklam) atilir.
 
     F226: read (png -> metin, OCR modeli; read_name onbellek adi) verilirse bloklar modelle okunur; ask (istem ->
     yanit, dil modeli) verilirse bloklar basliklara modelle baglanir (gazete_model). Model yaniti
-    kullanilamazsa kurallara donulur. Modelle bulunan onerilerde 'titled': baslik modelden, yeniden okunmaz."""
+    kullanilamazsa kurallara donulur. Modelle bulunan onerilerde 'titled': baslik modelden, yeniden okunmaz.
+
+    F227: layout (PIL goruntu -> bolgeler, gazete_layout.regions) verilirse bloklar yerlesim modelinin
+    bolgelerinden kurulur (onbellek ocr/<sayfa>.layout.json); Tesseract yalnizca yazi boyunu ve fotograf ustu
+    basliklari verir."""
     from PIL import Image
     import gazete_model
     folder = issue_dir(name)
@@ -423,10 +427,17 @@ def propose(name, page, reader=None, low_reader=None, log=print, read=None, read
     text = _cached(folder / 'ocr' / f'{page:04d}.tsv', lambda: reader(_png(image)))
     lines = lines_of(parse_tsv(text))
     body = body_size(lines)
-    blocks = blocks_of(lines, body)
     small = image.resize((image.width // LOW_FACTOR, image.height // LOW_FACTOR), Image.LANCZOS)
     low = _cached(folder / 'ocr' / f'{page:04d}.half.tsv', lambda: low_reader(_png(small)))
-    add_low_heads(blocks, lines_of(parse_tsv(low, LOW_FACTOR), split=False, min_conf=10), body, prefer=bool(read))
+    low_lines = lines_of(parse_tsv(low, LOW_FACTOR), split=False, min_conf=10)
+    if layout:
+        import gazete_layout
+        found = json.loads(_cached(folder / 'ocr' / f'{page:04d}.layout.json',
+                                   lambda: json.dumps(layout(image), ensure_ascii=False)))
+        blocks = gazete_layout.add_photo_heads(gazete_layout.blocks_of(found, lines, body, low_lines), low_lines, body, HEAD_RATIO)
+    else:
+        blocks = blocks_of(lines, body)
+        add_low_heads(blocks, low_lines, body, prefer=bool(read))
     seps = separators(image, body)
     if read:
         path = folder / 'ocr' / f'{page:04d}.{slug(read_name or "model")}.json'
@@ -438,6 +449,9 @@ def propose(name, page, reader=None, low_reader=None, log=print, read=None, read
             gazete_model.read_blocks(image, blocks, read, cache)
         finally:
             app_core.save_json(path, cache)
+    if layout:
+        import gazete_layout
+        blocks = [block for block in blocks if block['head'] or not gazete_layout.listing_text(block['text'])]
     found = None
     if ask:
         try:

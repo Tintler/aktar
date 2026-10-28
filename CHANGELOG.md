@@ -2,6 +2,20 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.48.0 — 2026-10-28
+
+### Eklenen
+- **Gazetede sayfa yerleşim modeli (F227):** Başlık, gövde, resim ve tablo bölgelerini artık belge yerleşimi için eğitilmiş PP-DocLayoutV3 modeli buluyor; GLM-OCR'ın resmî akışı da aynı modeli kullanıyor. Model ilk kullanımda bir kez iner (134 MB) ve CPU'da sayfa başına yaklaşık 1 saniyede çalışır. Okuma panelindeki "Sayfa yerleşimi" seçeneğiyle eski Tesseract yoluna dönülebilir. Örnek sayıda şunlar değişti:
+  - Renkli zemindeki başlıklar ("Sahnenin ışığında bir efsane") ve iki satırlık başlıklar bulunuyor.
+  - Makalelerin bütün sütunları alınıyor.
+  - Tablo, TV programı ve fikstür listeleri makaleye karışmıyor; at yarışı sayfasındaki öneriler 12'den 3'e indi.
+  - Fotoğraf üstüne basılmış başlıkları model resmin parçası saydığı için bunlar yarım boyutlu Tesseract taramasından ekleniyor.
+
+  Dil modelinin başlık listesinde numaraları kaydırdığı yanıtlar ve fotoğraf içi yazıya bağlanan gövdeler de düzeltiliyor. Hâlâ kalan sorunlar:
+  - Dil modeli bazen gerçek bir başlığı fotoğraf yazısı sayıp atlıyor.
+  - Uzun yazıların ara başlıkları ayrı makale olabiliyor.
+  - Bulmaca sayfaları elle temizlenmeli.
+
 ## 2.47.0 — 2026-10-28
 
 ### Eklenen

@@ -160,6 +160,19 @@ def _ref(value, prefix, count):
     return None
 
 
+AGREE = 0.5     # modelin yazdigi baslik metni OCR metnine en az bu kadar benzemeli
+
+
+def agrees(ours, theirs):
+    """Modelin duzelttigi baslik metni bizim okudugumuzla ayni baslik mi? Yazim duzeltmesi ('Eder farki' ->
+    'Ederson farkı') benzer kalir, kaydirilmis numara baska bir basligin metnini getirir. Metin yoksa evet."""
+    import difflib
+    a, b = (''.join(ch for ch in str(text or '').casefold() if ch.isalnum()) for text in (ours, theirs))
+    if not a or not b:
+        return True
+    return difflib.SequenceMatcher(None, a, b, autojunk=False).ratio() >= AGREE or a in b or b in a
+
+
 def parse_assignment(text, heads, bodies, options):
     """Yanit -> (owner, titles, skip, join): owner[j] baslik dizini ya da None (yalnizca adaylardan),
     titles {i: metin}, skip {i}, join {i: hedef i}."""
@@ -171,6 +184,8 @@ def parse_assignment(text, heads, bodies, options):
         item = info.get(f'H{i}')
         if not isinstance(item, dict):
             continue
+        if not agrees(heads[i].get('text'), item.get('text')):
+            continue      # F227: model numaralari kaydirmis (H17'ye H19'un metni): bu girdi yok sayilir
         target = _ref(item.get('join'), 'H', len(heads))
         if target is not None and target != i:
             join[i] = target
@@ -182,9 +197,14 @@ def parse_assignment(text, heads, bodies, options):
     owner = []
     for j in range(len(bodies)):
         head = _ref(marks.get(f'B{j}'), 'H', len(heads))
+        usable = [i for i in options[j] if i not in skip and _root(i, join) not in skip]
         if head is not None and head not in options[j]:
             # aday disi secim (metinde gecen ama uzaktaki bir basliga kayma): atlanmamis en yakin aday
-            head = next((i for i in options[j] if i not in skip and _root(i, join) not in skip), None)
+            head = usable[0] if usable else None
+        elif head is not None and head not in usable and usable:
+            # F227: 'skip' dedigi basliga (fotograf ici yazi) govde verirse atlanmamis en yakin aday; aday yoksa
+            # baslik makale olarak kalir (model yarim okunan gercek basligi da atlayabiliyor)
+            head = usable[0]
         owner.append(head)
     return owner, titles, skip, join
 

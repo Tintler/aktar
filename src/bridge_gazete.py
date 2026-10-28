@@ -183,19 +183,44 @@ class GazeteMixin:
         return result
 
     def gazete_reading(self):
-        """Okuma modelleri: {ocr_model, layout_model}; bos metin = modelsiz (Tesseract / kurallar)."""
+        """Okuma modelleri: {ocr_model, layout_model, page_layout, layout_available}; bos metin = modelsiz
+        (Tesseract / kurallar). page_layout (F227): 'model' (PP-DocLayoutV3, varsayilan) | 'tesseract'."""
+        import gazete_layout
         from app_core import load_config
         try:
             ocr, layout = self._gazete_model_names(load_config())
         except (ValueError, OSError) as error:
             return _error(error)
-        return {'ocr_model': ocr, 'layout_model': layout}
+        return {'ocr_model': ocr, 'layout_model': layout, 'page_layout': self._gazete_page_layout(),
+                'layout_available': gazete_layout.available()}
 
-    def gazete_set_reading(self, ocr_model=None, layout_model=None):
+    def gazete_set_reading(self, ocr_model=None, layout_model=None, page_layout=None):
         values = {key: ' '.join(str(value).split()) for key, value in
                   (('ocr_model', ocr_model), ('layout_model', layout_model)) if value is not None}
+        if page_layout in ('model', 'tesseract'):
+            values['page_layout'] = page_layout
         self._gazete_set_prefs(**values)
         return self.gazete_reading()
+
+    def _gazete_page_layout(self):
+        return 'tesseract' if self._gazete_prefs().get('page_layout') == 'tesseract' else 'model'
+
+    def _gazete_layout(self, stop, emit):
+        """F227: sayfa yerlesim modeli (gazete_layout.regions) ya da None (Tesseract bloklari). Model ilk
+        kullanimda iner; inemezse ya da onnxruntime yoksa Tesseract'a donulur."""
+        import gazete_layout
+        if self._gazete_page_layout() != 'model':
+            return None
+        if not gazete_layout.available():
+            self._log('Gazete: sayfa yerleşim modeli için onnxruntime gerekir; sayfa Tesseract ile bölünüyor.')
+            return None
+        try:
+            gazete_layout.ensure_model(self._log, lambda done, total: emit(
+                stage='Sayfa yerleşim modeli indiriliyor (MB)', done=done >> 20, total=total >> 20), stop.is_set)
+        except RuntimeError as error:
+            self._log(f'UYARI: {error} Sayfa Tesseract ile bölünüyor.')
+            return None
+        return gazete_layout.regions
 
     def _gazete_read(self, name, article):
         """Elle duzeltmeden sonra makaleyi okur: OCR modeli varsa onunla, yoksa Tesseract."""
@@ -207,6 +232,7 @@ class GazeteMixin:
     def _propose_pages(self, name, pages, stop, emit):
         """Verilen sayfalar (None: makalesi olmayan tum sayfalar) icin oneri + OCR. Gozden gecirilmis
         (reviewed) makalelere dokunulmaz; o sayfadaki diger otomatik makaleler yenilenir."""
+        import gazete_layout
         from app_core import unload_models
         data = gazete.load(name)
         if pages is None:
@@ -216,6 +242,7 @@ class GazeteMixin:
             return
         reader = gazete.ocr_reader(log=self._log)
         low = gazete.ocr_reader(log=self._log, psm='11')
+        layout = self._gazete_layout(stop, emit)
         emit(stage='Okuma modelleri hazırlanıyor', done=0, total=len(pages))
         models = self._gazete_models(keep=True)
         read = models['read']
@@ -225,7 +252,8 @@ class GazeteMixin:
                 if stop.is_set():
                     raise GracefulStop('Durduruldu.')
                 emit(stage='Makaleler bulunup okunuyor', done=done, total=len(pages), page=page)
-                found = gazete.propose(name, page, reader, low, self._log, read, models['read_name'], models['ask'])
+                found = gazete.propose(name, page, reader, low, self._log, read, models['read_name'], models['ask'],
+                                       layout)
                 articles = []
                 for item in found:
                     if stop.is_set():
@@ -246,6 +274,7 @@ class GazeteMixin:
                 gazete.save(name, data)
                 emit(page_done=page, name=name)
         finally:
+            gazete_layout.unload()
             if models['loaded']:
                 unload_models(models['client'], models['loaded'])
         emit(stage='Makaleler bulunup okunuyor', done=len(pages), total=len(pages))

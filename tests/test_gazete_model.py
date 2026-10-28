@@ -17,6 +17,16 @@ import gazete  # noqa: E402
 import gazete_model  # noqa: E402
 from test_gazete import column, word  # noqa: E402
 
+def fake_read(png):
+    """Sahte OCR modeli: genis kirpinti (baslik satiri) baslik, digerleri govde metni."""
+    import io
+    from PIL import Image
+    with Image.open(io.BytesIO(png)) as image:
+        if image.width > 4 * image.height:
+            return 'BÜYÜK BAŞLIK'
+    return 'Modelin okuduğu gövde metni, yeterince uzun bir paragraf olarak burada sürüyor ve bitiyor.'
+
+
 TSV_HEAD = 'level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext'
 
 
@@ -63,7 +73,7 @@ class ParseTests(unittest.TestCase):
             gazete_model.parse_json('JSON yok')
 
     def test_assignment_keeps_candidates_and_falls_back_to_nearest_kept(self):
-        heads = [{'box': [0, 0, 10, 10], 'text': f'H{i}'} for i in range(4)]
+        heads = [{'box': [0, 0, 10, 10], 'text': text} for text in ('Duzeltilmis', 'Ust', 'Saglik', 'Uzak')]
         bodies = [{}, {}, {}]
         options = [[1, 0], [2, 1], [1]]
         answer = json.dumps({'blocks': {'B0': 'H1', 'B1': 'H3', 'B2': 'none'},
@@ -74,6 +84,23 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(titles, {0: 'Düzeltilmiş', 2: 'Sağlık'})
         self.assertEqual(skip, {2})
         self.assertEqual(join, {1: 0})
+
+    def test_body_given_to_skipped_head_moves_to_next_kept_candidate(self):
+        heads = [{'box': [0, 0, 10, 10], 'text': text} for text in ('Fotograf ici yazi', 'Baslik', 'Kenar')]
+        answer = json.dumps({'blocks': {'B0': 'H0', 'B1': 'H2'},
+                             'headlines': {'H0': {'text': 'Fotoğraf içi yazı', 'skip': True}, 'H2': {'skip': True}}})
+        owner, _titles, _skip, _join = gazete_model.parse_assignment(answer, heads, [{}, {}], [[0, 1], [2]])
+        self.assertEqual(owner, [1, 2])      # B1'in baska adayi yok: baslik makale olarak kalir
+
+    def test_shifted_headline_entries_are_ignored(self):
+        heads = [{'box': [0, 0, 10, 10], 'text': text} for text in ('Eder farki önledi', 'DJU YÜREK HOPLATTI')]
+        answer = json.dumps({'blocks': {'B0': 'H1'},
+                             'headlines': {'H0': {'text': 'Ederson farkı önledi'},
+                                           'H1': {'text': 'Eder farki önledi', 'skip': True}}})
+        owner, titles, skip, _join = gazete_model.parse_assignment(answer, heads, [{}], [[1]])
+        self.assertEqual(titles, {0: 'Ederson farkı önledi'})
+        self.assertEqual(skip, set())
+        self.assertEqual(owner, [1])
 
     def test_clean_strips_markdown(self):
         self.assertEqual(gazete_model.clean('```\n## Başlık\n**kalın** metin\n```'), 'Başlık\nkalın metin')
@@ -177,7 +204,7 @@ class ProposeTests(unittest.TestCase):
 
         def read(png):
             reads.append(png)
-            return 'Modelin okuduğu gövde metni, yeterince uzun bir paragraf olarak burada sürüyor ve bitiyor.'
+            return fake_read(png)
         found = gazete.propose(self.name, 1, lambda png: self.full, lambda png: TSV_HEAD + '\n', log,
                                read, 'glm-ocr', lambda prompt, png=None: answer)
         return found, reads
