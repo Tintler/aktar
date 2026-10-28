@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.44.0 — 2026-10-28
+
+### Eklenen
+- **Kitap görsellerini büyük görme (F223):** Sahne, mekân, portre ve tam boy kıyafet görsellerine tıklayınca görsel ekranı kaplayacak kadar büyük açılır. Aynı gruptaki görseller arasında oklarla (düğme ya da ←/→ tuşları) geçilir; Escape, tıklama ya da kapat düğmesi büyük görünümü kapatır, Kitap görselleri penceresi açık kalır. Plan kurulumundaki uzun açıklamalar kaldırıldı ya da kısaltıldı.
+
 ## 2.43.0 — 2026-10-28
 
 ### Eklenen

@@ -429,7 +429,34 @@
   }
 
   const pct = (done, total) => (total ? Math.min(100, Math.round((done * 100) / total)) : 0);
+
+  // Buyuk gorunum: tiklanan gorsel ve ayni gruptaki digerleri (oklarla gezilir).
+  let zoom = $state(null);          // { items: [{url, title}], index }
+
+  function openZoom(items, url) {
+    const index = items.findIndex((item) => item.url === url);
+    if (index >= 0) zoom = { items, index };
+  }
+
+  function stepZoom(delta) {
+    if (zoom) zoom.index = (zoom.index + delta + zoom.items.length) % zoom.items.length;
+  }
+
+  // Yakalama evresinde: Escape yalnizca buyuk gorunumu kapatsin, Modal'i degil.
+  function zoomKey(event) {
+    if (!zoom) return;
+    if (event.key === 'Escape') zoom = null;
+    else if (event.key === 'ArrowRight') stepZoom(1);
+    else if (event.key === 'ArrowLeft') stepZoom(-1);
+    else return;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  const sceneShots = () => scenes.filter((s) => s.url).map((s) => ({ url: s.url, title: s.title }));
 </script>
+
+<svelte:window onkeydowncapture={zoomKey} />
 
 <Modal title={`Kitap görselleri · ${title}`} width={1040} {onclose}>
   {#if !loaded}
@@ -445,14 +472,10 @@
         <b>Dil modeli kitabı okuyor ve sahneleri seçiyor…</b>
         <span class="dim">{job.reading || !job.total ? 'bölümler okunuyor' : `${job.done} / ${job.total} cümle`}</span>
         <div class="track"><i style:width="{pct(job.done, job.total)}%"></i></div>
-        <p class="dim">Önce bütün kitap için tek bir stil kılavuzu ve karakter tarifleri yazılır, sonra kitap parça parça okunur.
-          Bu sırada ses motoru durur; bitince dil modeli bellekten boşaltılır. Pencereyi kapatabilirsiniz, iş sürer.</p>
         <div><button class="btn" onclick={stopPlan}><Icon name="stop" size={15} />Durdur</button></div>
       </div>
     {:else if setup}
       <div class="setup">
-        <p class="dim">Dil modeli kitabı okur, sahne değişimlerini seçer ve her sahne için bir görsel istemi yazar. Bütün görseller
-          aynı stil kılavuzuyla üretilir. Plan bitince stili ve sahneleri gözden geçirip üretimi siz başlatırsınız.</p>
         <label class="l" for="art-note">Kitap notu <small>Dil modeline verilen yönerge: tarz, ton, neyin gösterilip gösterilmeyeceği.</small></label>
         <textarea id="art-note" class="field" rows="3" bind:value={note}
           placeholder="Örn. daha soyut ol, insan yüzü gösterme, suluboya tarzında, dönemin mimarisini öne çıkar"></textarea>
@@ -483,7 +506,6 @@
               <button class="chip" class:on={extras.includes(entry.id)} title={`${entry.note}\nLoRA: ${entry.lora}\nTetik: ${entry.trigger}`}
                 onclick={() => toggleExtra(entry)}>{entry.label}</button>
             {/each}
-            <span class="dim">Herhangi bir tarzla birlikte kullanılır. Yalnızca sahnelere eklenir, karakter portrelerine eklenmez.</span>
           </div>
           {#if extraCheck}
             <div class="lora-note" class:bad={extraCheck.ok === false}>
@@ -496,7 +518,6 @@
           {#each options?.modifiers ?? [] as entry (entry.id)}
             <button class="chip" class:on={modifiers.includes(entry.id)} title={entry.rule} onclick={() => toggleModifier(entry.id)}>{entry.label}</button>
           {/each}
-          <span class="dim">Tarzdan bağımsız, birlikte seçilebilir (orta boş koyu ya da açık, biri). Orta boş: üst ve alt kenar iki ayrı görsel olarak üretilir (sahne başına iki görsel), ortası yazı için düz geçiş.</span>
         </div>
         <div class="row">
           <span class="dim">Sıklık</span>
@@ -525,7 +546,7 @@
           {#if noPeople}<Toggle checked={false} disabled label="Kıyafet kilidi" />
           {:else}<Toggle bind:checked={outfits} label="Kıyafet kilidi" />{/if}
           <span class="dim">{noPeople ? 'Karakter çizilmediği için kapalı.'
-            : 'Karakterin kıyafeti ayrı yazılır ve her görsele aynen eklenir; metin kıyafetin değiştiğini söylerse (üniforma, gecelik, zırh) o sahnelerde yenisi kullanılır.'}</span>
+            : 'Karakterin kıyafeti ayrı yazılır ve değişmediği sürece her görsele aynen eklenir.'}</span>
         </div>
         <div class="row">
           <span class="dim lead">RTX büyütme</span>
@@ -534,7 +555,6 @@
               <button class:on={upscale === value} onclick={() => pickUpscale(value)}>{UPSCALE_LABEL(value)}</button>
             {/each}
           </div>
-          <span class="dim">Üretilen görsel ComfyUI'de RTX Video Super Resolution ile büyütülür (NVIDIA RTX).</span>
         </div>
         {#if upscaleCheck}
           <div class="lora-note" class:bad={upscaleCheck.ok === false}>
@@ -623,7 +643,7 @@
 
       <details class="look" open={!scenes.some((s) => s.url)}>
         <summary>Stil ve karakterler</summary>
-        <label class="l" for="art-style">Stil kılavuzu <small>Her görselin başına aynen eklenir. Değiştirmek planı yeniden yaptırmaz; kaydedip "Hepsini yeniden üret" deyin.</small></label>
+        <label class="l" for="art-style">Stil kılavuzu <small>Her görselin başına aynen eklenir.</small></label>
         <textarea id="art-style" class="field" rows="4" bind:value={style} onchange={saveStyle}></textarea>
         <label class="l" for="art-chars">Karakterler <small>Satır başına "Ad: görünüş"; görünüm değişimi "Ad [5. bölüm]: yeni görünüş". Sahne istemlerine dil modeli kopyalar; yeni sahnelere yansır, var olan istemler değişmez.{#if plan.outfits} Kıyafet "Ad (kıyafet): giysi", kalıcı değişimi "Ad (kıyafet) [5. bölüm]: yeni giysi"; görsel üretilirken isteme eklenir.{/if}</small></label>
         <textarea id="art-chars" class="field" rows="3" bind:value={characters} onchange={saveCharacters}></textarea>
@@ -632,7 +652,7 @@
           <span class="dim">Sahnenin mekânının tarifi her görselin istemine eklenir.</span>
         </div>
         {#if plan.place_identity}
-          <label class="l" for="art-places">Mekânlar <small>Satır başına "Ad: kalıcı görünüş". Tarifi değiştirmek o mekândaki görsellere yeniden üretince yansır.</small></label>
+          <label class="l" for="art-places">Mekânlar <small>Satır başına "Ad: kalıcı görünüş".</small></label>
           <textarea id="art-places" class="field" rows="3" bind:value={places} onchange={savePlaces}></textarea>
           <div class="row">
             <Toggle checked={Boolean(plan.place_images)} disabled={Boolean(app.artJob)} label="Mekân görseli" onchange={setPlaceImages} />
@@ -648,7 +668,8 @@
               {#each plan.places as place (place.name)}
                 <div class="spot card">
                   <div class="img">
-                    {#if place.image_url}<img src={place.image_url} alt={place.name} loading="lazy" />
+                    {#if place.image_url}<button class="zoomable" title="Büyüt" onclick={() => openZoom(plan.places.filter((p) => p.image_url)
+                      .map((p) => ({ url: p.image_url, title: `Mekân: ${p.name}` })), place.image_url)}><img src={place.image_url} alt={place.name} loading="lazy" /></button>
                     {:else}<span class="dim">{generating && job.current === `Mekân: ${place.name}` ? 'Üretiliyor…' : 'Görsel yok'}</span>{/if}
                   </div>
                   <div class="acts">
@@ -739,13 +760,15 @@
             {#each faces as character (character.name)}
               <div class="face card">
                 <div class="portrait">
-                  {#if character.portrait_url}<img src={character.portrait_url} alt={character.name} />
+                  {#if character.portrait_url}<button class="zoomable" title="Büyüt" onclick={() => openZoom(faces.filter((c) => c.portrait_url)
+                    .map((c) => ({ url: c.portrait_url, title: `Portre: ${c.name}` })), character.portrait_url)}><img src={character.portrait_url} alt={character.name} /></button>
                   {:else}<span class="dim">{generating && job.current === `Portre: ${character.name}` ? 'Üretiliyor…' : 'Portre yok'}</span>{/if}
                 </div>
                 <b class="ellipsis" title={character.look}>{character.name}</b>
                 {#if plan.bodies && character.body_urls?.length}
                   <div class="bodies" title="Tam boy kıyafet referansları">
-                    {#each character.body_urls as url (url)}<img src={url} alt={`${character.name} tam boy`} loading="lazy" />{/each}
+                    {#each character.body_urls as url (url)}<button class="zoomable" title="Büyüt" onclick={() => openZoom(character.body_urls
+                      .map((u) => ({ url: u, title: `${character.name} · tam boy` })), url)}><img src={url} alt={`${character.name} tam boy`} loading="lazy" /></button>{/each}
                     <button class="btn sm ghost" disabled={Boolean(app.artJob) || !options?.workflow.ok} title="Tam boy referansları yeni seed ile üret"
                       onclick={() => generate(null, false, null, [character.name])}><Icon name="refresh" size={13} /></button>
                   </div>
@@ -766,7 +789,7 @@
         {#each scenes as scene (scene.id)}
           <div class="scene card" class:skip={scene.skip}>
             <div class="img">
-              {#if scene.url}<img src={scene.url} alt={scene.title} loading="lazy" />
+              {#if scene.url}<button class="zoomable" title="Büyüt" onclick={() => openZoom(sceneShots(), scene.url)}><img src={scene.url} alt={scene.title} loading="lazy" /></button>
               {:else if scene.error && !scene.skip && !(generating && job.current === scene.title)}<span class="dim" title={scene.error}>Üretilemedi: {scene.error}</span>
               {:else}<span class="dim">{scene.skip ? 'Atlandı' : generating && job.current === scene.title ? 'Üretiliyor…' : 'Henüz üretilmedi'}</span>{/if}
             </div>
@@ -829,12 +852,27 @@
   {/if}
 </Modal>
 
+{#if zoom}
+  {@const shot = zoom.items[zoom.index]}
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <div class="zoom" onclick={() => (zoom = null)}>
+    <img src={shot.url} alt={shot.title} />
+    <div class="zoom-bar">
+      <span class="ellipsis">{shot.title}{zoom.items.length > 1 ? ` · ${zoom.index + 1} / ${zoom.items.length}` : ''}</span>
+      <button class="icon-btn" title="Kapat" onclick={() => (zoom = null)}><Icon name="x" /></button>
+    </div>
+    {#if zoom.items.length > 1}
+      <button class="zoom-nav prev" title="Önceki" onclick={(e) => { e.stopPropagation(); stepZoom(-1); }}>‹</button>
+      <button class="zoom-nav next" title="Sonraki" onclick={(e) => { e.stopPropagation(); stepZoom(1); }}>›</button>
+    {/if}
+  </div>
+{/if}
+
 <style>
   .warn { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; font-size: 13px;
     background: color-mix(in srgb, var(--warning) 14%, transparent); color: var(--text); }
   .warn span { flex: 1; }
   .stage, .setup { display: flex; flex-direction: column; gap: 10px; }
-  .stage p, .setup p { margin: 0; font-size: 13px; line-height: 1.5; }
   .stage .track { flex: none; }
   .l { font-size: 13px; font-weight: 600; display: flex; flex-direction: column; gap: 2px; }
   .l small { font-weight: 400; color: var(--dim); font-size: 12px; }
@@ -887,4 +925,16 @@
   .fix .field { flex: 1; min-width: 0; height: 30px; font-size: 12px; }
   .acts { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
   textarea.field { font-size: 13px; line-height: 1.45; width: 100%; box-sizing: border-box; }
+  .zoomable { display: block; width: 100%; height: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
+  .bodies .zoomable { width: auto; height: auto; }
+  .zoom { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, .88); display: grid; place-items: center; padding: 48px 64px; cursor: zoom-out; }
+  .zoom img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; box-shadow: 0 8px 40px rgba(0, 0, 0, .6); }
+  .zoom-bar { position: absolute; top: 8px; left: 16px; right: 8px; display: flex; align-items: center; gap: 12px; color: #fff; font-size: 14px; cursor: default; }
+  .zoom-bar span { flex: 1; }
+  .zoom-bar .icon-btn { color: #fff; }
+  .zoom-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 64px; border-radius: 10px; font-size: 40px; line-height: 1;
+    color: #fff; background: rgba(255, 255, 255, .08); }
+  .zoom-nav:hover { background: rgba(255, 255, 255, .18); }
+  .zoom-nav.prev { left: 10px; }
+  .zoom-nav.next { right: 10px; }
 </style>
