@@ -3,6 +3,7 @@
   import Toggle from '../components/Toggle.svelte';
   import TemplateEditor from '../components/TemplateEditor.svelte';
   import VoiceSettings from '../components/VoiceSettings.svelte';
+  import PhonePanel from '../components/PhonePanel.svelte';
   import FoldHead from '../components/FoldHead.svelte';
   import { isOpen } from '../lib/folds.js';
   import { app, act, savePref, setTheme, reloadThemes, toast } from '../lib/state.svelte.js';
@@ -634,6 +635,8 @@
               <button class="btn sm" disabled={!cfg.backlog_url?.trim() || backlogStatus?.busy} onclick={testBacklog}>Bağlantıyı dene</button>
             </div>
           </section>
+
+          <PhonePanel {searching} />
       </div>
 
       <div class="cat-body" data-cat="advanced" hidden={!searching && tab !== 'advanced'}>

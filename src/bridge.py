@@ -38,6 +38,7 @@ from bridge_game import GameMixin
 from bridge_reader import ReaderMixin
 from bridge_tts import TtsMixin
 from bridge_pdf import PdfMixin
+from bridge_phone import PhoneMixin
 from bridge_document import DocumentMixin
 from bridge_library import LibraryMixin
 from bridge_mail import MailMixin
@@ -69,7 +70,7 @@ def _error(error):
 
 
 class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin, AssistantMixin, FilesMixin,
-             SubscriptionsMixin, VoiceMixin, WatchMixin, SubtitleToolsMixin, NativePlayerMixin, GameMixin, ArtMixin):
+             SubscriptionsMixin, VoiceMixin, WatchMixin, SubtitleToolsMixin, NativePlayerMixin, GameMixin, ArtMixin, PhoneMixin):
     def __init__(self, emit=None, dialogs=None):
         self._emit = emit or (lambda _event, _data: None)
         self._dialogs = dialogs          # desktop.Dialogs: open_file(), open_folder() ...
@@ -117,6 +118,7 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         paths, self._startup_paths = self._startup_paths, []
         self._start_watch()  # F114: izlenen koleksiyonlar arka planda taranir
         self._game_startup()  # F194: oyun cevirisi kisayollari (daha once kullanildiysa)
+        self._phone_startup()  # F229: telefon sesi sunucusu (istendiyse)
         return {'prefs': self.ui_prefs(), 'themes': themes.list_themes(),
                 'translate': self.translate_state(), 'books': self.book_snapshot(),
                 'library': self.library_open(), 'models': self._models,
@@ -414,6 +416,7 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         self._stop_watch_for_close()
         self._stop_game_for_close()
         self._stop_art_for_close()
+        self._stop_phone_for_close()
         self._release_models()
         if close:
             threading.Timer(0.1, close).start()
@@ -434,4 +437,5 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         self._stop_watch_for_close()
         self._stop_game_for_close()
         self._stop_art_for_close()
+        self._stop_phone_for_close()
         self._release_models()

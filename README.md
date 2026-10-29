@@ -45,6 +45,7 @@ Videolarınızı, belgelerinizi ve kitaplarınızı **yerel bir yapay zeka model
 - **Kitapta ara:** Ctrl+F ile kelime ya da cümle tüm kitapta aranır; sonuca tıklayınca bölüm açılıp eşleşme vurgulanır.
 - **Kitaba sor:** Okurken kitaba soru sorun ("3. bölümde ne oldu?"); cevaptaki bölüm atfı kitabı o bölüme götürür. **Okuduğum yere kadar** seçiliyse okuduğunuz yerden (bölüm içindeki konum dahil) sonrası modele hiç gitmez.
 - **Sesli okuma ve sesli kitap:** Kitaplar yerel ses motorlarıyla (EMA Lightning, VoxCPM) cümle cümle okunur; tarifle tasarlanan ya da kayıttan klonlanan sesler kullanılabilir. **Drama 3 (Türkçe)** motoru, kendi başlattığınız bir SGLang-Omni sunucusuna bağlanıp Fish Audio Drama 3 ile klon sesle okur (Built with Fish Audio; rızası olmadan tanınabilir kişilerin sesini klonlamak yasaktır). Kitabın tamamı bölüm işaretli M4B ya da bölüm başına MP3 olarak kaydedilir.
+- **Telefon sesi:** Telefondaki Sesli Haber uygulaması haberleri aynı Wi-Fi'deyken Aktar'ın sesiyle okur; Aktar kapalıysa telefonun kendi sesine geçer (Ayarlar › Bağlantılar).
 - **PDF'den kitap:** Metin katmanı olan PDF'ler doğrudan, taranmış PDF'ler OCR ile (kitabın diliyle) okunur, üst/alt bilgilerden ve bölünmüş kelimelerden temizlenir, bölümlere ayrılır ve EPUB'a dönüştürülür; sonuç **Gözden geçir** ekranında sayfa görüntüsünün yanında düzeltilir.
 
 **Genel**

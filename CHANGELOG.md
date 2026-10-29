@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.50.0 — 2026-10-29
+
+### Eklenen
+- **Telefon sesi (F229):** Telefondaki Sesli Haber uygulaması (ayrı Android uygulaması) Sözcü'nün manşetlerini, spor manşetlerini ve köşe yazılarını büyük yazıyla gösterir ve okur. Aynı Wi-Fi'deyken cümleler Aktar'ın sesiyle (varsayılan EMA Lightning) okunur; Aktar kapalıysa, başka bir sesle kitap okuyorsa ya da sesli kitap, dublaj kaydediyorsa telefon kendi Türkçe sesine geçer. Sunucu Ayarlar › Bağlantılar › Telefon sesi'nden açılır (isteğe bağlı olarak Aktar açılınca kendiliğinden); yalnızca yerel ağdan gelen istekleri kabul eder, telefon 6 haneli kodla bir kez eşlenir. Aktar kapanınca sunucu da durur.
+
 ## 2.49.0 — 2026-10-28
 
 ### Kaldırılan

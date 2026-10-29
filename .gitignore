@@ -39,3 +39,6 @@ dist-engines/
 
 # Sesli okuma onayarlari (resimler, klon kayitlari)
 ses-presetleri/
+
+# Telefon sesi (F229): eslenen telefonlar
+telefon/
