@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.51.1 — 2026-11-01
+
+### Düzeltilen
+- **Telefonda resim betimleme (F231):** Betimleme modeli artık elle yazılmıyor, model sunucusundaki modeller listesinden seçiliyor. Model LM Studio'da yüklü değilse betimlemeden önce yüklenir (JIT kapalıyken de çalışır) ve Aktar kapanırken boşaltılır.
+
 ## 2.51.0 — 2026-11-01
 
 ### Eklenen

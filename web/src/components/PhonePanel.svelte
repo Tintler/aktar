@@ -3,7 +3,7 @@
   // F230: Dokun Oku resim betimleme ayari (describe, vision_model).
   import Icon from '../lib/Icon.svelte';
   import Toggle from './Toggle.svelte';
-  import { act, toast } from '../lib/state.svelte.js';
+  import { act, app, toast } from '../lib/state.svelte.js';
   import { call } from '../lib/api.js';
 
   let { searching = false } = $props();
@@ -16,6 +16,12 @@
     if (Array.isArray(list)) voices = list.filter((v) => v.language === 'tr' && !v.configurable);
   });
   const groups = $derived([...new Set(voices.map((v) => v.group))]);
+  // Model sunucusundaki modeller (embedding haric); secili model listede yoksa (LM Studio kapali) yine gorunur
+  const visionNames = $derived.by(() => {
+    const list = (app.models.names ?? []).filter((n) => !n.toLowerCase().includes('embed'));
+    const current = state?.vision_model;
+    return current && !list.includes(current) ? [current, ...list] : list;
+  });
 
   async function run(method, ...args) {
     busy = true;
@@ -83,9 +89,12 @@
     </div>
     {#if state.describe}
       <div class="fr">
-        <div class="l">Betimleme modeli<small>Boş bırakılırsa Ayarlar'daki görsel model, o da boşsa analiz modeli kullanılır. Model resim okuyabilmeli.</small></div>
-        <input class="field" placeholder="Ayarlar'daki görsel model" value={state.vision_model}
-          onchange={(event) => run('phone_set', null, null, null, event.currentTarget.value)} />
+        <div class="l">Betimleme modeli<small>Model sunucusundaki modellerden; resim okuyabilen (görsel destekli) bir model seçin. Seçilmezse Kütüphane ve belgeler'deki görü modeli kullanılır. Model gerekince LM Studio'da kendiliğinden yüklenir.</small></div>
+        <select class="field" value={state.vision_model}
+          onchange={(event) => run('phone_set', null, null, null, event.currentTarget.value)}>
+          <option value="">(görü modeliyle aynı)</option>
+          {#each visionNames as name}<option value={name}>{name}</option>{/each}
+        </select>
       </div>
     {/if}
     {#if state.phones.length || searching}

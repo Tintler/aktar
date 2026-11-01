@@ -14,7 +14,7 @@ import re
 import threading
 
 import phone_server
-from app_core import APP_DIR, Client, load_config
+from app_core import APP_DIR, Client, keep_loaded, load_config
 from version import VERSION
 
 DEFAULT_VOICE = 'ema-lightning/default'
@@ -104,7 +104,13 @@ class PhoneMixin:
         if not self._phone_describes():
             raise phone_server.Busy('Resim betimleme Aktar\'da kapalı.')
         try:
-            client = Client(self._phone_vision_cfg(), lambda _message: None)
+            cfg = self._phone_vision_cfg()
+            client = Client(cfg, lambda _message: None)
+            # LM Studio'da JIT kapali olabilir: model acikca yuklenir, Aktar kapanirken bosaltilir
+            loaded = keep_loaded(client, [cfg['model']], self._log)
+            if loaded:
+                with self._lock:
+                    self._kept_models = list(dict.fromkeys(getattr(self, '_kept_models', []) + loaded))
             answer = client.vision(DESCRIBE_PROMPT, image, mime, max_tokens=DESCRIBE_TOKENS)
         except (RuntimeError, ValueError, OSError) as error:
             raise phone_server.Busy(f'Görsel model: {error}') from None
