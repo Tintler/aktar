@@ -34,7 +34,8 @@ class PhoneServerTest(unittest.TestCase):
             return '  Bir köy meydanı.\n Kalabalık var. '
 
         self.server = phone_server.PhoneServer(speak, phone_server.Phones(Path(self.folder.name) / 'telefonlar.json'),
-                                               '9.9.9', log=lambda _line: None, describe=describe)
+                                               '9.9.9', log=lambda _line: None, describe=describe,
+                                               diagnostics=phone_server.Diagnostics(Path(self.folder.name) / 'teshis'))
         self.server.start(0, '127.0.0.1')
         self.base = f'http://127.0.0.1:{self.server.info()["port"]}'
 
@@ -141,6 +142,32 @@ class PhoneServerTest(unittest.TestCase):
         self.server.describe = None
         self.busy = None
         self.assertEqual(self.send_image(b'x', 'image/jpeg', token)[0], 503)
+
+    def test_diagnostics_saved_with_screenshot(self):
+        import base64
+        token = self.pair()
+        record = {'paket': 'com.facebook/katana', 'dokunus': [10, 20], 'agac': {'b': [0, 0, 1, 1]},
+                  'ekran_goruntusu': base64.b64encode(b'\xff\xd8jpeg').decode()}
+        status, _kind, body = self.request('/api/teshis', record, token)
+        self.assertEqual(status, 200)
+        name = json.loads(body)['kayit']
+        self.assertTrue(name.endswith('-com.facebook_katana'))
+        folder = Path(self.folder.name) / 'teshis'
+        saved = json.loads((folder / (name + '.json')).read_text(encoding='utf-8'))
+        self.assertEqual(saved['ekran_goruntusu'], name + '.jpg')
+        self.assertEqual((folder / (name + '.jpg')).read_bytes(), b'\xff\xd8jpeg')
+        self.assertEqual(self.server.diagnostics.count(), 1)
+        # ayni saniyede ikinci kayit ustune yazmaz
+        self.request('/api/teshis', {'paket': 'com.facebook/katana'}, token)
+        self.assertEqual(self.server.diagnostics.count(), 2)
+
+    def test_diagnostics_need_key_and_are_pruned(self):
+        self.assertEqual(self.request('/api/teshis', {'paket': 'x'})[0], 401)
+        token = self.pair()
+        with mock.patch.object(phone_server, 'DIAG_KEEP', 2):
+            for _ in range(4):
+                self.assertEqual(self.request('/api/teshis', {'paket': 'x'}, token)[0], 200)
+        self.assertEqual(self.server.diagnostics.count(), 2)
 
     def test_plain_text(self):
         import bridge_phone

@@ -1,6 +1,6 @@
 <script>
   // F229: Sesli Haber telefon uygulamasina yerel agda Aktar'in sesini veren sunucu (bridge_phone.py).
-  // F230: Dokun Oku resim betimleme ayari (describe, vision_model).
+  // F230: Dokun Oku resim betimleme ayari (describe, vision_model). F232: teshis kayitlari (diagnostics).
   import Icon from '../lib/Icon.svelte';
   import Toggle from './Toggle.svelte';
   import { act, app, toast } from '../lib/state.svelte.js';
@@ -95,6 +95,14 @@
           <option value="">(görü modeliyle aynı)</option>
           {#each visionNames as name}<option value={name}>{name}</option>{/each}
         </select>
+      </div>
+    {/if}
+    {#if state.diagnostics || searching}
+      <div class="fr">
+        <div class="l">Teşhis kayıtları (Dokun Oku)<small>Telefonda Teşhis kaydı açıkken her okumada ekranın yapısı ve küçük bir ekran görüntüsü buraya kaydedilir; yanlış okunan uygulamaları düzeltmek için. Yalnızca bu bilgisayarda kalır, en fazla 300 kayıt tutulur.</small>
+          <small>{state.diagnostics} kayıt</small>
+        </div>
+        <button class="btn sm" onclick={() => act('phone_open_diagnostics')}><Icon name="folder" size={14} />Klasörü aç</button>
       </div>
     {/if}
     {#if state.phones.length || searching}

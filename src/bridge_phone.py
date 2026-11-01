@@ -5,6 +5,7 @@ kendiliginden acilir. Pencere kapaninca durur. Ses motoru baska bir is icin kull
 okuyucuda baska sesle okuma ...) istek 503 ile reddedilir, telefon kendi sesine duser.
 F230: Dokun Oku uygulamasi dokunulan resmi gonderir, Ayarlar'daki gorsel model (yoksa sohbet modeli) Turkce
 betimler; 'describe' kapaliysa 503.
+F232: Dokun Oku teshis kayitlari APP_DIR/telefon/teshis'e yazilir (yanlis okunan uygulamalarin agaci).
 Tercihler ui.json 'phone': {voice, port, autostart, describe, vision_model}.
 """
 from __future__ import annotations
@@ -48,6 +49,9 @@ class PhoneMixin:
 
     def _phone_phones(self):
         return phone_server.Phones(APP_DIR / 'telefon' / 'telefonlar.json')
+
+    def _phone_diagnostics(self):
+        return phone_server.Diagnostics(APP_DIR / 'telefon' / 'teshis')
 
     def _phone_busy(self, override):
         """Ses motorunu kullanan bir is varsa nedeni, yoksa None."""
@@ -123,13 +127,15 @@ class PhoneMixin:
         info.update(phones=self._phone_phones().listing(), voice=self._phone_voice(),
                     autostart=bool(prefs.get('autostart')), describe=self._phone_describes(),
                     vision_model=str(prefs.get('vision_model') or ''),
+                    diagnostics=self._phone_diagnostics().count(),
                     default_port=int(prefs.get('port') or phone_server.DEFAULT_PORT))
         return info
 
     def phone_start(self, port=None):
         if self._phone_server is None:
             self._phone_server = phone_server.PhoneServer(self._phone_speak, self._phone_phones(), VERSION, self._log,
-                                                          describe=self._phone_describe)
+                                                          describe=self._phone_describe,
+                                                          diagnostics=self._phone_diagnostics())
         try:
             port = int(port or self._phone_prefs().get('port') or phone_server.DEFAULT_PORT)
         except (TypeError, ValueError):
@@ -159,6 +165,11 @@ class PhoneMixin:
         if vision_model is not None:
             self._phone_set_prefs(vision_model=str(vision_model or '').strip())
         return self.phone_state()
+
+    def phone_open_diagnostics(self):
+        folder = self._phone_diagnostics().folder
+        folder.mkdir(parents=True, exist_ok=True)
+        return self.reveal(str(folder))
 
     def phone_remove(self, phone_id):
         self._phone_phones().remove(str(phone_id))

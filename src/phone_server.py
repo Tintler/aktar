@@ -12,14 +12,19 @@ Uclar (JSON, UTF-8; /api/durum ve /api/eslestir disinda 'X-Anahtar' basligi gere
   POST /api/eslestir {kod, ad}   -> {anahtar}
   POST /api/oku {metin, hiz}     -> audio/wav (tek cumle; en fazla TEXT_LIMIT karakter)
   POST /api/betimle <JPEG/PNG>   -> {metin} (F230, Dokun Oku: resmin Turkce betimlemesi; govde en fazla MAX_IMAGE)
+  POST /api/teshis {...}         -> {kayit} (F232, Dokun Oku teshis kaydi: ekran agaci, secim, okunanlar ve
+                                    'ekran_goruntusu' base64 JPEG; Diagnostics klasorune yazilir, en fazla MAX_DIAG)
 Hata yanitlari {hata}: 401 eslenmemis, 403 yerel ag disi ya da yanlis kod, 503 ses motoru mesgul/hazir degil
 (betimlemede: kapali ya da gorsel model yanit vermedi).
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import hmac
 import ipaddress
 import json
+import re
 import secrets
 import socket
 import threading
@@ -35,6 +40,8 @@ PAIR_TRIES = 10            # yanlis kod denemesi siniri (kod yenilenene kadar)
 SPEEDS = (0.5, 2.0)
 MAX_IMAGE = 6 * 1024 * 1024
 IMAGE_TYPES = ('image/jpeg', 'image/png')
+MAX_DIAG = 12 * 1024 * 1024
+DIAG_KEEP = 300            # en fazla bu kadar teshis kaydi tutulur (eskiler silinir)
 
 
 class Busy(Exception):
@@ -141,12 +148,56 @@ class Phones:
             return len(kept) != len(value)
 
 
+class Diagnostics:
+    """Dokun Oku teshis kayitlari (F232): <zaman>-<paket>.json ve ayni adli .jpg ekran goruntusu."""
+
+    def __init__(self, folder):
+        self.folder = Path(folder)
+        self._lock = threading.Lock()
+
+    def save(self, value):
+        shot = value.pop('ekran_goruntusu', None)
+        package = re.sub(r'[^A-Za-z0-9._-]+', '_', str(value.get('paket') or 'bilinmeyen'))[:60]
+        with self._lock:
+            self.folder.mkdir(parents=True, exist_ok=True)
+            stem = time.strftime('%Y%m%d-%H%M%S') + '-' + package
+            name, n = stem, 1
+            while (self.folder / (name + '.json')).exists():
+                n += 1
+                name = f'{stem}-{n}'
+            if isinstance(shot, str) and shot:
+                try:
+                    (self.folder / (name + '.jpg')).write_bytes(base64.b64decode(shot, validate=True))
+                    value['ekran_goruntusu'] = name + '.jpg'
+                except (binascii.Error, ValueError):
+                    pass
+            (self.folder / (name + '.json')).write_text(json.dumps(value, ensure_ascii=False, indent=1), encoding='utf-8')
+            self._prune()
+        return name
+
+    def _prune(self):
+        records = sorted(self.folder.glob('*.json'))
+        for old in records[:max(0, len(records) - DIAG_KEEP)]:
+            for path in (old, old.with_suffix('.jpg')):
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+
+    def count(self):
+        try:
+            return sum(1 for _ in self.folder.glob('*.json'))
+        except OSError:
+            return 0
+
+
 class PhoneServer:
     """speak(metin, hiz) -> WAV baytlari; motor mesgulse Busy. Istekler sirayla okunur (tek motor).
     describe(goruntu, mime) -> metin (F230); None ya da Busy: betimleme yok (503)."""
 
-    def __init__(self, speak, phones, version='', log=print, describe=None):
+    def __init__(self, speak, phones, version='', log=print, describe=None, diagnostics=None):
         self.speak = speak
+        self.diagnostics = diagnostics
         self.describe = describe
         self._describe_lock = threading.Lock()
         self.phones = phones
@@ -280,6 +331,9 @@ class _Handler(BaseHTTPRequestHandler):
         if path == '/api/betimle':
             self._describe()
             return
+        if path == '/api/teshis':
+            self._diagnose()
+            return
         if path != '/api/oku':
             self._error(404, 'Bilinmeyen adres.')
             return
@@ -332,3 +386,31 @@ class _Handler(BaseHTTPRequestHandler):
             self._json({'metin': text})
         except (BrokenPipeError, ConnectionResetError):
             pass
+
+    def _diagnose(self):
+        if self.owner.diagnostics is None:
+            self.close_connection = True
+            self._error(503, 'Teşhis kaydı kapalı.')
+            return
+        try:
+            length = int(self.headers.get('Content-Length') or 0)
+        except ValueError:
+            length = -1
+        if length <= 0 or length > MAX_DIAG:
+            self.close_connection = True
+            self._error(400, 'Teşhis kaydı çok büyük ya da boş.')
+            return
+        try:
+            value = json.loads(self.rfile.read(length))
+        except ValueError:
+            value = None
+        if not isinstance(value, dict):
+            self._error(400, 'Geçersiz teşhis kaydı.')
+            return
+        try:
+            name = self.owner.diagnostics.save(value)
+        except OSError as error:
+            self.owner.log(f'HATA: Teşhis kaydı yazılamadı: {error}')
+            self._error(503, 'Teşhis kaydı yazılamadı.')
+            return
+        self._json({'kayit': name})

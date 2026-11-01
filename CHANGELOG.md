@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.52.0 — 2026-11-01
+
+### Eklenen
+- **Dokun Oku teşhis kayıtları (F232):** Telefondaki Dokun Oku'da Teşhis kaydı açılınca her okumada ekranın yapısı (yazılar, açıklamalar, sınıflar), dokunulan yer, okunanlar ve küçük bir ekran görüntüsü Aktar'a gönderilir ve `telefon/teshis` klasörüne kaydedilir; yanlış okunan uygulamaları düzeltmek için. Yalnızca eşlenmiş telefondan kabul edilir, en fazla 300 kayıt tutulur. Ayarlar › Bağlantılar › Telefon sesi'nde kayıt sayısı ve Klasörü aç düğmesi görünür.
+
 ## 2.51.1 — 2026-11-01
 
 ### Düzeltilen
