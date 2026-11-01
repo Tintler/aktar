@@ -19,14 +19,22 @@ class PhoneServerTest(unittest.TestCase):
         self.spoken = []
         self.busy = None
 
+        self.described = []
+
         def speak(text, speed):
             if self.busy:
                 raise phone_server.Busy(self.busy)
             self.spoken.append((text, speed))
             return b'RIFF-fake-wav'
 
+        def describe(image, mime):
+            if self.busy:
+                raise phone_server.Busy(self.busy)
+            self.described.append((image, mime))
+            return '  Bir köy meydanı.\n Kalabalık var. '
+
         self.server = phone_server.PhoneServer(speak, phone_server.Phones(Path(self.folder.name) / 'telefonlar.json'),
-                                               '9.9.9', log=lambda _line: None)
+                                               '9.9.9', log=lambda _line: None, describe=describe)
         self.server.start(0, '127.0.0.1')
         self.base = f'http://127.0.0.1:{self.server.info()["port"]}'
 
@@ -96,6 +104,48 @@ class PhoneServerTest(unittest.TestCase):
     def test_outside_lan_is_rejected(self):
         with mock.patch.object(phone_server, 'allowed_client', return_value=False):
             self.assertEqual(self.request('/api/durum')[0], 403)
+
+    def send_image(self, data, kind, token):
+        request = urllib.request.Request(self.base + '/api/betimle', data=data, method='POST')
+        request.add_header('Content-Type', kind)
+        if token:
+            request.add_header('X-Anahtar', token)
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                return response.status, json.loads(response.read())
+        except urllib.error.HTTPError as error:
+            with error:
+                return error.code, json.loads(error.read())
+
+    def test_describe_image(self):
+        token = self.pair()
+        status, body = self.send_image(b'\xff\xd8fake-jpeg', 'image/jpeg', token)
+        self.assertEqual((status, body), (200, {'metin': 'Bir köy meydanı. Kalabalık var.'}))
+        self.assertEqual(self.described, [(b'\xff\xd8fake-jpeg', 'image/jpeg')])
+
+    def test_describe_needs_key_and_image(self):
+        self.assertEqual(self.send_image(b'x', 'image/jpeg', None)[0], 401)
+        token = self.pair()
+        self.assertEqual(self.send_image(b'metin', 'text/plain', token)[0], 400)
+        with mock.patch.object(phone_server, 'MAX_IMAGE', 4):
+            self.assertEqual(self.send_image(b'12345', 'image/png', token)[0], 400)
+        self.assertEqual(self.described, [])
+        # bozuk istekten sonra ayni sunucu calismaya devam eder
+        self.assertEqual(self.send_image(b'ok', 'image/png', token)[0], 200)
+
+    def test_describe_busy_or_missing_is_503(self):
+        token = self.pair()
+        self.busy = 'Resim betimleme Aktar\'da kapalı.'
+        status, body = self.send_image(b'x', 'image/jpeg', token)
+        self.assertEqual((status, body['hata']), (503, 'Resim betimleme Aktar\'da kapalı.'))
+        self.server.describe = None
+        self.busy = None
+        self.assertEqual(self.send_image(b'x', 'image/jpeg', token)[0], 503)
+
+    def test_plain_text(self):
+        import bridge_phone
+        self.assertEqual(bridge_phone.plain_text('<think>hmm</think>**Resimde** bir kedi var.\n- Yazı: `Merhaba`'),
+                         'Resimde bir kedi var. Yazı: Merhaba')
 
     def test_clamp_and_clean(self):
         self.assertEqual(phone_server.clamp_speed('x'), 1.0)

@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.51.0 — 2026-11-01
+
+### Eklenen
+- **Telefonda resim betimleme (F230):** Telefondaki Dokun Oku uygulaması (ayrı Android uygulaması; dokunulan yazıyı ve resmin içindeki yazıyı sesli okur) dokunulan resmi Aktar'a gönderir, Ayarlar'daki görsel model resimde ne olduğunu kısa Türkçe cümlelerle anlatır ve telefon bunu okur. Ayarlar › Bağlantılar › Telefon sesi'nde açılıp kapanır (varsayılan açık), betimleme modeli ayrıca seçilebilir. Resim yalnızca yerel ağdan, eşlenmiş telefondan kabul edilir ve yalnızca bu bilgisayarın model sunucusuna gider.
+
 ## 2.50.0 — 2026-10-29
 
 ### Eklenen

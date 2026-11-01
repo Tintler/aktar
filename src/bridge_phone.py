@@ -3,18 +3,34 @@
 Sunucu phone_server.py'de. Ayarlar > Baglantilar'dan acilir/kapanir; 'autostart' aciksa Aktar acilinca
 kendiliginden acilir. Pencere kapaninca durur. Ses motoru baska bir is icin kullaniliyorsa (sesli kitap, dublaj,
 okuyucuda baska sesle okuma ...) istek 503 ile reddedilir, telefon kendi sesine duser.
-Tercihler ui.json 'phone': {voice, port, autostart}.
+F230: Dokun Oku uygulamasi dokunulan resmi gonderir, Ayarlar'daki gorsel model (yoksa sohbet modeli) Turkce
+betimler; 'describe' kapaliysa 503.
+Tercihler ui.json 'phone': {voice, port, autostart, describe, vision_model}.
 """
 from __future__ import annotations
 
 import base64
+import re
 import threading
 
 import phone_server
-from app_core import APP_DIR
+from app_core import APP_DIR, Client, load_config
 from version import VERSION
 
 DEFAULT_VOICE = 'ema-lightning/default'
+DESCRIBE_PROMPT = (
+    'Bu resim az gören birine sesli okunacak. Resmi Türkçe, en fazla dört kısa cümleyle anlat: '
+    'önce ne gösterdiğini (kişiler, yer, ne yapıldığı), sonra varsa resimdeki yazıyı aynen oku. '
+    'Emin olmadığın şeyi uydurma. Başlık, madde işareti, yıldız ya da markdown kullanma; düz cümleler yaz.')
+DESCRIBE_TOKENS = 400
+
+
+def plain_text(text):
+    """Model yanitindan markdown isaretlerini ve dusunme etiketlerini atar (sesli okunacak)."""
+    text = re.sub(r'<think>.*?</think>', ' ', str(text or ''), flags=re.S)
+    text = re.sub(r'^\s*(#+|[-*•]|\d+[.)])\s+', '', text, flags=re.M)
+    text = text.replace('**', '').replace('__', '').replace('`', '')
+    return ' '.join(text.split())
 
 
 class PhoneMixin:
@@ -71,18 +87,43 @@ class PhoneMixin:
         result = self._engines().say(text, speed, None, language, override)
         return base64.b64decode(result.get('audio') or '')
 
+    def _phone_describes(self):
+        return self._phone_prefs().get('describe', True) is not False
+
+    def _phone_vision_cfg(self):
+        cfg = dict(load_config())
+        model = (str(self._phone_prefs().get('vision_model') or '').strip()
+                 or str(cfg.get('vision_model') or '').strip() or cfg['model'])
+        cfg.update(model=model, vision_model=model, disable_thinking=True, temperature=0.2,
+                   timeout_seconds=min(90, int(cfg['timeout_seconds'])))
+        cfg.pop('thinking', None)
+        return cfg
+
+    def _phone_describe(self, image, mime):
+        """Sunucu is parcaciginda (F230): resmin Turkce betimlemesi; kapaliysa ya da model yoksa Busy."""
+        if not self._phone_describes():
+            raise phone_server.Busy('Resim betimleme Aktar\'da kapalı.')
+        try:
+            client = Client(self._phone_vision_cfg(), lambda _message: None)
+            answer = client.vision(DESCRIBE_PROMPT, image, mime, max_tokens=DESCRIBE_TOKENS)
+        except (RuntimeError, ValueError, OSError) as error:
+            raise phone_server.Busy(f'Görsel model: {error}') from None
+        return plain_text(answer)
+
     def phone_state(self):
         server = self._phone_server
         info = server.info() if server else {'running': False, 'port': None, 'code': '', 'addresses': []}
         prefs = self._phone_prefs()
         info.update(phones=self._phone_phones().listing(), voice=self._phone_voice(),
-                    autostart=bool(prefs.get('autostart')),
+                    autostart=bool(prefs.get('autostart')), describe=self._phone_describes(),
+                    vision_model=str(prefs.get('vision_model') or ''),
                     default_port=int(prefs.get('port') or phone_server.DEFAULT_PORT))
         return info
 
     def phone_start(self, port=None):
         if self._phone_server is None:
-            self._phone_server = phone_server.PhoneServer(self._phone_speak, self._phone_phones(), VERSION, self._log)
+            self._phone_server = phone_server.PhoneServer(self._phone_speak, self._phone_phones(), VERSION, self._log,
+                                                          describe=self._phone_describe)
         try:
             port = int(port or self._phone_prefs().get('port') or phone_server.DEFAULT_PORT)
         except (TypeError, ValueError):
@@ -102,11 +143,15 @@ class PhoneMixin:
             self._log('Telefon sesi: sunucu kapatıldı.')
         return self.phone_state()
 
-    def phone_set(self, voice=None, autostart=None):
+    def phone_set(self, voice=None, autostart=None, describe=None, vision_model=None):
         if voice is not None:
             self._phone_set_prefs(voice=str(voice or ''))
         if autostart is not None:
             self._phone_set_prefs(autostart=bool(autostart))
+        if describe is not None:
+            self._phone_set_prefs(describe=bool(describe))
+        if vision_model is not None:
+            self._phone_set_prefs(vision_model=str(vision_model or '').strip())
         return self.phone_state()
 
     def phone_remove(self, phone_id):

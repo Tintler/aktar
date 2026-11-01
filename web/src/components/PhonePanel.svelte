@@ -1,5 +1,6 @@
 <script>
   // F229: Sesli Haber telefon uygulamasina yerel agda Aktar'in sesini veren sunucu (bridge_phone.py).
+  // F230: Dokun Oku resim betimleme ayari (describe, vision_model).
   import Icon from '../lib/Icon.svelte';
   import Toggle from './Toggle.svelte';
   import { act, toast } from '../lib/state.svelte.js';
@@ -34,7 +35,7 @@
 </script>
 
 <section>
-  <h2>Telefon sesi (Sesli Haber)</h2>
+  <h2>Telefon sesi (Sesli Haber, Dokun Oku)</h2>
   {#if state}
     <div class="fr">
       <div class="l">Sunucu
@@ -76,6 +77,17 @@
         {/each}
       </select>
     </div>
+    <div class="fr">
+      <div class="l">Resim betimleme (Dokun Oku)<small>Telefondaki Dokun Oku uygulaması dokunulan resmi gönderir, görsel model ne gösterdiğini Türkçe anlatır. Resim yalnızca bu bilgisayardaki model sunucusuna gider.</small></div>
+      <Toggle checked={state.describe} onchange={(value) => run('phone_set', null, null, value, null)} />
+    </div>
+    {#if state.describe}
+      <div class="fr">
+        <div class="l">Betimleme modeli<small>Boş bırakılırsa Ayarlar'daki görsel model, o da boşsa analiz modeli kullanılır. Model resim okuyabilmeli.</small></div>
+        <input class="field" placeholder="Ayarlar'daki görsel model" value={state.vision_model}
+          onchange={(event) => run('phone_set', null, null, null, event.currentTarget.value)} />
+      </div>
+    {/if}
     {#if state.phones.length || searching}
       <div class="fr phones">
         <div class="l">Eşlenen telefonlar</div>

@@ -11,7 +11,9 @@ Uclar (JSON, UTF-8; /api/durum ve /api/eslestir disinda 'X-Anahtar' basligi gere
   GET  /api/durum                -> {uygulama, surum, eslesmis}
   POST /api/eslestir {kod, ad}   -> {anahtar}
   POST /api/oku {metin, hiz}     -> audio/wav (tek cumle; en fazla TEXT_LIMIT karakter)
-Hata yanitlari {hata}: 401 eslenmemis, 403 yerel ag disi ya da yanlis kod, 503 ses motoru mesgul/hazir degil.
+  POST /api/betimle <JPEG/PNG>   -> {metin} (F230, Dokun Oku: resmin Turkce betimlemesi; govde en fazla MAX_IMAGE)
+Hata yanitlari {hata}: 401 eslenmemis, 403 yerel ag disi ya da yanlis kod, 503 ses motoru mesgul/hazir degil
+(betimlemede: kapali ya da gorsel model yanit vermedi).
 """
 from __future__ import annotations
 
@@ -31,6 +33,8 @@ MAX_JSON = 16 * 1024
 TEXT_LIMIT = 1000          # tek istekte okunacak en uzun metin (telefon cumle cumle gonderir)
 PAIR_TRIES = 10            # yanlis kod denemesi siniri (kod yenilenene kadar)
 SPEEDS = (0.5, 2.0)
+MAX_IMAGE = 6 * 1024 * 1024
+IMAGE_TYPES = ('image/jpeg', 'image/png')
 
 
 class Busy(Exception):
@@ -138,10 +142,13 @@ class Phones:
 
 
 class PhoneServer:
-    """speak(metin, hiz) -> WAV baytlari; motor mesgulse Busy. Istekler sirayla okunur (tek motor)."""
+    """speak(metin, hiz) -> WAV baytlari; motor mesgulse Busy. Istekler sirayla okunur (tek motor).
+    describe(goruntu, mime) -> metin (F230); None ya da Busy: betimleme yok (503)."""
 
-    def __init__(self, speak, phones, version='', log=print):
+    def __init__(self, speak, phones, version='', log=print, describe=None):
         self.speak = speak
+        self.describe = describe
+        self._describe_lock = threading.Lock()
         self.phones = phones
         self.version = version
         self.log = log
@@ -193,6 +200,12 @@ class PhoneServer:
     def say(self, text, speed):
         with self._speak_lock:
             return self.speak(text, speed)
+
+    def tell(self, image, mime):
+        if self.describe is None:
+            raise Busy('Resim betimleme kapalı.')
+        with self._describe_lock:   # gorsel model istekleri sirayla (bellek)
+            return self.describe(image, mime)
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -264,6 +277,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if not self._gate():
             return
+        if path == '/api/betimle':
+            self._describe()
+            return
         if path != '/api/oku':
             self._error(404, 'Bilinmeyen adres.')
             return
@@ -286,5 +302,33 @@ class _Handler(BaseHTTPRequestHandler):
             return
         try:
             self._send(200, audio, 'audio/wav')
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def _describe(self):
+        kind = (self.headers.get('Content-Type') or '').split(';')[0].strip().lower()
+        try:
+            length = int(self.headers.get('Content-Length') or 0)
+        except ValueError:
+            length = -1
+        if kind not in IMAGE_TYPES or length <= 0 or length > MAX_IMAGE:
+            self.close_connection = True   # okunmayan govde ayni baglantidaki sonraki istegi bozmasin
+            self._error(400, 'Resim JPEG ya da PNG olmalı (en fazla 6 MB).')
+            return
+        image = self.rfile.read(length)
+        try:
+            text = ' '.join(str(self.owner.tell(image, kind) or '').split())
+        except Busy as error:
+            self._error(503, str(error) or 'Görsel model meşgul.')
+            return
+        except Exception as error:   # model sunucusu hatasi: sunucu ayakta kalsin
+            self.owner.log(f'HATA: Resim betimleme: {error}')
+            self._error(503, 'Resim betimlenemedi.')
+            return
+        if not text:
+            self._error(503, 'Görsel model yanıt vermedi.')
+            return
+        try:
+            self._json({'metin': text})
         except (BrokenPipeError, ConnectionResetError):
             pass
