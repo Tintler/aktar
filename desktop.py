@@ -3,6 +3,7 @@
     py -3 desktop.py          web/dist icindeki derlenmis arayuz
     py -3 desktop.py --dev    Vite gelistirme sunucusu (web klasorunde `npm run dev`)
     py -3 desktop.py --version  surumu yazar (F155)
+    py -3 desktop.py --tray     pencere gostermeden sistem tepsisinde baslar (F233, oturum acilisi)
 
 Windows'ta WebView2, Linux'ta WebKitGTK (python3-gi + gir1.2-webkit2-4.1) kullanilir.
 """
@@ -20,6 +21,7 @@ from webview.dom import DOMEventHandler
 import mic_permission
 import native_player
 import themes
+import tray
 from app_core import ROOT
 from bridge import Bridge
 from window_frame import WindowFrame, fit_geometry, frameless
@@ -67,7 +69,9 @@ def main():
         sys.exit('Arayüz derlenmemiş: web klasöründe "npm install" ve "npm run build" çalıştırın '
                  '(ya da GUI_BASLAT.cmd kullanın).')
     dialogs = Dialogs()
-    state = {'window': None, 'closing_ok': False}
+    # F233: oturum acilisinda tepside baslar (tepsi kutuphanesi yoksa pencere gorunur acilir)
+    hidden = tray.TRAY_ARG in sys.argv and tray.available()
+    state = {'window': None, 'closing_ok': False, 'hidden': hidden}
 
     def emit(event, data):
         window = state['window']
@@ -93,7 +97,7 @@ def main():
                                    x=geometry['x'], y=geometry['y'], min_size=MIN_SIZE,
                                    maximized=geometry['maximized'] and not frameless(),
                                    background_color=palette['window'][:7],
-                                   frameless=frameless(), easy_drag=False)
+                                   frameless=frameless(), easy_drag=False, hidden=hidden)
     state['window'] = dialogs.window = window
     if native_player.available():   # F122: gomulu mpv (libmpv-2.dll bin\ icinde)
         bridge._native = native_player.NativePlayer(window, emit, bridge._log)
@@ -122,7 +126,36 @@ def main():
             return True
         return bridge.request_close(close_later)
 
+    # F233: sistem tepsisi. Ayar aciksa simge durumuna kucultulen pencere gizlenip tepside bekler; tepside
+    # baslatildiysa ayar kapali olsa da simge pencere ilk acilana kadar durur.
+    def show_window():
+        window.show()
+        window.restore()
+        if state['hidden']:
+            state['hidden'] = False
+            sync_tray()
+
+    def quit_app():
+        show_window()          # kapanis onayi (suren ceviri vb.) sayfada sorulur
+        window.destroy()
+
+    tray_icon = tray.Tray(show_window, quit_app, bridge._log)
+
+    def sync_tray():
+        if bridge.ui_prefs().get('tray') or state['hidden']:
+            tray_icon.start()
+        else:
+            tray_icon.stop()
+
+    def on_minimized():
+        if bridge.ui_prefs().get('tray') and tray_icon.running:
+            window.hide()
+
+    bridge._tray_sync = sync_tray
+    sync_tray()
+    window.events.minimized += on_minimized
     window.events.closing += on_closing
+    window.events.closed += tray_icon.stop
     window.events.closed += bridge.shutdown
 
     def on_drop(event):

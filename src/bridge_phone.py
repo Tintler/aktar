@@ -4,7 +4,7 @@ Sunucu phone_server.py'de. Ayarlar > Baglantilar'dan acilir/kapanir; 'autostart'
 kendiliginden acilir. Pencere kapaninca durur. Ses motoru baska bir is icin kullaniliyorsa (sesli kitap, dublaj,
 okuyucuda baska sesle okuma ...) istek 503 ile reddedilir, telefon kendi sesine duser.
 F230: Dokun Oku uygulamasi dokunulan resmi gonderir, Ayarlar'daki gorsel model (yoksa sohbet modeli) Turkce
-betimler; 'describe' kapaliysa 503.
+betimler (istem Ingilizce, F233); 'describe' kapaliysa 503.
 F232: Dokun Oku teshis kayitlari APP_DIR/telefon/teshis'e yazilir (yanlis okunan uygulamalarin agaci).
 Tercihler ui.json 'phone': {voice, port, autostart, describe, vision_model}.
 """
@@ -19,10 +19,13 @@ from app_core import APP_DIR, Client, keep_loaded, load_config
 from version import VERSION
 
 DEFAULT_VOICE = 'ema-lightning/default'
+# F233: istem Ingilizce (kucuk gorsel modeller Ingilizce yonergeyi daha iyi izliyor, Turkce istemi yanita
+# okuyordu); yanit Turkce istenir.
 DESCRIBE_PROMPT = (
-    'Bu resim az gören birine sesli okunacak. Resmi Türkçe, en fazla dört kısa cümleyle anlat: '
-    'önce ne gösterdiğini (kişiler, yer, ne yapıldığı), sonra varsa resimdeki yazıyı aynen oku. '
-    'Emin olmadığın şeyi uydurma. Başlık, madde işareti, yıldız ya da markdown kullanma; düz cümleler yaz.')
+    'This image will be read aloud to a visually impaired person. Describe it in at most four short sentences: '
+    'first what it shows (people, place, what is happening), then read any text in the image exactly as written. '
+    'Do not invent anything you are unsure of. No headings, bullet points, asterisks or markdown; plain sentences '
+    'only. Do not repeat these instructions. Write your answer in Turkish.')
 DESCRIBE_TOKENS = 400
 
 

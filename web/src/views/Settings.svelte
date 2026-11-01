@@ -17,6 +17,13 @@
   let saving = $state(false);
   let tesseract = $state('');
   let cuda = $state({ message: '' });
+  let trayInfo = $state(null);   // F233: tepsiye kucultme + oturum acilisinda baslatma
+  call('tray_state').then((value) => { if (value && !value.error) trayInfo = value; });
+  async function setTray(values) {
+    const value = await act('tray_set', values.enabled ?? null, values.autostart ?? null);
+    if (value) trayInfo = value;
+    else call('tray_state').then((v) => { if (v && !v.error) trayInfo = v; });
+  }
   const dirty = $derived(cfg !== null && JSON.stringify(cfg) !== saved);
 
   async function load() {
@@ -641,6 +648,20 @@
 
       <div class="cat-body" data-cat="advanced" hidden={!searching && tab !== 'advanced'}>
         {#if searching}<div class="cat-label">{CATS.find((c) => c.id === 'advanced').label}</div>{/if}
+          {#if trayInfo}
+            <section>
+              <h2>Pencere</h2>
+              <div class="fr">
+                <div class="l">Sistem tepsisine küçült<small>{trayInfo.available ? "Açıkken simge durumuna küçültülen pencere görev çubuğundan kalkar, saatin yanındaki simgeden yeniden açılır. Pencereyi kapatmak Aktar'ı yine tamamen kapatır." : 'Tepsi kütüphanesi (pystray) kurulu değil.'}</small></div>
+                <Toggle checked={trayInfo.tray} disabled={!trayInfo.available} onchange={(value) => setTray({ enabled: value })} />
+              </div>
+              <div class="fr">
+                <div class="l">Oturum açılınca başlat<small>Bilgisayarda oturum açılınca Aktar pencere göstermeden sistem tepsisinde başlar; simgeye tıklayınca açılır.</small></div>
+                <Toggle checked={trayInfo.autostart} onchange={(value) => setTray({ autostart: value })} />
+              </div>
+            </section>
+          {/if}
+
           <section>
             <h2>Gelişmiş</h2>
             <div class="fr">

@@ -29,6 +29,7 @@ import media_server
 import setup_check
 from version import VERSION
 import themes
+import tray
 from app_core import (APP_DIR, DEFAULT_CONFIG, WINDOWS, Client, keep_loaded, load_config, loaded_models, qa_config,
                       read, save_json, unload_models, validate_config)
 from bridge_art import ArtMixin
@@ -77,6 +78,7 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         # window_frame.WindowFrame; desktop.py atar. Ozel (alt cizgili): pywebview public
         # nitelikleri sayfaya verir ve iclerinde gezinir.
         self._frame = None
+        self._tray_sync = None    # F233: desktop.py atar; tepsi simgesini ui.json 'tray'e gore acar/kapatir
         self._lock = threading.RLock()
         self._models = {'state': 'probing', 'names': [], 'message': '', 'model': ''}
         self._startup_paths = []
@@ -385,6 +387,26 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         else:
             return False
         return True
+
+    def tray_state(self):
+        """F233: sistem tepsisine kucultme ve oturum acilisinda (tepside) baslatma."""
+        try:
+            autostart = tray.autostart_enabled()
+        except OSError:
+            autostart = False
+        return {'available': tray.available(), 'tray': bool(self.ui_prefs().get('tray')), 'autostart': autostart}
+
+    def tray_set(self, enabled=None, autostart=None):
+        if enabled is not None:
+            self.save_ui_prefs({'tray': bool(enabled)})
+            if self._tray_sync is not None:
+                self._tray_sync()
+        if autostart is not None:
+            try:
+                tray.set_autostart(bool(autostart))
+            except OSError as error:
+                raise RuntimeError(f'Başlangıç kaydı yazılamadı: {error}') from None
+        return self.tray_state()
 
     def request_close(self, close):
         """Pencere kapanirken cagrilir. Hemen kapanabiliyorsa True."""

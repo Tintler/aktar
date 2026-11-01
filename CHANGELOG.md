@@ -2,6 +2,14 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.53.0 — 2026-11-01
+
+### Eklenen
+- **Sistem tepsisi ve oturum açılışında başlatma (F233):** Ayarlar › Gelişmiş › Pencere'de iki yeni anahtar. *Sistem tepsisine küçült* açıkken simge durumuna küçültülen pencere görev çubuğundan kalkar ve saatin yanındaki bildirim alanında simge olarak durur; simgeye tıklayınca yeniden açılır, sağ tık menüsünde Çıkış vardır. Pencereyi kapatmak Aktar'ı yine tamamen kapatır. *Oturum açılınca başlat* açıkken Aktar Windows açılınca (Linux'ta oturum açılınca) pencere göstermeden tepside başlar. İkisi de varsayılan kapalıdır.
+
+### Değişen
+- **Telefonda resim betimleme:** Görsel modele giden istem artık İngilizce, yanıt yine Türkçe isteniyor. Küçük modeller Türkçe istemi izlemekte zorlanıp yanıtın içinde istemi de okuyordu.
+
 ## 2.52.0 — 2026-11-01
 
 ### Eklenen

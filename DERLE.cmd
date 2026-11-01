@@ -35,6 +35,7 @@ py -3 -m PyInstaller ^
     --name Aktar ^
     --version-file build\version_info.txt ^
     --paths src ^
+    --hidden-import pystray._win32 ^
     %ICON_ARG% ^
     --add-data "bin\ffmpeg.exe;bin" --add-data "bin\ffprobe.exe;bin" ^
     --add-data "assets;assets" ^
