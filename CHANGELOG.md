@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.57.1 — 2026-11-03
+
+### Düzeltilen
+- **Duygu etiketleri ve karakter ataması aynı anda:** Karakter ataması bu bilgisayarın (ya da yerel ağın) dil modeliyle sürerken duygu etiketi oluşturma da başlatılabiliyordu; ikisi birlikte belleği dolduruyordu. Artık o sırada reddedilir (tersi zaten reddediliyordu). İnternetteki bir model sunucusuyla ikisi birlikte çalışabilir.
+
 ## 2.57.0 — 2026-11-03
 
 ### Eklenen

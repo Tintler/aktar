@@ -172,6 +172,9 @@ class TtsMixin:
             if not remote and getattr(self, '_art_planning_local', lambda: False)():
                 return _error('Kitap görselleri planlanırken duygu etiketi oluşturulamaz (ikisi de bu bilgisayarın '
                               'dil modelini kullanır; internetteki bir model sunucusuyla birlikte çalışabilir).')
+            if not remote and getattr(self, '_cast_local', lambda: False)():
+                return _error('Karakter ataması sürerken duygu etiketi oluşturulamaz (ikisi de bu bilgisayarın dil '
+                              'modelini kullanır; internetteki bir model sunucusuyla birlikte çalışabilir).')
             for name in ('_prepare_job', '_audiobook_job') if not remote else ():
                 running = getattr(self, name, None)
                 if running is not None and running.is_alive():
