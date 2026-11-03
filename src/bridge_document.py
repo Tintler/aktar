@@ -127,15 +127,11 @@ class DocumentMixin:
                         log('Belge indekslenemedi (kısa belgede gerekmez): ' + str(error))
                 session = collection_qa.CollectionQA([doc.path], doc.path.stem, log=log)
                 fits = session.whole_hits(cfg) is not None
-                model = str(cfg.get('embedding_model', '')).strip()
-                if fits or model:
-                    session.history = list(doc.history)
-                    doc.session = session
-                    doc.ready = True
-                    doc.note = '' if fits else 'Uzun belge: soruyla ilgili bölümler aranarak cevaplanır.'
-                else:
-                    doc.note = ('Belge tek seferde modele sığmayacak kadar uzun; soru sormak için '
-                                'Ayarlar → Kütüphane indeksi\'nden embedding modeli seçin.')
+                # F239: embedding modeli yoksa uzun belge anahtar kelimeyle aranir (CollectionQA.search_hits)
+                session.history = list(doc.history)
+                doc.session = session
+                doc.ready = True
+                doc.note = '' if fits else 'Uzun belge: soruyla ilgili bölümler aranarak cevaplanır.'
             except Exception as error:  # metin yoksa / okunamazsa sohbet kapali kalir
                 doc.note = 'Bu belgeye soru sorulamıyor: ' + str(error)
             push(doc)

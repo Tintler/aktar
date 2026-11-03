@@ -780,6 +780,7 @@ class LibraryMixin:
             self._log('Bu hazırlıkta taranmış sayfalar için OCR motoru: ' + ocr_engine)
         client = Client(cfg, log=self._log)  # indeksleme icin tek istemci
         frame_reader = []  # F114: ilk videoda kurulur
+        index_failed = []  # F239: embedding modeli sunucuda yoksa indeksleme bir kez denenir, sorular anahtar kelimeyle
 
         def started(index, path, step):
             queue.update(index=index, name=Path(path).name, step=step, percent=None,
@@ -840,10 +841,14 @@ class LibraryMixin:
                                             path, ('Model %' if stage == 'download' else 'Konuşmacı %')
                                             + str(int(100 * done / total)), 'accent'))
                     has_text = False  # indeks konusmaci etiketleriyle yeniden kurulur
-                if outcome != 'skipped' and str(cfg.get('embedding_model', '')).strip():
+                if outcome != 'skipped' and str(cfg.get('embedding_model', '')).strip() and not index_failed:
                     if not has_text:
                         started(index, path, 'indeksleniyor')
-                    library.index(entry, cfg, log=log, cancelled=cancel.is_set, client=client)
+                    try:
+                        library.index(entry, cfg, log=log, cancelled=cancel.is_set, client=client)
+                    except (RuntimeError, ValueError) as error:
+                        index_failed.append(error)
+                        self._log(f'İndeksleme kapatıldı ({error}); sorular anahtar kelime aramasıyla cevaplanır.')
                 if outcome != 'skipped' and summaries:
                     started(index, path, 'özetleniyor')
                     collection_qa.summarize_video(path, log=log, progress=counted('Özet'), cancelled=cancel.is_set)

@@ -708,17 +708,31 @@ class Client:
         value = self.request('/models')
         return [item['id'] for item in value.get('data', []) if item.get('id')]
 
-    def vision(self, prompt, image, mime='image/png', max_tokens=4096, model=None):
-        """Gorsel + metin istegi (F69): `model` ya da `vision_model` (bossa sohbet modeli) ile."""
+    def vision(self, prompt, image, mime='image/png', max_tokens=4096, model=None, fallback_prompt=None):
+        """Gorsel + metin istegi (F69): `model` ya da `vision_model` (bossa sohbet modeli) ile.
+
+        F239: secilen model sunucuda yoksa (OpenRouter'a gecince yerel OCR/gorsel model adi kalir) sirayla
+        `vision_model` ve sohbet modeli denenir; `model`den dusulurse istem `fallback_prompt` olur."""
         import base64
-        model = model or str(self.cfg.get('vision_model', '')).strip() or self.cfg['model']
-        payload = {'model': model, 'temperature': 0, 'max_tokens': max_tokens, 'stream': False,
-                   'messages': [{'role': 'user', 'content': [
-                       {'type': 'text', 'text': prompt},
-                       {'type': 'image_url', 'image_url': {
-                           'url': f'data:{mime};base64,' + base64.b64encode(image).decode()}}]}]}
-        self._thinking(payload)
-        value = self.request('/chat/completions', payload)
+        url = f'data:{mime};base64,' + base64.b64encode(image).decode()
+        chain = [name for name in dict.fromkeys(
+            (model, str(self.cfg.get('vision_model', '')).strip(), self.cfg['model'])) if name]
+        missing = self.__dict__.setdefault('_missing_models', set())
+        candidates = [name for name in chain if name not in missing] or chain[-1:]
+        for attempt, name in enumerate(candidates):
+            text = prompt if name == model or not fallback_prompt else fallback_prompt
+            payload = {'model': name, 'temperature': 0, 'max_tokens': max_tokens, 'stream': False,
+                       'messages': [{'role': 'user', 'content': [
+                           {'type': 'text', 'text': text}, {'type': 'image_url', 'image_url': {'url': url}}]}]}
+            self._thinking(payload)
+            try:
+                value = self.request('/chat/completions', payload)
+                break
+            except RuntimeError as error:
+                if attempt + 1 >= len(candidates) or not llm_provider.missing_model(error):
+                    raise
+                missing.add(name)
+                self.log(f'UYARI: {name} sunucuda yok; görsel {candidates[attempt + 1]} ile okunuyor.')
         try:
             return str(value['choices'][0]['message'].get('content') or '')
         except (KeyError, IndexError, TypeError):

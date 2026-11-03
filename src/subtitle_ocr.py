@@ -213,7 +213,7 @@ def reader_for(cfg, language='', log=print):
     prompt = str(cfg.get('ocr_model_prompt') or 'Text Recognition:') if model else SUBTITLE_PROMPT
 
     def read_png(png):
-        return client.vision(prompt, png, model=model or None, max_tokens=512)
+        return client.vision(prompt, png, model=model or None, max_tokens=512, fallback_prompt=SUBTITLE_PROMPT)
     read_png.workers = 1
     read_png.label = 'OCR modeli' if model else 'görü modeli'
     return read_png

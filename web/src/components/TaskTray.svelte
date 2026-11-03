@@ -81,6 +81,12 @@
         percent: e.total ? pct(e.done, e.total) : null, count: e.total ? `${e.done} / ${e.total} cümle` : '',
         go: () => go('reading') });
     }
+    const c = app.castJob;
+    if (c) {
+      list.push({ id: 'cast', icon: 'users', title: 'Karakterler atanıyor', detail: [c.title, c.reading ? 'bölümler okunuyor' : ''].filter(Boolean).join(' · '),
+        percent: c.total ? pct(c.done, c.total) : null, count: c.total ? `${c.done} / ${c.total} cümle` : '',
+        go: () => go('reading') });
+    }
     const art = app.artJob;
     if (art) {
       const plan = art.stage === 'plan';

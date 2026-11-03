@@ -1,7 +1,7 @@
 <script>
   import Icon from '../lib/Icon.svelte';
   import BookCover from '../components/BookCover.svelte';
-  import { app, act, openPdfImport, toast, refreshEmotionBooks } from '../lib/state.svelte.js';
+  import { app, act, openPdfImport, toast, refreshEmotionBooks, refreshCastBooks } from '../lib/state.svelte.js';
   import { confirm, choose } from '../lib/confirm.svelte.js';
   import { bookSections } from '../lib/emotions.js';
 
@@ -109,6 +109,52 @@
     if (result?.info?.text) act('reveal', result.info.text);
   }
 
+  // F239 (deneysel): cok sesli sesli kitap. Dil modeli konusmalari karakterlere atar (butun kitap icin bir kez),
+  // sesler 'Karakter sesleri' penceresinde secilir.
+  const cast = (book) => app.castBooks.includes(book.id);
+  const castPartial = (book) => app.castPartials[book.id] ?? null;
+
+  async function startCast(book, resume = false) {
+    menu = null;
+    if (app.castJob) { toast('Başka bir kitabın karakter ataması sürüyor.'); return; }
+    if (!resume) {
+      const yes = await confirm({
+        title: cast(book) ? 'Karakterleri yeniden ata' : 'Karakter seslerini belirle (deneysel)',
+        message: `"${book.title}" kitabındaki konuşmaların kime ait olduğunu dil modeli tahmin eder; sonra her karaktere ` +
+          'ayrı bir ses seçebilirsiniz. Model yanılabilir: konuşanı bilinmeyen satırlar anlatıcının sesiyle okunur. ' +
+          "Ayarlar → Modeller'deki sohbet modeli kullanılır; yerel modelde bu sırada ses motoru durdurulur." +
+          (cast(book) ? ' Mevcut atama yenilenir; seçtiğiniz sesler aynı adlı karakterlerde kalır.' : '')
+          + (castPartial(book) ? ' Yarım kalan atama silinir.' : ''),
+        ok: 'Başlat', cancel: 'Vazgeç' });
+      if (!yes) return;
+    }
+    app.castJob = { book: book.id, title: book.title, done: 0, total: 0, reading: true };
+    let sections;
+    try {
+      sections = await bookSections(book.id, app.ttsPrefs.split ?? {});
+    } catch (error) {
+      app.castJob = null;
+      toast(String(error?.message ?? error), 'error');
+      return;
+    }
+    const result = await act('tts_cast_create', book.id, sections, book.title, resume);
+    if (!result?.started) app.castJob = null;
+    else if (app.castJob?.reading) app.castJob = { book: book.id, title: book.title, done: 0, total: result.total };
+  }
+
+  function openCast(book) {
+    menu = null;
+    app.castModal = { book: book.id, title: book.title, language: book.language || 'tr' };
+  }
+
+  async function removeCast(book) {
+    menu = null;
+    const yes = await confirm({ title: 'Karakter atamasını sil', message: `"${book.title}" kitabının karakter ataması ve ses seçimleri silinsin mi?`,
+      ok: 'Sil', cancel: 'Vazgeç', danger: true });
+    if (!yes) return;
+    if (await act('tts_cast_clear', book.id)) { await refreshCastBooks(); toast('Karakter ataması silindi.'); }
+  }
+
   function open(book) {
     if (!book.exists) { toast('Kitap dosyası bulunamadı: ' + book.path, 'error'); return; }
     onopen(book);
@@ -122,7 +168,7 @@
   }
 
   const progressLabel = (b) => (!b.exists ? 'Dosya bulunamadı' : b.percent >= 100 ? 'Bitti' : b.percent ? `%${Math.round(b.percent)} okundu` : 'Yeni')
-    + (tagged(b) ? ' · duygu etiketli' : '') + (illustrated(b) ? ' · görselli' : '');
+    + (tagged(b) ? ' · duygu etiketli' : '') + (cast(b) ? ' · çok sesli' : '') + (illustrated(b) ? ' · görselli' : '');
 </script>
 
 <svelte:window onclick={() => (menu = null)} />
@@ -182,6 +228,19 @@
       <button disabled={!menu.book.exists || Boolean(app.emotionJob)} onclick={() => createEmotions(menu.book)}>
         <Icon name="sparkles" size={15} />{tagged(menu.book) ? 'Duygu etiketlerini yeniden oluştur' : 'Duygu etiketleri oluştur'}</button>
     {/if}
+    {#if app.castJob?.book === menu.book.id}
+      <button onclick={() => { menu = null; act('tts_cast_cancel'); }}><Icon name="stop" size={15} />Karakter atamasını durdur</button>
+    {:else}
+      {#if castPartial(menu.book)}
+        <button disabled={!menu.book.exists || Boolean(app.castJob)} onclick={() => startCast(menu.book, true)}>
+          <Icon name="play" size={15} />Karakter atamasını sürdür{partialLabel(castPartial(menu.book))}</button>
+      {/if}
+      <button disabled={!menu.book.exists || Boolean(app.castJob)} onclick={() => startCast(menu.book)}>
+        <Icon name="users" size={15} />{cast(menu.book) ? 'Karakterleri yeniden ata (deneysel)' : 'Karakter seslerini belirle (deneysel)'}</button>
+    {/if}
+    {#if cast(menu.book)}
+      <button onclick={() => openCast(menu.book)}><Icon name="users" size={15} />Karakter sesleri…</button>
+    {/if}
     <button disabled={!menu.book.exists} onclick={() => openArt(menu.book)}>
       <Icon name="image" size={15} />{app.artBooks[menu.book.id] ? 'Kitap görselleri' : 'Kitap görselleri oluştur'}</button>
     {#if app.artJob?.book === menu.book.id}
@@ -190,6 +249,9 @@
     {#if tagged(menu.book)}
       <button onclick={() => showEmotions(menu.book)}><Icon name="fileText" size={15} />Etiketli metni göster</button>
       <button onclick={() => removeEmotions(menu.book)}><Icon name="trash" size={15} />Duygu etiketlerini sil</button>
+    {/if}
+    {#if cast(menu.book)}
+      <button onclick={() => removeCast(menu.book)}><Icon name="trash" size={15} />Karakter atamasını sil</button>
     {/if}
     <button onclick={() => remove(menu.book)}><Icon name="trash" size={15} />Kitaplıktan kaldır</button>
   </div>

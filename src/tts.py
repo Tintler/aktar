@@ -10,6 +10,7 @@ so development needs no packaging. Which engine and voice read a book is chosen 
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import importlib.util
 import io
@@ -224,9 +225,14 @@ class InlineWorker:
 class Engines:
     """Lists, installs and runs voice engines; keeps at most one worker process running."""
 
-    def __init__(self, app_dir, source_dir, emit=None, prefs=None, transcribe=None, log=None, emotion=None):
+    def __init__(self, app_dir, source_dir, emit=None, prefs=None, transcribe=None, log=None, emotion=None,
+                 cast=None):
         self.app_dir, self.source_dir = Path(app_dir), Path(source_dir)
         self._emotion = emotion           # F168: (book, sentence) -> emotion tag ('' none), engines with "emotion_tags"
+        # F239: multi-voice reading (experimental): cast(book, sentence) -> the speaking character's voice override
+        # ({'voice', 'options'}) or None (narrator); cast(book, None) -> whether the book is read with several voices
+        self._cast = cast
+        self._voice_lock = threading.RLock()   # a voice switch and the sentence read with it stay together
         self._emit = emit or (lambda _event, _data: None)
         self._prefs = prefs or (lambda: {})
         self._transcribe = transcribe     # builtin engines: (wav path, language) -> Whisper segments
@@ -437,7 +443,7 @@ class Engines:
     def emotion_tag(self, book, text, language='tr', override=None):
         """F168: a book sentence's emotion tag ('' none), only for an engine whose motor.json has "emotion_tags"
         (Drama 3) and only for reading a book with its own voice (not chat or dubbing voices)."""
-        if not book or override or self._emotion is None:
+        if not book or (override and not override.get('cast')) or self._emotion is None:
             return ''
         engine_id, _voice = self.choice(language)
         if not engine_id or not self._manifests().get(engine_id, {}).get('emotion_tags'):
@@ -464,6 +470,43 @@ class Engines:
         if found and drama3_tags.is_markup(found) and not self._rich_tags(engine_id):
             return drama3_tags.legacy_tag(found, drama3_tags.ALL_TAGS)
         return found
+
+    def _casting(self, book):
+        """F239: is this book read with character voices."""
+        return bool(book and self._cast is not None and self._cast(book, None))
+
+    def _cast_for(self, book, text, language='tr', override=None):
+        """F239: the voice a book sentence (or the first of a group) is read with: the speaking character's voice of
+        the narrator's engine, else `override` (None: the narrator). A page's own voice (override) is never replaced."""
+        if override is not None or not self._casting(book):
+            return override
+        first = text[0] if isinstance(text, (list, tuple)) and text else text
+        found = self._cast(book, ' '.join(str(first or '').split()))
+        narrator = self.choice(language)[0]
+        if not found or not narrator or str(found.get('voice', '')).partition('/')[0] != narrator:
+            return None
+        return dict(found, cast=True)
+
+    def _speaker(self, book, text, language='tr'):
+        """F239: the cast voice of a sentence as a comparable key ('' narrator)."""
+        found = self._cast_for(book, text, language)
+        return json.dumps([found.get('voice'), found.get('options')], sort_keys=True) if found else ''
+
+    def _ensure_voice(self, language, override):
+        """F239: switches the running engine to the voice a sentence needs (same engine; blocking). The reader's
+        narrator and character voices take turns this way; "Hazirla" batches sentences by voice to switch rarely."""
+        engine_id, voice_id = self.choice(language, override)
+        options = self._voice_options(engine_id, voice_id, override)
+        if (self.current.get('engine'), self.current.get('voice')) == (engine_id, voice_id) and self._options == options:
+            return
+        worker = self._ready_worker()
+        if worker.engine['id'] != engine_id:
+            raise RuntimeError('Karakter sesi başka bir ses motorunda; okuyucunun sesiyle aynı motordan bir ses seçin.')
+        result = worker.request('load', voice=voice_id, device=self._requested_device or 'auto', options=options,
+                                timeout=600)
+        self.current = dict(self.current, engine=engine_id, voice=voice_id,
+                            device=result.get('device', self.current.get('device')))
+        self._options = options
 
     def _cache_path(self, book, text, speed, language, override=None, tag=None):
         """Where a sentence rendered with the voice chosen for `language` is kept (None: no caching)."""
@@ -543,19 +586,24 @@ class Engines:
         `tag`: emotion tag chosen by the caller (F172); None reads the book's own (F168).
         F177: `text` may be a list of consecutive sentences (group_chars) read in one request; each sentence keeps
         its own book emotion tag inside the joined text."""
+        override = self._cast_for(book, text, language, override)   # F239: the speaking character's voice
         text, tag = self._request_text(text, book, language, override, tag)
         if not text:
             return {'audio': '', 'duration': 0.0}
         path = self._cache_path(book, text, speed, language, override, tag)
         if path is not None and path.exists():
             return dict(self._clip(path.read_bytes()), cached=True)
-        worker = self._ready_worker()
-        engine_id, voice_id = self.choice(language, override)
-        if (self.current.get('engine'), self.current.get('voice')) != (engine_id, voice_id):
-            raise RuntimeError('Ses motoru hazır değil.')
-        tag = self._tag_for(book, text, language, override, tag)
-        extra = {'tag': tag} if tag else {}
-        result = worker.request('say', text=text, speed=float(speed), rate=AUDIO_RATE, timeout=600, **extra)
+        casting = self._casting(book)
+        with self._voice_lock if casting else contextlib.nullcontext():
+            worker = self._ready_worker()
+            engine_id, voice_id = self.choice(language, override)
+            if casting:
+                self._ensure_voice(language, override)
+            elif (self.current.get('engine'), self.current.get('voice')) != (engine_id, voice_id):
+                raise RuntimeError('Ses motoru hazır değil.')
+            tag = self._tag_for(book, text, language, override, tag)
+            extra = {'tag': tag} if tag else {}
+            result = worker.request('say', text=text, speed=float(speed), rate=AUDIO_RATE, timeout=600, **extra)
         if path is not None and result.get('audio'):
             path.parent.mkdir(parents=True, exist_ok=True)
             partial = path.with_suffix('.part')
@@ -588,12 +636,22 @@ class Engines:
         limit = self.group_chars(language, override) if breaks is not None else 0
         ends_paragraph = {int(b) for b in breaks or ()}
         known = {}
+        casting = override is None and self._casting(book)
+        speakers = {}
+
+        def speaker(index):
+            """F239: a group is read with one voice, so it never crosses a change of speaker."""
+            if not casting:
+                return ''
+            if index not in speakers:
+                speakers[index] = self._speaker(book, texts[index], language)
+            return speakers[index]
 
         def reach(start, chars):
             """Sentences that may follow `start` in one group of at most `chars` characters."""
             end, total = start, len(texts[start])
             while (chars > 0 and end + 1 < len(texts) and end not in ends_paragraph and texts[end + 1]
-                   and total + 1 + len(texts[end + 1]) <= chars):
+                   and total + 1 + len(texts[end + 1]) <= chars and speaker(end + 1) == speaker(start)):
                 end += 1
                 total += 1 + len(texts[end])
             return end
@@ -603,10 +661,11 @@ class Engines:
             if start not in known:
                 known[start] = None
                 if texts[start]:
+                    voice = self._cast_for(book, texts[start], language, override)
                     for end in range(reach(start, limit), start - 1, -1):
                         text, tag = self._request_text(texts[start] if end == start else texts[start:end + 1],
-                                                       book, language, override)
-                        path = self._cache_path(book, text, speed, language, override, tag)
+                                                       book, language, voice)
+                        path = self._cache_path(book, text, speed, language, voice, tag)
                         if path is not None and self._cached_file(path):
                             known[start] = end
                             break
@@ -690,7 +749,11 @@ class Engines:
         sentences = list(sentences)
         total = sum(1 for s in sentences if str(s).strip())
         done = 0
-        for start, end, ready in self.plan(book, sentences, speed, language, breaks):
+        groups = self.plan(book, sentences, speed, language, breaks)
+        if self._casting(book):   # F239: one voice after another, so the engine switches voice rarely
+            voices = {start: self._speaker(book, sentences[start], language) for start, _end, _ready in groups}
+            groups.sort(key=lambda group: (voices[group[0]] != '', voices[group[0]], group[0]))
+        for start, end, ready in groups:
             if cancel is not None and cancel.is_set():
                 return done
             if not ready:
@@ -709,8 +772,9 @@ class Engines:
             raise ValueError('Cümle bulunamadı.')
         start, end, _ready = next(g for g in self.plan(book, sentences, speed, language, breaks) if g[0] <= index <= g[1])
         text = sentences[start] if end == start else list(sentences[start:end + 1])
-        request, tag = self._request_text(text, book, language)
-        return start, end, text, self._cache_path(book, request, speed, language, None, tag)
+        voice = self._cast_for(book, text, language)
+        request, tag = self._request_text(text, book, language, voice)
+        return start, end, text, self._cache_path(book, request, speed, language, voice, tag)
 
     @staticmethod
     def _previous(path):
@@ -788,6 +852,10 @@ class Engines:
         self._exporting = True
         stream = None
         try:
+            if override is None and self._casting(book):   # F239: voice by voice first, then joined from the cache
+                self.prepare(book, texts, speed, language, progress, cancel, ends)
+                if cancel is not None and cancel.is_set():
+                    raise Cancelled('Ses kaydı durduruldu.')
             for start, end, _ready in self.plan(book, texts, speed, language, ends, override):
                 if cancel is not None and cancel.is_set():
                     raise Cancelled('Ses kaydı durduruldu.')

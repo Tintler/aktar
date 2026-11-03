@@ -57,7 +57,8 @@ class TtsMixin:
         if cached is None or cached.app_dir != directory:
             self._engines_cache = Engines(directory, Path(ROOT) / 'engines', emit=self._emit,
                                           prefs=lambda: self.ui_prefs().get('tts', {}),
-                                          transcribe=self._tts_transcribe, log=self._log, emotion=self._emotion_tag)
+                                          transcribe=self._tts_transcribe, log=self._log, emotion=self._emotion_tag,
+                                          cast=getattr(self, '_cast_voice', None))
         return self._engines_cache
 
     # ------------------------------------------------------------------ duygu etiketleri (F168, deneysel)
@@ -321,6 +322,9 @@ class TtsMixin:
         (sohbet, dublaj): '' okuyucunun sesi, 'preset:<kimlik>' ses kaydi ya da '<motor>/<ses>'."""
         if self._emotion_local():   # F170: dil modeli calisirken ses motoru bellege yuklenmez (F238: yerel modelse)
             return {'state': 'error', 'message': 'Duygu etiketleri oluşturulurken ses motoru başlatılmaz; '
+                    'bitmesini bekleyin ya da sağ üstteki işlerden durdurun.'}
+        if getattr(self, '_cast_local', lambda: False)():   # F239: dil modeli karakter atiyor
+            return {'state': 'error', 'message': 'Karakter ataması sürerken ses motoru başlatılmaz; '
                     'bitmesini bekleyin ya da sağ üstteki işlerden durdurun.'}
         if getattr(self, '_art_planning_local', lambda: False)():   # F197: dil modeli gorsel plani cikariyor
             return {'state': 'error', 'message': 'Kitap görselleri planlanırken ses motoru başlatılmaz; '

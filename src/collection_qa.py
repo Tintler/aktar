@@ -428,6 +428,27 @@ class CollectionQA:
         date = self._date(video) if data and data[3] else ''
         return (bool(date), date, self._order(video))
 
+    def search_hits(self, question, cfg, client):
+        """Embedding aramasi; model secilmemis, sunucuda yok (F239: OpenRouter'a gecince yerel embedding modeli
+        kalir) ya da indeks hic yoksa anahtar kelime aramasi."""
+        query = self._query(question)
+        if str(cfg.get('embedding_model', '')).strip():
+            try:
+                hits = search_index.search(self.videos, query, cfg, client, limit=HIT_LIMIT, base=self.base,
+                                           log=self.log)
+                if hits:
+                    return hits
+            except (RuntimeError, ValueError) as error:
+                self.log('Embedding araması yapılamadı, anahtar kelimeyle aranıyor: ' + str(error))
+        sources, documents = [], []
+        for video in self.videos:
+            data = self._video_lines(video)
+            if data and data[1]:
+                sources.append((video, data[0], data[1]))
+                if data[3]:
+                    documents.append(video)
+        return search_index.keyword_search(sources, query, HIT_LIMIT, documents)
+
     # soru
     def ask(self, question, client=None, think=None, on_reasoning=None, cancelled=None, instructions='', template=''):
         """Soruyu cevaplar. Donen: {'question','answer','parts','sources'}.
@@ -439,9 +460,8 @@ class CollectionQA:
         cfg = qa_config(self.config_provider(), think)  # F72: soru-cevap modeli
         client = client or Client(cfg, log=self.log)
         latest = [] if len(self.videos) == 1 else self.latest_documents(question, cfg)
-        hits = self.whole_hits(cfg) or (self.focus_hits(cfg) + self.latest_hits(latest, cfg) + search_index.search(
-            self.videos, self._query(question), cfg, client, limit=HIT_LIMIT, base=self.base,
-            log=self.log))
+        hits = self.whole_hits(cfg) or (self.focus_hits(cfg) + self.latest_hits(latest, cfg)
+                                        + self.search_hits(question, cfg, client))
         if not hits:
             raise ValueError('İndekste bu soruyla ilgili bir şey bulunamadı. Dosyalar '
                              '"Hepsini hazırla" ile indekslendi mi?')

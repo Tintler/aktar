@@ -4,6 +4,7 @@
   import TemplateEditor from '../components/TemplateEditor.svelte';
   import VoiceSettings from '../components/VoiceSettings.svelte';
   import PhonePanel from '../components/PhonePanel.svelte';
+  import BackupPanel from '../components/BackupPanel.svelte';
   import FoldHead from '../components/FoldHead.svelte';
   import ModelPicker from '../components/ModelPicker.svelte';
   import { isOpen } from '../lib/folds.js';
@@ -715,6 +716,8 @@
               </div>
             </section>
           {/if}
+
+          <BackupPanel />
 
           <section>
             <h2>Gelişmiş</h2>

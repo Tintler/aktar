@@ -97,6 +97,25 @@
     await voiceChanged();   // hazir cumle sayisi etikete gore degisir; okuyorsa kaldigi cumleden surer
   }
 
+  // F239 (deneysel): cok sesli okuma. Karakter atamasi olan kitapta 'Cok sesli' cipi Karakter sesleri penceresini acar;
+  // sesler arka ucta secilir (tts_say/tts_plan/tts_prepare ayni yoldan), pencere kapaninca hazir sayisi yenilenir.
+  let castInfo = $state(null);   // {info: {enabled, voices, characters ...}}
+  async function refreshCast() {
+    const result = book && app.castBooks.includes(book.id) ? await call('tts_cast_info', book.id, book.language || 'tr').catch(() => null) : null;
+    castInfo = result && !result.error && result.info ? result : null;
+  }
+  $effect(() => {
+    book?.id; app.castBooks; app.ttsPrefs.voices;
+    untrack(refreshCast);
+  });
+  const multiVoice = $derived(Boolean(castInfo?.info?.enabled && Object.keys(castInfo.info.voices ?? {}).length));
+  let castOpen = false;
+  $effect(() => {
+    const open = app.castModal?.book === book?.id;
+    if (castOpen && !open) untrack(async () => { await refreshCast(); await voiceChanged(); });
+    castOpen = open;
+  });
+
   $effect(() => setPauses(resolvePauses(app.ttsPrefs.pauses)));
   function highlight(index) {
     for (const el of article?.querySelectorAll('.s.now') ?? []) el.classList.remove('now');
@@ -779,6 +798,13 @@
               + (emotions.missing?.length ? ` Ayarlarda yeni seçilen ${emotions.missing.join(' ')} bu kitapta yok: kitaplıktan yeniden etiketleyin.` : '')}>
             <Icon name="sparkles" size={14} />Duygulu</button>
         {/if}
+        {#if castInfo}
+          <button class="chip" class:acc={multiVoice}
+            onclick={() => (app.castModal = { book: book.id, title: book.title, language: book.language || 'tr' })}
+            title={`Çok sesli okuma (deneysel) ${multiVoice ? 'açık' : 'kapalı'}: ${castInfo.info.characters?.length ?? 0} karakter, ` +
+              `${Object.keys(castInfo.info.voices ?? {}).length} tanesine ses seçildi. Tıklayınca karakter sesleri açılır.`}>
+            <Icon name="users" size={14} />Çok sesli</button>
+        {/if}
         <button class="chip acc" title="Okuma hızı" onclick={cycleSpeed}>{app.ttsPrefs.speed.toLocaleString('tr-TR')}×</button>
         {#if app.ttsPrepare?.book === book.id}
           <button class="chip acc" title="Hazırlamayı durdur" onclick={cancelPrepare}>
@@ -804,6 +830,7 @@
                   <div class="menu-head">{otherSearching ? 'Başka seslerle hazırlanan sesler aranıyor…' : 'Bu bölüm başka bir sesle hazırlanmamış'}</div>
                 {/if}
                 <div class="menu-sep"></div>
+                {#if multiVoice}<div class="menu-head">Çok sesli: önce anlatıcının, sonra her karakterin cümleleri hazırlanır</div>{/if}
                 <button onclick={() => prepare(false)}>Bu bölümü hazırla</button>
                 <button onclick={() => prepare(true)}>Buradan kitabın sonuna kadar hazırla</button>
               </div>
@@ -824,6 +851,7 @@
             <Icon name="download" size={14} />{app.ttsExport ? `Kaydediliyor ${app.ttsExport.done}/${app.ttsExport.total}` : 'Kaydet'}</button>
           {#if showExport}
             <div class="prep-menu">
+              {#if multiVoice}<div class="menu-head">Çok sesli: karakter sesleriyle kaydedilir (okuyucunun sesi seçiliyken)</div>{/if}
               <button onclick={exportSection}>Bu bölümü WAV olarak kaydet</button>
               <button disabled={Boolean(app.ttsAudiobook)} onclick={openAudiobook}
                 title="Video (tam ekran okuyucu gibi), M4B ya da MP3; ses ve görünüm seçilir">Kitabın tamamı: sesli kitap ya da video…</button>

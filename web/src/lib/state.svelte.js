@@ -29,6 +29,7 @@ export const app = $state({
   reading: { book: null, section: 0, offset: 0, percent: 0 },
   reader: { size: 19, font: 'serif', leading: 1.75, width: 680, paper: 'theme' },
   bookChat: null,             // F146: okuyucudaki kitap sohbeti {book, chat} (bridge_reader.reader_chat_open)
+  bookRecap: null,            // F239: okuyucuda 'Simdiye kadar' ozeti (bridge_reader.reader_recap_get)
   // PDF'den kitap (bridge_pdf): acik pencere ve calisan is (pencere kapansa da is surer).
   pdfImport: null,            // {open, info, title, author, target, running, progress, result}
   setup: false,               // F154: bilesen denetimi penceresi acik
@@ -44,6 +45,12 @@ export const app = $state({
   emotionJob: null,           // F170: {book, title, done, total, reading}: kitabin duygu etiketleri olusturulurken
   emotionBooks: [],           // F170: etiketli surumu olan kitaplar (tts_emotions_books)
   emotionPartials: {},        // F238: yarim kalan etiketlemeler {kitap: {done, total}} (tts_emotions_partials)
+  // F239 cok sesli sesli kitap (deneysel): suren karakter atamasi {book, title, done, total, reading}, atamasi olan
+  // kitaplar, yarim kalanlar ve acik 'Karakter sesleri' penceresi {book, title, language} (CastModal.svelte).
+  castJob: null,
+  castBooks: [],
+  castPartials: {},
+  castModal: null,
   // F197 kitap gorselleri: suren is {book, title, stage: 'plan'|'generate', done, total, current, reading},
   // plani olan kitaplar {kitap: {complete, scenes, images}} ve acik pencere {book} (BookArt.svelte).
   artJob: null,
@@ -144,6 +151,11 @@ export function log(line) {
 export async function refreshArtBooks() {
   const books = await call('art_books').catch(() => null);
   if (books && typeof books === 'object' && !books.error) app.artBooks = books;
+}
+
+export async function refreshCastBooks() {
+  const result = await call('tts_cast_books').catch(() => null);
+  if (Array.isArray(result?.books)) { app.castBooks = result.books; app.castPartials = result.partials ?? {}; }
 }
 
 export async function refreshEmotionBooks() {
@@ -311,6 +323,20 @@ export async function init() {
       : 'Duygu etiketleme durduruldu. Kitaplıkta sağ tıklayıp kaldığı yerden sürdürebilirsiniz.');
     else toast(`Duygu etiketleri hazır: ${data.title || 'kitap'} · ${data.info?.tagged ?? 0} konuşma etiketlendi.`, 'ok');
   });
+  // F239: karakter atamasi (kitapliktan, butun kitap icin).
+  on('tts_cast', (data) => {
+    if (!data.finished) { app.castJob = { book: data.book, title: data.title, done: data.done, total: data.total }; return; }
+    app.castJob = null;
+    refreshCastBooks();
+    if (data.error) toast('Karakter ataması yapılamadı: ' + data.error, 'error');
+    else if (data.cancelled) toast('Karakter ataması durduruldu. Kitaplıkta sağ tıklayıp kaldığı yerden sürdürebilirsiniz.');
+    else {
+      toast(`Karakterler atandı: ${data.title || 'kitap'} · ${data.info?.assigned ?? 0}/${data.info?.speech ?? 0} konuşma, ` +
+        `${data.info?.characters?.length ?? 0} karakter. Şimdi karakterlere ses seçin.`, 'ok');
+      const book = app.shelf.find((b) => b.id === data.book);
+      app.castModal = { book: data.book, title: data.title, language: book?.language || 'tr' };
+    }
+  });
   // F197: kitap gorselleri (plan ya da uretim); acik pencere ayrica dinler (sahne gorseli geldikce).
   on('art', (data) => {
     if (!data.finished) {
@@ -393,6 +419,9 @@ export async function init() {
     // Kitap, reader_chat_open cevabi gelmeden hazirlanmis olabilir: olay o zaman da saklanir (at: ne zaman geldi).
     if (!app.bookChat || app.bookChat.book === book) app.bookChat = { book, chat, at: Date.now() };
   });
+  on('reader_recap', (state) => {
+    if (!app.bookRecap || app.bookRecap.book === state.book) app.bookRecap = state;
+  });
   on('player', (state) => {
     if (state && app.player?.path === state.path) app.player = state;
   });
@@ -436,6 +465,7 @@ export async function init() {
   applyBookSnapshot(start.books);
   call('shelf_list').then((books) => { if (Array.isArray(books)) app.shelf = books; });
   refreshEmotionBooks();
+  refreshCastBooks();
   refreshArtBooks();
   call('tts_status').then((status) => { if (status?.state) app.tts = status; });
   call('refresh_models');

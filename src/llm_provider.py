@@ -18,6 +18,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
+import re
 import threading
 from urllib.parse import urlparse
 
@@ -209,6 +210,16 @@ def headers():
     if token:
         result['Authorization'] = 'Bearer ' + token
     return result
+
+
+_MISSING_MODEL = re.compile(r'does not exist|not a valid model|model[_ ]not[_ ]found|no endpoints found|unknown model'
+                            r'|model .{1,120} (?:is )?not (?:found|available)', re.I)
+
+
+def missing_model(error):
+    """F239: hata iletisi "model sunucuda yok" mu (OpenRouter: 'X is not a valid model ID', 'No endpoints found
+    that support image input'; LM Studio / OpenAI: 'model ... does not exist', 'model_not_found')."""
+    return bool(_MISSING_MODEL.search(str(error)))
 
 
 def http_error(error):

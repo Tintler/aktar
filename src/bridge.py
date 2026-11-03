@@ -34,7 +34,9 @@ from app_core import (APP_DIR, DEFAULT_CONFIG, WINDOWS, Client, keep_loaded, loa
                       read, save_json, unload_models, validate_config)
 from bridge_art import ArtMixin
 from bridge_assistant import AssistantMixin, FilesMixin
+from bridge_backup import BackupMixin
 from bridge_book import BookMixin
+from bridge_cast import CastMixin
 from bridge_game import GameMixin
 from bridge_reader import ReaderMixin
 from bridge_tts import TtsMixin
@@ -71,7 +73,7 @@ def _error(error):
     return {'error': str(error)}
 
 
-class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin, AssistantMixin, FilesMixin,
+class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, CastMixin, BackupMixin, PdfMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin, AssistantMixin, FilesMixin,
              SubscriptionsMixin, VoiceMixin, WatchMixin, SubtitleToolsMixin, NativePlayerMixin, GameMixin, ArtMixin, PhoneMixin):
     def __init__(self, emit=None, dialogs=None):
         self._emit = emit or (lambda _event, _data: None)
@@ -335,6 +337,8 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
              emotion is not None and emotion.is_alive() and getattr(self, '_emotion_method', '') == 'llm'),
             ({'id': 'art', 'label': 'Kitap görselleri planı', 'resume': True}, self._art_planning()),
             ({'id': 'library', 'label': 'Kütüphane hazırlığı', 'resume': False}, self._queue_running()),
+            ({'id': 'recap', 'label': 'Kitap özeti', 'resume': True}, self._recap_running()),
+            ({'id': 'cast', 'label': 'Karakter ataması', 'resume': True}, self._cast_running()),
         ) if running]
 
     def llm_jobs(self):
@@ -344,7 +348,8 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         """F238: model sunucusunu kullanan isleri durdurur (yeni model eski isin ortasina karismasin)."""
         stopped = self._llm_job_list()
         actions = {'translate': self.cancel_translation, 'book': self.book_stop, 'emotions': self.tts_emotions_cancel,
-                   'art': self.art_cancel, 'library': self.queue_stop}
+                   'art': self.art_cancel, 'library': self.queue_stop, 'recap': self.reader_recap_cancel,
+                   'cast': self.tts_cast_cancel}
         for job in stopped:
             actions[job['id']]()
         if stopped:
@@ -593,6 +598,9 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         self._stop_watch_for_close()
         self._stop_game_for_close()
         self._stop_art_for_close()
+        self.reader_recap_cancel()
+        self.tts_cast_cancel()
+        self.backup_cancel()
         self._stop_phone_for_close()
         self._release_models()
         if close:
@@ -614,5 +622,8 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         self._stop_watch_for_close()
         self._stop_game_for_close()
         self._stop_art_for_close()
+        self.reader_recap_cancel()
+        self.tts_cast_cancel()
+        self.backup_cancel()
         self._stop_phone_for_close()
         self._release_models()

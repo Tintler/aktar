@@ -202,3 +202,62 @@ def search(videos, query, cfg, client=None, limit=12, base=None, log=print):
     return [{'video': video, 'title': title, 'start': chunk['start'], 'end': chunk['end'],
              'text': chunk['text'], 'score': round(score, 4), 'document': document}
             for score, video, title, chunk, document in best]
+
+
+# ---------------------------------------------------------------- anahtar kelime aramasi (F239)
+# Embedding modeli secilmemis ya da sunucuda yoksa (OpenRouter'a gecince yerel embedding modeli kalir) soru
+# yine cevaplanir: parcalar sorudaki kelimelerle puanlanir. Turkce ekler icin kelimenin ilk STEM harfi
+# karsilastirilir; hicbir kelime tutmazsa (ornegin "simdiye kadar neler oldu") parcalar metne esit yayilir.
+KEYWORD_WINDOW = 1200
+STEM = 5
+_STOP = set('''ve ile de da ki mi mu mı mü bu şu o bir ne neden nasıl niye nedir kim kimdir hangi hangisi
+için gibi kadar daha çok en ama fakat veya ya hem ise şey olan oldu olur olmuş var yok neler nerede ne zaman
+şimdi şimdiye peki acaba bana bize sen ben onu bunu şunu bunlar şunlar bölüm bölümde kitap kitapta
+the a an and or of to in on at is are was were what who why how which this that be it as for with from by
+about did does do so tell me'''.split())
+
+
+def _terms(text):
+    import book_search
+    words = re.findall(r'\w+', book_search.fold(text))
+    return [word[:STEM] for word in words if len(word) >= 3 and word not in _STOP and not word.isdigit()]
+
+
+def keyword_windows(lines, size=KEYWORD_WINDOW, pages=False):
+    """Ardisik satirlardan ~size karakterlik parcalar; `pages` (belge) ise parca sayfa sinirini asmaz."""
+    windows, current, used = [], [], 0
+    for line in lines:
+        if current and (used + len(line['text']) > size or (pages and line['start'] != current[0]['start'])):
+            windows.append(current)
+            current, used = [], 0
+        current.append(line)
+        used += len(line['text']) + 1
+    if current:
+        windows.append(current)
+    return [{'start': items[0]['start'], 'end': items[-1]['end'], 'text': ' '.join(item['text'] for item in items)}
+            for items in windows]
+
+
+def keyword_search(sources, query, limit=12, documents=()):
+    """sources: [(video, baslik, satirlar)] -> search() ile ayni bicimde isabetler.
+
+    `documents`: belge olan videolar (parcalar sayfa sinirini asmaz). Puan: kelimenin parcadaki varligi x idf."""
+    documents = {str(item) for item in documents}
+    wanted = list(dict.fromkeys(_terms(query)))
+    chunks = [(str(video), title, window, set(_terms(window['text'])))
+              for video, title, lines in sources
+              for window in keyword_windows(lines, pages=str(video) in documents)]
+    if not chunks:
+        return []
+    count = len(chunks)
+    weight = {term: math.log(1 + count / (1 + sum(term in chunk[3] for chunk in chunks))) for term in wanted}
+    scored = [(sum(weight[term] for term in wanted if term in chunk[3]), index, chunk)
+              for index, chunk in enumerate(chunks)]
+    if not any(score for score, _index, _chunk in scored):
+        step = count / min(limit, count)   # sorudan kelime tutmadi: metne esit yayilmis parcalar
+        picked = [(0.0, int(index * step), chunks[int(index * step)]) for index in range(min(limit, count))]
+    else:
+        picked = heapq.nlargest(limit, [item for item in scored if item[0] > 0], key=lambda item: (item[0], -item[1]))
+    return [{'video': video, 'title': title, 'start': window['start'], 'end': window['end'], 'text': window['text'],
+             'score': round(score, 4), 'document': str(video) in documents}
+            for score, _index, (video, title, window, _terms_) in picked]

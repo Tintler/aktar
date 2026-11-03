@@ -222,3 +222,80 @@ class ReaderMixin:
 
     def reader_chat_clear(self):
         return self._clear_document_chat(getattr(self, '_book_chat', None))
+
+    # ------------------------------------------------------------------ simdiye kadar / kim kimdir (F239)
+    def _recap_state(self, book_id):
+        job = getattr(self, '_recap_job', None)
+        running = job is not None and job['book'] == book_id and not job['finished']
+        state = {'book': book_id, 'running': running, 'recap': None, 'error': '', 'done': 0, 'total': 0, 'note': ''}
+        if job is not None and job['book'] == book_id:
+            state.update(error=job['error'], done=job['done'], total=job['total'], note=job['note'])
+        try:
+            import book_recap
+            state['recap'] = book_recap.Store(book_id, book_core.APP_DIR).load().get('recap')
+        except (OSError, ValueError):
+            pass
+        return state
+
+    def reader_recap_get(self, book_id):
+        """Kayitli ozet ve (varsa) suren isin durumu."""
+        return self._recap_state(book_id)
+
+    def reader_recap_run(self, book_id, until, fraction=1.0):
+        """Okunan yere (`until` bolumu, onun `fraction` kadari) kadar ozet + kisi listesi; arka planda, olay
+        'reader_recap'. Bitmis bolumlerin ozetleri kalir: yeniden calistirmak yalnizca yeni okunani ozetler."""
+        import threading
+        import book_recap
+        from app_core import Client, GracefulStop, load_config, qa_config
+        if self._recap_running():
+            return _error('Bir özet zaten hazırlanıyor.')
+        try:
+            _entry, book = self._shelf()._book(book_id)
+        except (ValueError, OSError, KeyError, zipfile.BadZipFile) as error:
+            return _error(error)
+        until = max(0, int(until))
+        fraction = min(1.0, max(0.0, float(1.0 if fraction in (None, '') else fraction)))
+        cancel = threading.Event()
+        job = {'book': book_id, 'cancel': cancel, 'error': '', 'done': 0, 'total': 0, 'note': 'Hazırlanıyor…',
+               'finished': False}
+        log = lambda message: self._log('[Özet] ' + str(message))  # noqa: E731
+
+        def push():
+            self._emit('reader_recap', self._recap_state(book_id))
+
+        def progress(done, total):
+            job.update(done=done, total=total, note=f'Bölümler özetleniyor… {done}/{total}' if done < total
+                       else 'Özet yazılıyor…')
+            push()
+
+        def work():
+            try:
+                self._keep_chat_models()
+                cfg = qa_config(load_config(), False)
+                book_recap.build(book, until, fraction, Client(cfg, log), cfg['model'],
+                                 book_recap.Store(book_id, book_core.APP_DIR), log=log, progress=progress,
+                                 cancelled=cancel.is_set)
+                job['note'] = ''
+            except GracefulStop as stop:
+                job['note'] = str(stop)
+            except Exception as error:  # baglanti/model hatasi panele yazilir
+                job['error'] = 'Özet hazırlanamadı: ' + str(error)
+                job['note'] = ''
+                log(job['error'])
+            job['finished'] = True
+            push()
+
+        job['thread'] = threading.Thread(target=work, name='aktar-recap', daemon=True)
+        self._recap_job = job
+        job['thread'].start()
+        return self._recap_state(book_id)
+
+    def _recap_running(self):
+        job = getattr(self, '_recap_job', None)
+        return job is not None and not job['finished']
+
+    def reader_recap_cancel(self):
+        job = getattr(self, '_recap_job', None)
+        if job is not None:
+            job['cancel'].set()
+        return True

@@ -7,6 +7,7 @@
   import MicButton from './MicButton.svelte';
   import TemplatePicker from './TemplatePicker.svelte';
   import Toggle from './Toggle.svelte';
+  import BookRecap from './BookRecap.svelte';
   import { templateFor } from '../lib/templates.svelte.js';
   import { app, act, savePref } from '../lib/state.svelte.js';
   import { confirm } from '../lib/confirm.svelte.js';
@@ -18,6 +19,12 @@
   let question = $state('');
   let scroller = $state();
   let spoilers = $state(app.prefs.book_chat?.until_here ?? true);
+  let mode = $state(app.prefs.book_chat?.mode === 'recap' ? 'recap' : 'chat');   // F239: Kitaba sor | Özet
+
+  function setMode(value) {
+    mode = value;
+    savePref({ book_chat: { ...app.prefs.book_chat, mode: value } });
+  }
 
   const opened = Date.now();
   act('reader_chat_open', book.id).then((state) => {
@@ -31,7 +38,7 @@
   });
 
   function setSpoilers(value) {
-    savePref({ book_chat: { until_here: value } });
+    savePref({ book_chat: { ...app.prefs.book_chat, until_here: value } });
   }
 
   async function ask(text = question, think = app.think) {
@@ -49,16 +56,21 @@
     if (state && app.bookChat?.book === book.id) app.bookChat.chat = state;
   }
 
-  const SUGGESTIONS = ['Şimdiye kadar neler oldu?', 'Bu bölümü özetle', 'Ana karakterler kimler?'];
+  // F239: genel ozet ve kisi listesi Ozet sekmesinde (bolum bolum, aramaya dayanmaz)
+  const SUGGESTIONS = ['Bu bölümü özetle', 'Bu bölümde kimler var?'];
 </script>
 
 <aside class="panel">
   <div class="head">
-    <span class="pill">Kitaba sor</span>
+    <button class="pill" class:off={mode !== 'chat'} onclick={() => setMode('chat')}>Kitaba sor</button>
+    <button class="pill" class:off={mode !== 'recap'} onclick={() => setMode('recap')}>Özet</button>
     <span class="grow"></span>
-    <button class="icon-btn sm" title="Sohbeti temizle" disabled={!chat || chat.asking || !chat.entries.some((e) => e.kind === 'user')} onclick={clear}><Icon name="trash" size={15} /></button>
+    {#if mode === 'chat'}<button class="icon-btn sm" title="Sohbeti temizle" disabled={!chat || chat.asking || !chat.entries.some((e) => e.kind === 'user')} onclick={clear}><Icon name="trash" size={15} /></button>{/if}
     <button class="icon-btn sm" title="Kapat" onclick={onclose}><Icon name="x" size={15} /></button>
   </div>
+  {#if mode === 'recap'}
+    <BookRecap {book} {section} {fraction} {ongo} />
+  {:else}
   <div class="scope" title="Açıkken yalnızca okuduğunuz yere (açık bölümde ekranın alt kenarına) kadarki kısım modele gider; sonrası hiç gösterilmez.">
     <Toggle bind:checked={spoilers} onchange={setSpoilers} label={`Okuduğum yere kadar (${section + 1}. bölüm, %${Math.round(fraction * 100)})`} />
   </div>
@@ -67,6 +79,7 @@
       <ChatMessages entries={chat.entries} single oncite={(item) => ongo?.(Math.max(0, Number(item.start) - 1))} />
       {#if chat.enabled && !chat.entries.some((e) => e.kind === 'user')}
         <div class="suggest">
+          <button class="chip" onclick={() => setMode('recap')}>Şimdiye kadar neler oldu?</button>
           {#each SUGGESTIONS as s}<button class="chip" onclick={() => ask(s)}>{s}</button>{/each}
         </div>
       {/if}
@@ -82,6 +95,7 @@
   {:else}
     <div class="note"><Icon name="loader" size={13} spin />Kitap hazırlanıyor…</div>
   {/if}
+  {/if}
 </aside>
 
 <style>
@@ -90,6 +104,8 @@
   .head { display: flex; align-items: center; gap: 4px; }
   .grow { flex: 1; }
   .pill { background: var(--text); color: var(--window); font-weight: 600; font-size: 13px; padding: 5px 12px; border-radius: 999px; }
+  .pill.off { background: none; color: var(--secondary); font-weight: 500; }
+  .pill.off:hover { color: var(--text); }
   .scope { font-size: 12.5px; }
   .messages { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 14px; padding: 4px 4px 8px 0; }
   .suggest { display: flex; flex-wrap: wrap; gap: 6px; }

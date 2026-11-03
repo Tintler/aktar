@@ -681,7 +681,7 @@ def vision_reader(cfg, log=print):
             try:
                 if ocr_model and prompt == documents.OCR_PROMPT:  # F77: OCR'a ozel model
                     text = client.vision(str(cfg.get('ocr_model_prompt') or 'Text Recognition:'),
-                                         png, model=ocr_model)
+                                         png, model=ocr_model, fallback_prompt=prompt)
                 else:
                     text = client.vision(prompt, png)
                 text = qa.strip_thinking(text)

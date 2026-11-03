@@ -514,3 +514,62 @@ class VoxCpmWorkerTests(unittest.TestCase):
         self.engine.say('Selam.', 1.0, 0)
         kwargs = self.calls[-1][2]
         self.assertEqual((kwargs['reference_wav_path'], kwargs['prompt_text']), (str(recording), 'Merhaba dünya.'))
+
+
+class CastTests(unittest.TestCase):
+    """F239: cok sesli okuma -- konusan karakterin sesi ayni motorda degisir, gruplar konusmaci degisiminde bolunur."""
+
+    load = EnginesTests.load
+    tearDown = EnginesTests.tearDown
+
+    def setUp(self):
+        EnginesTests.setUp(self)
+        manifest = make_engine(self.root, 'ema-lightning', ('tr',))
+        manifest['voices'].append({'id': 'tr-two', 'name': 'ikinci', 'language': 'tr', 'files': []})
+        manifest['group_sentences'] = True
+        manifest['settings'] = [{'key': 'max_chars', 'default': 500}]
+        (self.root / 'engines' / 'ema_lightning' / 'motor.json').write_text(json.dumps(manifest), encoding='utf-8')
+        self.enabled = True
+        self.engines._cast = self.cast
+        self.book = 'abcdef1234'
+
+    def cast(self, book, text):
+        if text is None:
+            return self.enabled
+        return {'voice': 'ema-lightning/tr-two', 'options': None} if text.startswith('“') else None
+
+    def loaded(self):
+        return (self.app / 'ses-motorlari' / 'ema-lightning' / 'data' / 'loaded.txt').read_text()
+
+    def test_character_voice_switches_and_groups_split(self):
+        sentences = ['Ali geldi.', 'Kapıyı açtı.', '“Merhaba,” dedi.', 'Sonra oturdu.']
+        groups = self.engines.plan(self.book, sentences, 1.0, 'tr', breaks=[])
+        self.assertEqual([g[:2] for g in groups], [[0, 1], [2, 2], [3, 3]])
+        self.assertEqual(self.load('tr')['voice'], 'tr-voice')
+        self.engines.say(sentences[2], 1.0, self.book)
+        self.assertEqual(self.loaded(), 'tr-two')
+        self.engines.say(sentences[3], 1.0, self.book)
+        self.assertEqual(self.loaded(), 'tr-voice')
+        self.engines._cast = None   # ayni cumle anlatici sesiyle ayri onbellek kaydi
+        self.assertNotEqual(self.engines._cache_path(self.book, sentences[2], 1.0, 'tr'),
+                            CastTests._path_with_cast(self, sentences[2]))
+
+    def _path_with_cast(self, text):
+        self.engines._cast = self.cast
+        return self.engines._cache_path(self.book, text, 1.0, 'tr', self.engines._cast_for(self.book, text, 'tr'))
+
+    def test_prepare_renders_voice_by_voice(self):
+        sentences = ['“Bir,” dedi.', 'Anlatı.', '“İki,” dedi.', 'Yine anlatı.']
+        self.load('tr')
+        order = []
+        real = self.engines._ensure_voice
+
+        def ensure(language, override):
+            order.append((override or {}).get('voice', 'narrator'))
+            return real(language, override)
+        with patch.object(self.engines, '_ensure_voice', ensure):
+            self.assertEqual(self.engines.prepare(self.book, sentences, 1.0, 'tr', breaks=[0, 1, 2, 3]), 4)
+        self.assertEqual(order, ['narrator', 'narrator', 'ema-lightning/tr-two', 'ema-lightning/tr-two'])
+        self.assertEqual(self.engines.cached(self.book, sentences, 1.0, 'tr', breaks=[0, 1, 2, 3]), 4)
+        self.enabled = False   # kapatinca karakter cumleleri anlatici sesiyle yeniden hazirlanmali
+        self.assertEqual(self.engines.cached(self.book, sentences, 1.0, 'tr', breaks=[0, 1, 2, 3]), 2)

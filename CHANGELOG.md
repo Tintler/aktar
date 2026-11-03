@@ -2,6 +2,17 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.57.0 — 2026-11-03
+
+### Eklenen
+- **Şimdiye kadar ne oldu / Kim kimdir:** Okuyucunun sağ panelinde "Kitaba sor"un yanında yeni "Özet" sekmesi var. Okuduğunuz yere kadar (açık bölümde ekranın alt kenarına kadar) olanların özetini ve kişilerin listesini çıkarır; sonrası modele hiç gitmez. Bölüm özetleri saklanır, okumaya devam edince yalnızca yeni okunan kısım özetlenir. Metindeki (s.N) atıfları kitabı o bölüme götürür.
+- **Çok sesli sesli kitap (deneysel):** Kitaplıkta sağ tık → "Karakter seslerini belirle". Dil modeli konuşmaların kime ait olduğunu tahmin eder, "Karakter sesleri" penceresinde her karaktere okuyucunun ses motorundan bir ses (ya da kayıtlı ses) seçilir; adlar düzeltilip birleştirilebilir. Okuyucudaki "Çok sesli" çipi pencereyi açar. Okuma, Hazırla ve Kaydet aynı sesleri kullanır: Hazırla önce anlatıcının, sonra her karakterin cümlelerini sırayla üretir; sesli kitap/bölüm kaydı da önce böyle hazırlar. Konuşanı bilinmeyen ya da sesi seçilmeyen satırlar anlatıcının sesiyle okunur. Yarım kalan atama sürdürülebilir.
+- **Yedekleme ve taşıma:** Ayarlar → Gelişmiş → "Yedekleme ve taşıma". Ayarlar, model bağlantıları, kitaplık ve okuma konumları, koleksiyonlar ve sohbetler, seriler ve sözlükler, kayıtlı sesler, duygu etiketleri, karakter sesleri, özetler ve kitap görselleri tek ZIP'e yazılır; istenirse çalışma dosyaları (transkriptler, indeksler) ve hazırlanmış sesler de. Geri yüklemeden önce mevcut veri "yedekler" klasörüne alınır. Başka bilgisayarda bulunamayan kitap ve koleksiyon klasörleri "Bulunamayan dosyaları bul" ile seçilen klasörde aranıp yeniden bağlanır. API anahtarları yedeğe girmez.
+
+### Düzeltilen
+- **OpenRouter'da belge/kitap sohbeti:** Bağlantı profilinde sunucuda olmayan bir embedding modeli kaldığında ("Model ... does not exist") uzun belgeye ve kitaba soru sorulamıyordu. Artık embedding modeli seçilmemiş, sunucuda yok ya da indeks hiç kurulmamışsa ilgili bölümler anahtar kelimeyle aranır; kütüphane hazırlığında indeksleme bir kez denenip kapatılır.
+- **OCR / görü modeli sunucuda yoksa:** Seçili OCR modeli (ör. glm-ocr) ya da görü modeli sunucuda bulunmazsa sırayla görü modeline, o da yoksa sohbet modeline geçilir (taranmış PDF, görsel, altyazı OCR'ı).
+
 ## 2.56.0 — 2026-11-03
 
 ### Eklenen
