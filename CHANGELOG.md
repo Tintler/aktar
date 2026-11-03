@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.53.1 — 2026-11-03
+
+### Düzeltilen
+- **Kitap kapağı:** Kapağı işaretlemeyen EPUB'larda (yalnızca ilk sayfada kapak resmi olan) kitaplıkta kapak görünmüyordu. Artık işaret yoksa kapak sayfasındaki resim kapak olarak alınır.
+
 ## 2.53.0 — 2026-11-01
 
 ### Eklenen

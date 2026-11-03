@@ -125,6 +125,22 @@ class BookBridgeTests(unittest.TestCase):
         self.assertTrue(info['cover'].startswith('data:image/png;base64,'))
         self.assertEqual(book_info(self.root / 'missing.epub')['title'], 'missing')
 
+    def test_book_info_finds_cover_through_cover_page(self):
+        # Kapak isareti olmayan EPUB: kapak yalnizca ilk sayfadaki resim.
+        import zipfile
+        path = self.root / 'unmarked.epub'
+        with zipfile.ZipFile(path, 'w') as archive:
+            archive.writestr('META-INF/container.xml', '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+                             '<rootfiles><rootfile full-path="content.opf"/></rootfiles></container>')
+            archive.writestr('content.opf', '<package xmlns="http://www.idpf.org/2007/opf"><metadata/><manifest>'
+                             '<item id="p0" href="front.xhtml" media-type="application/xhtml+xml"/>'
+                             '<item id="i1" href="main-1.jpg" media-type="image/jpeg"/></manifest>'
+                             '<spine><itemref idref="p0"/></spine></package>')
+            archive.writestr('front.xhtml', '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+                             '<div><img src="main-1.jpg"/></div></body></html>')
+            archive.writestr('main-1.jpg', b'\xff\xd8jpeg')
+        self.assertTrue(book_info(path)['cover'].startswith('data:image/jpeg;base64,'))
+
     def test_start_requires_prepared_project(self):
         self.assertIn('error', self.bridge.book_prepare())
         self.assertIn('error', self.bridge.book_start(None))

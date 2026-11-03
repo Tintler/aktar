@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 COVER_LIMIT = 4_000_000
+COVER_PAGE_TEXT = 200
 IMAGE_TYPES = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif',
                '.webp': 'image/webp', '.svg': 'image/svg+xml'}
 
@@ -32,6 +33,32 @@ def _cover_href(package):
     return None, None
 
 
+def _cover_page(package):
+    """Cover page document: the guide's cover reference, a page named cover, or the first spine page."""
+    for node in package.iter():
+        if _local(node.tag) == 'reference' and node.attrib.get('type', '').lower() in ('cover', 'title-page'):
+            return node.attrib.get('href', '').split('#')[0]
+    pages = {item.get('id'): item.get('href') for item in (node.attrib for node in package.iter()
+             if _local(node.tag) == 'item') if 'html' in item.get('media-type', '')}
+    named = next((href for key, href in pages.items() if 'cover' in (key + href).lower()), None)
+    first = next((pages.get(node.attrib.get('idref')) for node in package.iter() if _local(node.tag) == 'itemref'), None)
+    return named or first
+
+
+def _page_image(archive, member):
+    """First image of a short page (a cover page carries an image and little text), as an archive member."""
+    page = ET.fromstring(archive.read(member))
+    if len(''.join(page.itertext()).strip()) > COVER_PAGE_TEXT:
+        return None
+    for node in page.iter():
+        tag = _local(node.tag)
+        src = node.attrib.get('src') if tag == 'img' else next(
+            (value for key, value in node.attrib.items() if _local(key) == 'href'), None) if tag == 'image' else None
+        if src:
+            return posixpath.normpath(posixpath.join(posixpath.dirname(member), src.split('#')[0]))
+    return None
+
+
 def book_info(epub, with_cover=True):
     """Returns {'title', 'author', 'cover'}; cover is a data URI or None. Never raises for bad files."""
     epub = Path(epub)
@@ -48,8 +75,10 @@ def book_info(epub, with_cover=True):
             if not with_cover:
                 return info
             href, media_type = _cover_href(package)
-            if href:
-                member = posixpath.normpath(posixpath.join(posixpath.dirname(opf), href))
+            member = posixpath.normpath(posixpath.join(posixpath.dirname(opf), href)) if href else None
+            if not member and (page := _cover_page(package)):
+                member = _page_image(archive, posixpath.normpath(posixpath.join(posixpath.dirname(opf), page)))
+            if member:
                 entry = archive.getinfo(member)
                 if entry.file_size <= COVER_LIMIT:
                     media_type = media_type or IMAGE_TYPES.get(Path(member).suffix.lower(), 'image/jpeg')
