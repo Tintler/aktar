@@ -719,7 +719,8 @@ class TtsMixin:
                 if view.voice_signature(language) == current:
                     notes.append(f'{variant["label"]}: seçili ses')
                     continue
-                count = view.cached(book, sentences, speed, language, breaks=breaks)
+                # F239: cok seslide karakter cumleleri her anlatici sesinde aynidir; yalnizca anlatim sayilir
+                count = view.cached(book, sentences, speed, language, breaks=breaks, narration=True)
             except Exception as error:
                 self._log(f'UYARI: "{variant["label"]}" sesiyle hazırlanan ses okunamadı: {error!r}')
                 continue

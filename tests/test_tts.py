@@ -571,5 +571,7 @@ class CastTests(unittest.TestCase):
             self.assertEqual(self.engines.prepare(self.book, sentences, 1.0, 'tr', breaks=[0, 1, 2, 3]), 4)
         self.assertEqual(order, ['narrator', 'narrator', 'ema-lightning/tr-two', 'ema-lightning/tr-two'])
         self.assertEqual(self.engines.cached(self.book, sentences, 1.0, 'tr', breaks=[0, 1, 2, 3]), 4)
+        # Hazirla'nin 'baska sesler' listesi yalnizca anlatimi sayar (karakter cumleleri her anlaticida ayni)
+        self.assertEqual(self.engines.cached(self.book, sentences, 1.0, 'tr', breaks=[0, 1, 2, 3], narration=True), 2)
         self.enabled = False   # kapatinca karakter cumleleri anlatici sesiyle yeniden hazirlanmali
         self.assertEqual(self.engines.cached(self.book, sentences, 1.0, 'tr', breaks=[0, 1, 2, 3]), 2)

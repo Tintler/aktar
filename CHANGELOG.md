@@ -2,6 +2,12 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.57.2 — 2026-11-03
+
+### Düzeltilen
+- **Çok sesli okuma:** Hazırla menüsündeki "başka seslerle hazırlanmış" listesi karakter cümlelerini de sayıyordu; tek bir karakter cümlesi bütün kayıtlı seslerde "1/169 hazır" görünüyordu. Artık yalnızca anlatım sayılır.
+- **Karakter sesleri penceresi:** Anlatım sesi kayıtlı sesin adıyla gösterilir (önce yalnızca motor adı yazıyordu) ve okuyucunun ses seçicisinden değiştiği belirtilir. Birinci tekil anlatımda "Anlatıcı" karakterinin yalnızca anlatıcının kendi konuşmaları olduğu yazılır.
+
 ## 2.57.1 — 2026-11-03
 
 ### Düzeltilen

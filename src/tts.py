@@ -686,10 +686,12 @@ class Engines:
             start = end + 1
         return groups
 
-    def cached(self, book, sentences, speed, language='tr', override=None, breaks=None):
-        """How many of the sentences are already rendered for this book and voice (alone or in a group)."""
+    def cached(self, book, sentences, speed, language='tr', override=None, breaks=None, narration=False):
+        """How many of the sentences are already rendered for this book and voice (alone or in a group).
+        F239 `narration`: only the narrator's sentences (character voices are the same whichever narrator)."""
         return sum(sum(1 for text in sentences[start:end + 1] if str(text).strip())
-                   for start, end, ready in self.plan(book, sentences, speed, language, breaks, override) if ready)
+                   for start, end, ready in self.plan(book, sentences, speed, language, breaks, override)
+                   if ready and not (narration and override is None and self._speaker(book, sentences[start], language)))
 
     def with_prefs(self, prefs, shared=None):
         """F190: a read-only view of the cache as if ui.json 'tts' were `prefs` (another voice or backend), for

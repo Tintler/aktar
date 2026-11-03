@@ -26,6 +26,8 @@
   const characters = $derived((info?.characters ?? []).filter((c) => !filter.trim() || c.name.toLocaleLowerCase('tr').includes(filter.trim().toLocaleLowerCase('tr'))));
   const assigned = $derived(Object.keys(info?.voices ?? {}).length);
   const GENDER = { female: 'kadın', male: 'erkek', unknown: '' };
+  // Birinci tekil anlatimda dil modeli anlaticinin konusmalarini "Anlatıcı"/"Ben" karakterine verir
+  const NARRATOR = /^(anlatıcı|anlatici|ben|narrator)$/i;
 
   async function update(values) {
     const result = await act('tts_cast_set', book, values.voices ?? null, values.enabled ?? null, values.rename ?? null);
@@ -75,12 +77,14 @@
   {:else}
     <div class="lead">
       <b>Deneysel.</b> Dil modeli {info.speech} konuşmanın {info.assigned} tanesinin kime ait olduğunu tahmin etti; yanılabilir.
-      Ses seçilmeyen karakterler ve konuşanı bilinmeyen satırlar anlatıcının sesiyle okunur.
+      Yalnızca konuşma satırları (tırnak ya da tire ile başlayanlar) karakterin sesiyle okunur. Anlatım, ses seçilmeyen
+      karakterler ve konuşanı bilinmeyen satırlar anlatıcının sesiyle okunur.
     </div>
     <div class="row-top">
       <Toggle checked={info.enabled} label="Çok sesli okuma" onchange={(value) => update({ enabled: value })} />
       <span class="grow"></span>
-      <span class="dim">Anlatıcı: <b>{data.narrator || '—'}</b>{data.engine ? ` · ${data.engine}` : ''}</span>
+      <span class="dim">Anlatım sesi: <b>{data.narrator || '—'}</b>{data.engine && !(data.narrator || '').includes(data.engine) ? ` · ${data.engine}` : ''}<br />
+        okuyucunun alt çubuğundaki ses seçiciden değişir</span>
     </div>
     {#if info.enabled && !assigned}<div class="warn">Henüz hiçbir karaktere ses seçilmedi; okuma tek sesle sürer.</div>{/if}
     {#if !data.voices.length}
@@ -96,10 +100,11 @@
           <div class="who">
             <input class="name" value={person.name} title="Adı değiştir (aynı adı yazınca iki karakter birleşir)"
               onchange={(e) => rename(person.name, e.currentTarget.value)} />
-            <small>{person.lines} konuşma{GENDER[person.gender] ? ' · ' + GENDER[person.gender] : ''}</small>
+            <small>{person.lines} konuşma{GENDER[person.gender] ? ' · ' + GENDER[person.gender] : ''}{NARRATOR.test(person.name)
+              ? ' · anlatıcının kendi konuşmaları (anlatım satırları değil)' : ''}</small>
           </div>
           <select class="field" value={info.voices?.[person.name] ?? ''} onchange={(e) => setVoice(person.name, e.currentTarget.value)}>
-            <option value="">Anlatıcının sesi</option>
+            <option value="">Anlatım sesi{data.narrator ? ` (${data.narrator})` : ''}</option>
             {#each data.voices as voice}<option value={voice.value}>{voice.label}</option>{/each}
           </select>
           <button class="icon-btn sm" title="Sesi dinle" disabled={!info.voices?.[person.name]}

@@ -74,8 +74,11 @@ class CastMixin:
             options.append({'value': item['value'], 'label': item['label'], 'group': item['group']})
         prefs = self.ui_prefs().get('tts', {})
         chosen = (prefs.get('voices') or {}).get(language or 'tr') or ''
-        narrator = next((item['label'] for item in self.tts_voices() if item['value'] == chosen), '') or \
-            (f'{engine_id}/{voice_id}' if engine_id else '')
+        if prefs.get('active_preset'):   # okuyucuda kayitli ses secili: anlatim onunla okunur
+            chosen = 'preset:' + str(prefs['active_preset'])
+        fallback = f'{engine_id}/{voice_id}' if engine_id else ''
+        labels = {item['value']: item['label'] for item in self.tts_voices()}
+        narrator = labels.get(chosen) or labels.get(fallback) or fallback
         engine = next((item['name'] for item in engines.engines() if item['id'] == engine_id), engine_id or '')
         return {'info': info, 'voices': options, 'narrator': narrator, 'engine': engine,
                 'partial': self._cast_store().load_partial(book) is not None}
