@@ -16,16 +16,40 @@
     if (result?.errors?.length) toast(result.errors.join(' · '), 'error');
   }
 
+  // F242: kitabin hazirlanmis sesleri, etiketleri, karakterleri ... kimligiyle ayri durur; varsa birlikte silinmesi
+  // sorulur (yalnizca kaldirilirsa ayni dosya yeniden eklenince geri gelir; sonradan Ayarlar > Gelismis > Temizlik)
+  const mb = (bytes) => `${Math.max(0.1, bytes / 1e6).toLocaleString('tr-TR', { maximumFractionDigits: 1 })} MB`;
   async function remove(book) {
     menu = null;
-    const yes = await confirm({
-      title: 'Kitaplıktan kaldır',
-      message: `"${book.title}" kitaplıktan kaldırılsın mı? Dosyanın kendisi silinmez; okuma konumu ve yer imleri silinir.`,
-      ok: 'Kaldır', cancel: 'Vazgeç',
-    });
-    if (!yes) return;
-    const books = await act('shelf_remove', book.id);
-    if (books) { app.shelf = books; toast('Kitap kaldırıldı.'); }
+    const parts = (await act('shelf_book_data', book.id)) ?? [];
+    let mode;
+    if (!parts.length) {
+      mode = (await confirm({
+        title: 'Kitaplıktan kaldır',
+        message: `"${book.title}" kitaplıktan kaldırılsın mı? Dosyanın kendisi silinmez; okuma konumu ve yer imleri silinir.`,
+        ok: 'Kaldır', cancel: 'Vazgeç',
+      })) ? 'only' : null;
+    } else {
+      const total = parts.reduce((sum, part) => sum + part.bytes, 0);
+      mode = await choose({
+        title: 'Kitaplıktan kaldır',
+        message: `"${book.title}" kitaplıktan kaldırılsın mı? Dosyanın kendisi silinmez; okuma konumu ve yer imleri silinir.\n` +
+          `Bu kitap için kaydedilenler: ${parts.map((p) => `${p.label} (${mb(p.bytes)})`).join(', ')}.`,
+        options: [
+          { value: 'only', label: 'Yalnızca kitaplıktan kaldır',
+            hint: 'Kayıtlar kalır; aynı dosyayı yeniden eklerseniz hepsi geri gelir. Sonradan Ayarlar → Gelişmiş → Temizlik\'ten silinebilir.' },
+          { value: 'data', label: `Kitaplıktan kaldır ve kayıtlarını sil (${mb(total)})`,
+            hint: 'Hazırlanmış sesler (ücretli bulut sesleri dahil) ve diğer kayıtlar geri alınamaz biçimde silinir.' },
+        ],
+        ok: 'Kaldır',
+      });
+    }
+    if (!mode) return;
+    const books = await act(mode === 'data' ? 'shelf_remove_with_data' : 'shelf_remove', book.id);
+    if (!books) return;
+    app.shelf = books;
+    toast(mode === 'data' ? 'Kitap kayıtlarıyla birlikte kaldırıldı.' : 'Kitap kaldırıldı.');
+    if (mode === 'data') { refreshEmotionBooks(); refreshCastBooks(); }
   }
 
   // F170: Drama 3 duygu etiketleri butun kitap icin bir kez olusturulur; okuyucu Drama 3 ile okurken bu etiketli

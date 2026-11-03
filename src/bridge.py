@@ -37,6 +37,7 @@ from bridge_assistant import AssistantMixin, FilesMixin
 from bridge_backup import BackupMixin
 from bridge_book import BookMixin
 from bridge_cast import CastMixin
+from bridge_cleanup import CleanupMixin
 from bridge_game import GameMixin
 from bridge_reader import ReaderMixin
 from bridge_tts import TtsMixin
@@ -73,7 +74,7 @@ def _error(error):
     return {'error': str(error)}
 
 
-class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, CastMixin, BackupMixin, PdfMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin, AssistantMixin, FilesMixin,
+class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, CastMixin, BackupMixin, CleanupMixin, PdfMixin, LibraryMixin, MailMixin, PlayerMixin, DocumentMixin, AssistantMixin, FilesMixin,
              SubscriptionsMixin, VoiceMixin, WatchMixin, SubtitleToolsMixin, NativePlayerMixin, GameMixin, ArtMixin, PhoneMixin):
     def __init__(self, emit=None, dialogs=None):
         self._emit = emit or (lambda _event, _data: None)

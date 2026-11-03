@@ -2,6 +2,12 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.58.0 — 2026-11-04
+
+### Eklenen
+- **Temizlik:** Ayarlar → Gelişmiş → Temizlik. Kitaplıkta olmayan kitapların ardında kalan kayıtları (hazırlanmış sesler, sesli kitap parçaları, duygu etiketleri ve yarım kalan etiketlemeler, karakter sesleri, özetler, kitap görselleri), dosyası bulunamayan kitapları, kaynağı bulunamayan video/belge transkript ve arama önbelleklerini ve kullanılmayan dönüştürülmüş e-kitapları listeler. Hiçbir şey kendiliğinden silinmez; yalnızca işaretlenenler onaydan sonra silinir.
+- **Kitaplıktan kaldır:** Kitabın kayıtları varsa (sesler, etiketler, karakterler, özet, görseller) "yalnızca kaldır" ya da "kayıtlarıyla birlikte sil" seçilir. Önceden kaldırılan kitabın kayıtları hep diskte kalıyordu.
+
 ## 2.57.2 — 2026-11-03
 
 ### Düzeltilen
