@@ -5,6 +5,7 @@
   import VoiceSettings from '../components/VoiceSettings.svelte';
   import PhonePanel from '../components/PhonePanel.svelte';
   import FoldHead from '../components/FoldHead.svelte';
+  import ModelPicker from '../components/ModelPicker.svelte';
   import { isOpen } from '../lib/folds.js';
   import { app, act, savePref, setTheme, reloadThemes, toast } from '../lib/state.svelte.js';
   import { resolveTheme } from '../lib/theme.js';
@@ -40,7 +41,8 @@
   const locked = (key) => info?.locked.includes(key);
   const bookLocked = (key) => info?.book_locked?.includes(key);
   const names = $derived(app.models.names ?? []);
-  const chatNames = $derived(names.filter((n) => !n.toLowerCase().includes('embed')));
+  // F237: uzun listelerde (OpenRouter) model adlari saglayiciya gore alfabetik; secici aranabilir.
+  const chatNames = $derived(names.filter((n) => !n.toLowerCase().includes('embed')).sort((a, b) => a.localeCompare(b)));
   // Secili deger listede yoksa (LM Studio kapali) yine de gorunsun.
   const withCurrent = (list, current) => (current && !list.includes(current) ? [current, ...list] : list);
   const embedNames = $derived(withCurrent([...names.filter((n) => n.toLowerCase().includes('embed')),
@@ -362,19 +364,14 @@
             <div class="fr">
               <div class="l">Analiz modeli<small>Çeviri, dosya özetleri, ekstre okuma ve analiz için kullanılan model.</small></div>
               <div class="pick">
-                <select class="field w" bind:value={cfg.model} disabled={locked('model')}>
-                  {#each withCurrent(chatNames, cfg.model) as m}<option value={m}>{m}</option>{/each}
-                </select>
+                <div class="mp"><ModelPicker bind:value={cfg.model} options={withCurrent(chatNames, cfg.model)} disabled={locked('model')} /></div>
                 <button class="icon-btn" title="Modelleri sunucudan yeniden getir" disabled={app.models.state === 'probing'}
                   onclick={() => call('refresh_models')}><Icon name="refresh" size={16} spin={app.models.state === 'probing'} /></button>
               </div>
             </div>
             <div class="fr">
               <div class="l">Soru-cevap modeli<small>Koleksiyon, belge ve video sohbetini cevaplayan model. Ayrı (ör. daha küçük) bir model seçilebilir.</small></div>
-              <select class="field w" bind:value={cfg.qa_model}>
-                <option value="">(analiz modeliyle aynı)</option>
-                {#each withCurrent(chatNames, cfg.qa_model) as m}<option value={m}>{m}</option>{/each}
-              </select>
+              <div class="mp"><ModelPicker bind:value={cfg.qa_model} options={withCurrent(chatNames, cfg.qa_model)} empty="(analiz modeliyle aynı)" /></div>
             </div>
             {#if app.models.state === 'failed'}<p class="err small selectable">{app.models.message}</p>{/if}
             <div class="fr">
@@ -498,17 +495,11 @@
             <h2>Kütüphane indeksi ve görsel okuma</h2>
             <div class="fr">
               <div class="l">Embedding modeli<small>Transkriptleri aranabilir yapan model (ör. text-embedding-embeddinggemma-2). Kapalıysa yalnızca transkript çıkarılır.</small></div>
-              <select class="field w" bind:value={cfg.embedding_model}>
-                <option value="">(kapalı)</option>
-                {#each embedNames as m}<option value={m}>{m}</option>{/each}
-              </select>
+              <div class="mp"><ModelPicker bind:value={cfg.embedding_model} options={embedNames} empty="(kapalı)" /></div>
             </div>
             <div class="fr">
               <div class="l">Görü modeli<small>Görselleri tarif edip içindeki yazıları okuyan model; görsel destekli olmalı.</small></div>
-              <select class="field w" bind:value={cfg.vision_model}>
-                <option value="">(analiz modeliyle aynı)</option>
-                {#each visionNames as m}<option value={m}>{m}</option>{/each}
-              </select>
+              <div class="mp"><ModelPicker bind:value={cfg.vision_model} options={visionNames} empty="(analiz modeliyle aynı)" /></div>
             </div>
             <div class="fr">
               <div class="l">OCR motoru<small>Taranmış PDF sayfalarını okuyan motor. Görseller her zaman görü modeliyle okunur.</small></div>
@@ -518,10 +509,7 @@
             </div>
             <div class="fr">
               <div class="l">OCR modeli<small>Taranmış sayfalar için OCR'a özel küçük model (ör. glm-ocr); hızlıdır ve metin uydurmaz.</small></div>
-              <select class="field w" bind:value={cfg.ocr_model}>
-                <option value="">(seçilmedi)</option>
-                {#each withCurrent(chatNames, cfg.ocr_model) as m}<option value={m}>{m}</option>{/each}
-              </select>
+              <div class="mp"><ModelPicker bind:value={cfg.ocr_model} options={withCurrent(chatNames, cfg.ocr_model)} empty="(seçilmedi)" /></div>
             </div>
             <div class="fr">
               <div class="l">Tesseract<small class:okc={tesseract}>{tesseract ? 'Bulundu: ' + tesseract : 'Bulunamadı (OCR motoru Tesseract seçilirse gerekir).'}</small></div>
@@ -792,7 +780,8 @@
   .field.w2 { width: 260px; }
   .field.n { width: 160px; }
   .pick { display: flex; align-items: center; gap: 6px; }
-  .pick .field.w { width: 296px; }
+  .mp { width: 340px; flex: none; }
+  .pick .mp { width: 296px; }
   .hint-line { color: var(--dim); font-size: 12px; margin: 2px 0 4px; }
   .note-row { display: flex; gap: 8px; align-items: center; color: var(--dim); font-size: 12px; padding: 4px 0; margin: 6px 0; }
   .warn { display: flex; gap: 8px; align-items: center; color: var(--warning); font-size: 12px; background: color-mix(in srgb, var(--warning) 10%, transparent); padding: 8px 12px; border-radius: 8px; margin: 6px 0; }

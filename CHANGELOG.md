@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.55.0 — 2026-11-03
+
+### Eklenen
+- **Aranabilir model seçici:** Ayarlar'daki model listeleri (analiz, soru-cevap, embedding, görü, OCR) artık arama kutulu. Yazılan kelimelerin hepsi geçen modeller kalır (ör. "gpt 6 luna" → openai/gpt-6-luna); OpenRouter gibi yüzlerce model listeleyen sunucularda model bulmak kolaylaştı. Listede olmayan bir model adı da "Kullan" ile elle girilebilir. Uzun listeler alfabetik sıralanır.
+
 ## 2.54.0 — 2026-11-03
 
 ### Eklenen
