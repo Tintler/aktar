@@ -77,6 +77,87 @@ def validate(cfg):
         raise ValueError('provider lmstudio veya openai olmalı.')
 
 
+# Baglanti profilleri (F236): config.json 'llm_profiles' [{id, name, <PROFILE_KEYS>}] + 'llm_profile' (etkin
+# kimlik, '' = profilsiz). Etkin profilin degerleri ust duzeydedir (tum kod onlari okur); profil gecisi ust duzeyi
+# hedef profilin degerleriyle degistirir. API anahtari profil basina 'llm-api-key@<kimlik>' kaydinda durur; etkin
+# profilin anahtari ayrica SECRET_KEY'e kopyalanir, boylece istekler (book_core dahil) degismeden ayni anahtari okur.
+PROFILE_KEYS = ('provider', 'base_url', 'model', 'qa_model', 'vision_model', 'ocr_model', 'embedding_model')
+MAX_PROFILES = 20
+
+
+def profiles(cfg):
+    return [dict(item) for item in (cfg or {}).get('llm_profiles') or [] if isinstance(item, dict)]
+
+
+def find_profile(cfg, profile_id):
+    return next((item for item in profiles(cfg) if item.get('id') == profile_id), None)
+
+
+def snapshot(cfg):
+    return {key: cfg.get(key, '') for key in PROFILE_KEYS}
+
+
+def profile_label(cfg):
+    """Profil olmadan kurulmus baglanti icin kendiliginden ad: hazir ayarin adi ya da sunucunun adi."""
+    url = str(cfg.get('base_url') or '').rstrip('/')
+    for preset in PRESETS:
+        if preset['base_url'].rstrip('/') == url:
+            return preset['label']
+    host = urlparse(url).hostname or 'Sunucu'
+    if is_lmstudio(cfg):
+        return 'LM Studio' + ('' if scope(url) == 'local' else ' · ' + host)
+    return ('Yerel · ' if scope(url) != 'internet' else '') + host
+
+
+def new_profile_id(name, cfg):
+    taken = {item.get('id') for item in profiles(cfg)}
+    base = ''.join(ch if ch.isascii() and ch.isalnum() else '-' for ch in str(name).lower()).strip('-')[:24] or 'baglanti'
+    base = '-'.join(part for part in base.split('-') if part)
+    value, number = base, 2
+    while value in taken:
+        value, number = f'{base}-{number}', number + 1
+    return value
+
+
+def validate_profiles(cfg):
+    items = cfg.get('llm_profiles', [])
+    if not isinstance(items, list) or len(items) > MAX_PROFILES:
+        raise ValueError(f'llm_profiles en fazla {MAX_PROFILES} profillik liste olmalı.')
+    seen = set()
+    for item in items:
+        if not isinstance(item, dict) or not str(item.get('id') or '').strip() or not str(item.get('name') or '').strip():
+            raise ValueError('Her bağlantı profilinin kimliği ve adı olmalı.')
+        if item['id'] in seen:
+            raise ValueError('Bağlantı profili kimlikleri benzersiz olmalı.')
+        seen.add(item['id'])
+        validate(dict(item))
+    active = cfg.get('llm_profile', '')
+    if active and active not in seen:
+        raise ValueError('Etkin bağlantı profili listede yok.')
+
+
+def secret_name(profile_id):
+    return f'{SECRET_KEY}@{profile_id}' if profile_id else SECRET_KEY
+
+
+def profile_key(profile_id):
+    """Profilin kayitli anahtari ('' = yok)."""
+    try:
+        import secret_store
+        return str(secret_store.get_secret(secret_name(profile_id)) or '').strip()
+    except Exception:
+        return ''
+
+
+def store_profile_key(profile_id, value):
+    import secret_store
+    value = str(value or '').strip()
+    if value:
+        secret_store.set_secret(secret_name(profile_id), value)
+    else:
+        secret_store.delete_secret(secret_name(profile_id))
+
+
 def sends_extensions(cfg):
     """Standart disi alanlar (chat_template_kwargs, reasoning_effort='none') gonderilebilir mi?
     LM Studio ve yereldeki sunucular (llama.cpp, vLLM, Ollama) bunlari tanir ya da yok sayar;

@@ -9,6 +9,7 @@
   import { app, act, savePref, setTheme, reloadThemes, toast } from '../lib/state.svelte.js';
   import { resolveTheme } from '../lib/theme.js';
   import { call, on } from '../lib/api.js';
+  import { confirm, prompt } from '../lib/confirm.svelte.js';
   import { onDestroy, tick } from 'svelte';
 
   let info = $state(null);       // get_settings sonucu (varsayilanlar, kilitler, secenekler)
@@ -70,6 +71,51 @@
     const preset = info.llm.presets.find((p) => p.id === id);
     if (preset) { cfg.base_url = preset.base_url; cfg.provider = preset.provider; }
   }
+  // F236: kayitli baglantilar (ornegin yerel LM Studio + OpenAI); gecis aninda kaydedilir.
+  let profileBusy = $state(false);
+  const profiles = $derived(cfg?.llm_profiles ?? []);
+  function applySettings(value) {
+    info = value;
+    cfg = value.config;
+    saved = JSON.stringify(cfg);
+    apiKey = '';
+  }
+  async function profileAction(method, ...args) {
+    if (dirty && !(await save())) return false;   // kaydedilmemis degisiklik once etkin baglantiya yazilir
+    profileBusy = true;
+    const result = await act(method, ...args);
+    profileBusy = false;
+    if (result) applySettings(result.settings);
+    return !!result;
+  }
+  async function useProfile(id) {
+    if (id === cfg.llm_profile) return;
+    if (await profileAction('llm_profile_use', id)) toast(`${profiles.find((p) => p.id === id)?.name} bağlantısına geçildi.`, 'ok');
+  }
+  async function newProfile() {
+    const name = (await prompt({ title: 'Yeni bağlantı', placeholder: 'Bağlantı adı (ör. OpenAI)', ok: 'Ekle',
+      message: profiles.length ? 'Şu anki ayarların kopyasıyla başlar (API anahtarı boş); sonra değiştirip kaydedin.'
+        : 'Şu anki ayarlar kendi adıyla ayrı bir bağlantı olarak saklanır; yeni bağlantı onların kopyasıyla başlar (API anahtarı boş).' }))?.trim();
+    if (name && await profileAction('llm_profile_create', name)) toast(`${name} eklendi. Hazır ayar, adres, anahtar ve modeli seçip kaydedin.`, 'ok');
+  }
+  async function renameProfile() {
+    const current = profiles.find((p) => p.id === cfg.llm_profile);
+    const name = (await prompt({ title: 'Bağlantıyı yeniden adlandır', value: current?.name ?? '', ok: 'Kaydet' }))?.trim();
+    if (current && name && name !== current.name) await profileAction('llm_profile_rename', current.id, name);
+  }
+  async function deleteProfile() {
+    const current = profiles.find((p) => p.id === cfg.llm_profile);
+    const next = profiles.find((p) => p.id !== current?.id);
+    if (!current || !(await confirm({ title: 'Bağlantıyı sil', danger: true, ok: 'Sil',
+      message: `"${current.name}" bağlantısı ve kayıtlı API anahtarı silinir. `
+        + (next ? `"${next.name}" bağlantısına geçilir.` : 'Ayarlar şu anki değerleriyle kalır.') }))) return;
+    await profileAction('llm_profile_delete', current.id);
+  }
+  const offProfile = on('llm_profile', () => {   // model panelinden gecis: sayfa yeni degerlerle yenilenir
+    if (!profileBusy && !dirty) load();
+  });
+  onDestroy(offProfile);
+
   async function saveApiKey(value) {
     const r = await act('llm_set_api_key', value);
     if (r) { info.llm.api_key_set = r.api_key_set; apiKey = ''; toast(value ? 'API anahtarı kaydedildi.' : 'API anahtarı silindi.', 'ok'); }
@@ -133,10 +179,11 @@
       toast('Ayarlar kaydedildi.', 'ok');
       call('mail_account').then((r) => r && (mail = r));
     }
+    return !!result;
   }
 
   function reset() {
-    for (const key of Object.keys(info.defaults)) if (!locked(key)) cfg[key] = info.defaults[key];
+    for (const key of Object.keys(info.defaults)) if (!locked(key) && !key.startsWith('llm_profile')) cfg[key] = info.defaults[key];
     for (const key of Object.keys(info.book_defaults ?? {})) if (!bookLocked(key)) cfg.book[key] = info.book_defaults[key];
   }
 
@@ -265,6 +312,21 @@
           <section>
             <h2>Model sunucusu</h2>
             {#if info.locked.length}<div class="warn"><Icon name="alert" size={16} />Çeviri sürerken model ve bağlantı ayarları değiştirilemez.</div>{/if}
+            <div class="fr">
+              <div class="l">Bağlantı<small>{profiles.length ? 'Kayıtlı bağlantılar arasında geçiş yapın. Aşağıdaki ayarlar (adres, tür, anahtar, modeller) seçili bağlantıya kaydedilir.'
+                : 'Yeni bağlantı eklerseniz şu anki ayarlar kendi adıyla saklanır; ikisi arasında buradan ya da sol alttaki model panelinden geçebilirsiniz.'}</small></div>
+              <div class="pick">
+                {#if profiles.length}
+                  <select class="field w2" value={cfg.llm_profile} disabled={profileBusy || locked('base_url')}
+                    onchange={(e) => { const id = e.currentTarget.value; e.currentTarget.value = cfg.llm_profile; useProfile(id); }}>
+                    {#each profiles as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
+                  </select>
+                  <button class="icon-btn" title="Yeniden adlandır" disabled={profileBusy} onclick={renameProfile}><Icon name="pencil" size={16} /></button>
+                  <button class="icon-btn" title="Bu bağlantıyı sil" disabled={profileBusy || locked('base_url')} onclick={deleteProfile}><Icon name="trash" size={16} /></button>
+                {/if}
+                <button class="btn sm" disabled={profileBusy || locked('base_url')} onclick={newProfile}><Icon name="plus" size={14} />Yeni bağlantı</button>
+              </div>
+            </div>
             <div class="fr">
               <div class="l">Hazır ayar<small>Adresi ve sunucu türünü doldurur; sonra değiştirebilirsiniz.</small></div>
               <select class="field w" value="" disabled={locked('base_url')} onchange={(e) => { applyPreset(e.currentTarget.value); e.currentTarget.value = ''; }}>

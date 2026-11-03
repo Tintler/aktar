@@ -44,6 +44,9 @@ DEFAULT_CONFIG = {
     # Sunucu turu (F152): 'lmstudio' ya da 'openai' (Ollama, llama.cpp, vLLM, OpenAI, OpenRouter ...).
     # API anahtari config.json'a degil isletim sistemi deposuna yazilir (llm_provider).
     'provider': 'lmstudio',
+    # Baglanti profilleri (F236, llm_provider): kayitli sunucu baglantilari ve etkin olanin kimligi.
+    'llm_profiles': [],
+    'llm_profile': '',
     'model': 'gemma-4-26b-a4b-it-qat@q4_k_xl',
     'batch_cues': 10,
     'max_tokens': 8192,
@@ -228,6 +231,7 @@ def load_config(path=None):
 
 def validate_config(cfg):
     llm_provider.validate(cfg)
+    llm_provider.validate_profiles(cfg)
     if not str(cfg['model']).strip():
         raise ValueError('Model adı boş olamaz.')
     languages.validate(cfg)

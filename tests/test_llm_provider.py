@@ -129,5 +129,97 @@ class BookOpenAITests(unittest.TestCase):
         self.assertTrue(app_core.retryable_translation_error(RuntimeError('Model sunucusu istegi zaman asimina ugradi.')))
 
 
+class ProfileTests(unittest.TestCase):
+    """F236: baglanti profilleri; gecis yerel baglantiyi bozmaz, anahtar profil basina saklanir."""
+
+    def setUp(self):
+        import json
+        import tempfile
+        import bridge
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.secrets = {}
+        self.json = json
+        (self.root / 'config.json').write_text(json.dumps(dict(
+            app_core.DEFAULT_CONFIG, base_url='http://127.0.0.1:5000/v1', model='gemma', qa_model='kucuk')), encoding='utf-8')
+        llm_provider._key_cache.clear()
+        self.patches = [
+            mock.patch.object(bridge, 'APP_DIR', self.root),
+            mock.patch('secret_store.set_secret', side_effect=lambda k, v: self.secrets.__setitem__(k, v)),
+            mock.patch('secret_store.get_secret', side_effect=lambda k: self.secrets.get(k)),
+            mock.patch('secret_store.delete_secret', side_effect=lambda k: self.secrets.pop(k, None)),
+            mock.patch.dict('os.environ', {'AKTAR_API_KEY': '', 'LM_STUDIO_API_KEY': ''}),
+            mock.patch.object(bridge.Bridge, 'refresh_models', lambda self: True),
+        ]
+        for patch in self.patches:
+            patch.start()
+        self.secrets['llm-api-key'] = 'yerel-anahtar'
+        self.secrets['llm-api-key@openai'] = 'eski'   # silinememis eski kayit yeni profile gecmemeli
+        self.api = bridge.Bridge()
+
+    def tearDown(self):
+        for patch in reversed(self.patches):
+            patch.stop()
+        llm_provider._key_cache.clear()
+        self.temp.cleanup()
+
+    def config(self):
+        return self.json.loads((self.root / 'config.json').read_text(encoding='utf-8'))
+
+    def test_create_keeps_current_connection_and_switch_back(self):
+        result = self.api.llm_profile_create('OpenAI')
+        self.assertNotIn('error', result)
+        cfg = self.config()
+        self.assertEqual([p['name'] for p in cfg['llm_profiles']], ['LM Studio', 'OpenAI'])
+        self.assertEqual([p['id'] for p in cfg['llm_profiles']], ['lm-studio', 'openai'])
+        self.assertEqual(cfg['llm_profile'], 'openai')
+        self.assertEqual(self.secrets['llm-api-key@lm-studio'], 'yerel-anahtar')
+        self.assertNotIn('llm-api-key', self.secrets)   # yeni baglanti anahtarsiz
+        self.assertNotIn('llm-api-key@openai', self.secrets)
+
+        # Yeni baglanti Ayarlar'dan duzenlenir: kaydetme etkin profili gunceller, profil listesine dokunulmaz.
+        values = dict(cfg, base_url='https://api.openai.com/v1', provider='openai', model='gpt-5', qa_model='',
+                      llm_profiles=[], llm_profile='')
+        self.assertNotIn('error', self.api.save_settings(values))
+        self.assertNotIn('error', self.api.llm_set_api_key('sk-openai'))
+        cfg = self.config()
+        self.assertEqual(cfg['llm_profile'], 'openai')
+        self.assertEqual(cfg['llm_profiles'][1]['base_url'], 'https://api.openai.com/v1')
+        self.assertEqual(cfg['llm_profiles'][0]['base_url'], 'http://127.0.0.1:5000/v1')
+        self.assertEqual(self.secrets['llm-api-key@openai'], 'sk-openai')
+
+        self.assertNotIn('error', self.api.llm_profile_use('lm-studio'))
+        cfg = self.config()
+        self.assertEqual((cfg['base_url'], cfg['provider'], cfg['model'], cfg['qa_model']),
+                         ('http://127.0.0.1:5000/v1', 'lmstudio', 'gemma', 'kucuk'))
+        self.assertEqual(llm_provider.headers()['Authorization'], 'Bearer yerel-anahtar')
+        self.api.llm_profile_use('openai')
+        self.assertEqual(self.config()['model'], 'gpt-5')
+        self.assertEqual(llm_provider.headers()['Authorization'], 'Bearer sk-openai')
+
+    def test_rename_and_delete(self):
+        self.api.llm_profile_create('Uzak')
+        self.assertNotIn('error', self.api.llm_profile_rename('lm-studio', 'Masaüstü'))
+        self.assertEqual(self.config()['llm_profiles'][0]['name'], 'Masaüstü')
+        # Kullanilan baglanti silinince kalan ilk baglantiya (anahtariyla) gecilir.
+        self.assertNotIn('error', self.api.llm_profile_delete('uzak'))
+        self.assertEqual(self.config()['llm_profile'], 'lm-studio')
+        self.assertEqual(llm_provider.api_key(), 'yerel-anahtar')
+        self.assertNotIn('error', self.api.llm_profile_delete('lm-studio'))
+        self.assertNotIn('llm-api-key@lm-studio', self.secrets)
+        self.assertEqual(self.config()['base_url'], 'http://127.0.0.1:5000/v1')
+        cfg = self.config()
+        self.assertEqual((cfg['llm_profiles'], cfg['llm_profile']), ([], ''))
+        self.assertIn('error', self.api.llm_profile_use('yok'))
+        self.assertIn('error', self.api.llm_profile_create('  '))
+
+    def test_validate_profiles(self):
+        base = dict(app_core.DEFAULT_CONFIG)
+        with self.assertRaises(ValueError):
+            app_core.validate_config(dict(base, llm_profile='yok'))
+        with self.assertRaises(ValueError):
+            app_core.validate_config(dict(base, llm_profiles=[{'id': 'a', 'name': 'A', 'base_url': 'http://example.com/v1'}]))
+        app_core.validate_config(dict(base, llm_profile='a', llm_profiles=[{'id': 'a', 'name': 'A', **llm_provider.snapshot(base)}]))
+
 if __name__ == '__main__':
     unittest.main()

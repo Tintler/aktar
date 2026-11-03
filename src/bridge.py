@@ -307,10 +307,131 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         """Model sunucusu API anahtarini isletim sistemi deposuna yazar; bos deger siler."""
         try:
             llm_provider.set_api_key(value)
+            active = self.get_settings()['config'].get('llm_profile', '')
+            if active:   # F236: etkin baglantinin kendi kaydi da
+                llm_provider.store_profile_key(active, value)
         except Exception as error:  # depo yok (Linux'ta secret-tool) ya da yazilamadi
             return {'error': 'API anahtarı kaydedilemedi: ' + str(error)}
         self.refresh_models()
         return {'api_key_set': bool(llm_provider.api_key())}
+
+    # ------------------------------------------------------------------ baglanti profilleri (F236)
+    @staticmethod
+    def _sync_profile(value):
+        """Etkin profile ust duzeydeki baglanti degerlerini yazar."""
+        active = value.get('llm_profile', '')
+        value['llm_profiles'] = [dict(item, **llm_provider.snapshot(value)) if item.get('id') == active else item
+                                 for item in llm_provider.profiles(value)]
+
+    def _profile_change(self, change):
+        """config.json'u okur, change(value) ile degistirir, dogrulayip yazar; {'settings'} | {'error'}."""
+        if self._running() or self._book_running():
+            return _error('Çeviri sürerken bağlantı değiştirilemez.')
+        try:
+            value = dict(DEFAULT_CONFIG)
+            try:
+                value.update(json.loads(read(APP_DIR / 'config.json')))
+            except (OSError, ValueError):
+                pass
+            before = llm_provider.snapshot(value), value.get('llm_profile', '')
+            self._sync_profile(value)
+            key = change(value)   # yeni etkin anahtar (None = degismez); config yazilinca depoya konur
+            validate_config(value)
+            save_json(APP_DIR / 'config.json', value)
+            if key is not None:
+                llm_provider.set_api_key(key)
+        except Exception as error:  # noqa: BLE001 - dogrulama, dosya ya da anahtar deposu
+            return _error(error)
+        if (llm_provider.snapshot(value), value.get('llm_profile', '')) != before:
+            self.refresh_models()
+        self._emit('llm_profile', self.llm_profiles())   # acik Ayarlar sayfasi ve model paneli yenilenir
+        return {'settings': self.get_settings()}
+
+    def llm_profiles(self):
+        """Sol alttaki model paneli icin: {'profiles': [{id, name, base_url, model}], 'active'}."""
+        try:
+            value = json.loads(read(APP_DIR / 'config.json'))
+        except (OSError, ValueError):
+            value = {}
+        return {'profiles': [{key: item.get(key, '') for key in ('id', 'name', 'base_url', 'model')}
+                             for item in llm_provider.profiles(value)],
+                'active': value.get('llm_profile', '')}
+
+    @staticmethod
+    def _activate(value, profile_id):
+        """profile_id'yi etkin yapar (degerleri ust duzeye); donen deger SECRET_KEY'e konacak anahtar."""
+        profile = llm_provider.find_profile(value, profile_id)
+        value.update({name: profile.get(name, DEFAULT_CONFIG[name]) for name in llm_provider.PROFILE_KEYS})
+        value['llm_profile'] = profile_id
+        return llm_provider.profile_key(profile_id)
+
+    def llm_profile_use(self, profile_id):
+        """Kayitli baglantiya gecer; {'settings'} (get_settings) | {'error'}."""
+        def change(value):
+            if not llm_provider.find_profile(value, profile_id):
+                raise ValueError('Bağlantı profili bulunamadı.')
+            if value.get('llm_profile') != profile_id:
+                return self._activate(value, profile_id)
+            return None
+        result = self._profile_change(change)
+        if 'error' not in result:
+            self._log('Model sunucusu bağlantısı: ' + llm_provider.find_profile(result['settings']['config'], profile_id)['name'])
+        return result
+
+    def llm_profile_create(self, name):
+        """Yeni baglanti profili (su anki degerlerin kopyasi, anahtarsiz) ekler ve ona gecer. Profil yokken su
+        anki baglanti once kendi adiyla (anahtariyla) profil olarak saklanir; boylece eski baglanti kaybolmaz."""
+        name = ' '.join(str(name or '').split())[:60]
+        if not name:
+            return _error('Bağlantı adı boş olamaz.')
+
+        def change(value):
+            items = llm_provider.profiles(value)
+            if len(items) + (1 if value.get('llm_profile') else 2) > llm_provider.MAX_PROFILES:
+                raise ValueError(f'En fazla {llm_provider.MAX_PROFILES} bağlantı kaydedilebilir.')
+            if not value.get('llm_profile'):
+                first = llm_provider.new_profile_id(llm_provider.profile_label(value), value)
+                items.append({'id': first, 'name': llm_provider.profile_label(value), **llm_provider.snapshot(value)})
+                value['llm_profiles'] = items
+                llm_provider.store_profile_key(first, llm_provider.api_key())
+            new = llm_provider.new_profile_id(name, value)
+            llm_provider.store_profile_key(new, '')   # ayni kimlikle silinmis eski profilden kalan anahtar
+            value['llm_profiles'] = items + [{'id': new, 'name': name, **llm_provider.snapshot(value)}]
+            self._activate(value, new)
+            return ''   # yeni baglanti anahtarsiz baslar
+        return self._profile_change(change)
+
+    def llm_profile_rename(self, profile_id, name):
+        name = ' '.join(str(name or '').split())[:60]
+        if not name:
+            return _error('Bağlantı adı boş olamaz.')
+
+        def change(value):
+            if not llm_provider.find_profile(value, profile_id):
+                raise ValueError('Bağlantı profili bulunamadı.')
+            value['llm_profiles'] = [dict(item, name=name) if item['id'] == profile_id else item
+                                     for item in llm_provider.profiles(value)]
+            return None
+        return self._profile_change(change)
+
+    def llm_profile_delete(self, profile_id):
+        """Profili ve anahtar kaydini siler. Etkin profil silinirse kalan ilk profile gecilir; hic kalmazsa
+        degerleri ust duzeyde kalir (profilsiz kip)."""
+        def change(value):
+            if not llm_provider.find_profile(value, profile_id):
+                raise ValueError('Bağlantı profili bulunamadı.')
+            value['llm_profiles'] = [item for item in llm_provider.profiles(value) if item['id'] != profile_id]
+            if profile_id != value.get('llm_profile'):
+                return None
+            value['llm_profile'] = ''
+            return self._activate(value, value['llm_profiles'][0]['id']) if value['llm_profiles'] else None
+        result = self._profile_change(change)
+        if 'error' not in result:
+            try:
+                llm_provider.store_profile_key(profile_id, '')
+            except Exception:  # depo yok: silinecek anahtar da yok
+                pass
+        return result
 
     def save_settings(self, values):
         try:
@@ -320,7 +441,9 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
             except (OSError, ValueError):
                 pass
             current = dict(value)
-            incoming = {key: item for key, item in dict(values or {}).items() if key in DEFAULT_CONFIG}
+            # Profil listesi ve etkin profil yalnizca llm_profile_* ile degisir; etkin profil kaydedilen degerleri alir.
+            incoming = {key: item for key, item in dict(values or {}).items()
+                        if key in DEFAULT_CONFIG and key not in ('llm_profiles', 'llm_profile')}
             if self._running() or self._book_running():
                 for key in LOCKED_WHILE_RUNNING:
                     incoming.pop(key, None)
@@ -334,6 +457,7 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
                         value[key] = default
                 elif isinstance(default, str):
                     value[key] = str(value.get(key, '')).strip()
+            self._sync_profile(value)
             validate_config(value)
             self._book_merge_settings(value, dict(values or {}).get('book'))
             save_json(APP_DIR / 'config.json', value)

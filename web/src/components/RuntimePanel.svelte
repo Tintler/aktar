@@ -14,6 +14,8 @@
   let engine = $state(null);
   let busy = $state('');      // bosaltilan ornegin kimligi ('tts' ses motoru)
   let place = $state({ left: 12, bottom: 80 });
+  let conn = $state({ profiles: [], active: '' });   // F236: kayitli baglantilar; ikiden fazlaysa buradan gecilir
+  let switching = $state('');
 
   async function loadLlm() {
     if (llm.loading) return;      // sorgu suruyorsa ikincisi gonderilmez
@@ -25,9 +27,24 @@
   async function loadEngine() {
     engine = (await call('tts_runtime'))?.engine ?? null;
   }
+  async function loadConn() {
+    const result = await call('llm_profiles');
+    if (result && !result.error) conn = result;
+  }
   function refresh() {
     loadLlm();
     loadEngine();
+    loadConn();
+  }
+  async function useProfile(profile) {
+    if (switching || profile.id === conn.active) return;
+    switching = profile.id;
+    const result = await call('llm_profile_use', profile.id);
+    switching = '';
+    if (result?.error) return toast(result.error, 'error');
+    conn = { ...conn, active: profile.id };
+    toast(`${profile.name} bağlantısına geçildi.`, 'ok');
+    loadLlm();
   }
 
   // Yalnizca `open` izlenir: yenileme `llm`i okuyup yazdigi icin izlenirse effect kendini yeniden tetikler
@@ -41,7 +58,8 @@
       }
       refresh();
     });
-    return on('tts', () => loadEngine());
+    const offs = [on('tts', () => loadEngine()), on('llm_profile', (value) => { if (value) conn = value; })];
+    return () => offs.forEach((off) => off());
   });
 
   async function ejectModel(model) {
@@ -82,6 +100,17 @@
       <span>Model sunucusu</span>
       <button class="icon-btn sm" title="Yenile" disabled={llm.loading} onclick={refresh}><Icon name="refresh" size={14} spin={llm.loading} /></button>
     </div>
+    {#if conn.profiles.length > 1}
+      <div class="conns" role="radiogroup" aria-label="Bağlantı">
+        {#each conn.profiles as profile (profile.id)}
+          <button class="conn" class:on={profile.id === conn.active} role="radio" aria-checked={profile.id === conn.active}
+            title={`${profile.base_url}
+${profile.model}`} disabled={!!switching} onclick={() => useProfile(profile)}>
+            {#if switching === profile.id}<Icon name="loader" size={13} spin />{/if}{profile.name}
+          </button>
+        {/each}
+      </div>
+    {/if}
     {#if llm.loading && !llm.models?.length}
       <div class="empty"><Icon name="loader" size={14} spin />Yüklü modeller soruluyor…</div>
     {:else if llm.error}
@@ -133,6 +162,12 @@
   .head { display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700; color: var(--dim);
     text-transform: uppercase; letter-spacing: .06em; padding: 6px 6px 4px 10px; min-height: 30px; }
   .head.sep { margin-top: 6px; border-top: 1px solid var(--outline); padding-top: 10px; }
+  .conns { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 10px 8px; }
+  .conn { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    background: var(--surface); color: var(--secondary); border: 1px solid var(--outline); cursor: pointer; }
+  .conn:not(.on):not(:disabled):hover { background: var(--surface-hover); }
+  .conn.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  .conn:disabled:not(.on) { opacity: .6; cursor: default; }
   .item { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 10px; }
   .item:hover { background: var(--surface-hover); }
   .ic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--surface); color: var(--accent); flex: none; }

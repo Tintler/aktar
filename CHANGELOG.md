@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.54.0 — 2026-11-03
+
+### Eklenen
+- **Model sunucusu bağlantıları:** Ayarlar → Modeller'de birden fazla bağlantı (ör. yerel LM Studio ve OpenAI) kaydedilip aralarında geçilebilir. Her bağlantı kendi adresini, sunucu türünü, API anahtarını ve modellerini (analiz, soru-cevap, görü, OCR, embedding) saklar; ilk yeni bağlantı eklenince mevcut ayarlar kendi adıyla korunur. Sol alttaki model panelinden de tek tıkla geçilir.
+
 ## 2.53.1 — 2026-11-03
 
 ### Düzeltilen
