@@ -6,7 +6,7 @@
   import { untrack } from 'svelte';
   import Icon from '../lib/Icon.svelte';
   import { call, on } from '../lib/api.js';
-  import { toast } from '../lib/state.svelte.js';
+  import { toast, confirmModelChange } from '../lib/state.svelte.js';
 
   let { open = $bindable(false), anchor = null } = $props();
 
@@ -38,6 +38,7 @@
   }
   async function useProfile(profile) {
     if (switching || profile.id === conn.active) return;
+    if (!(await confirmModelChange())) return;   // F238: devam eden is iptal edilir
     switching = profile.id;
     const result = await call('llm_profile_use', profile.id);
     switching = '';

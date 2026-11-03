@@ -60,8 +60,9 @@ OCR_ENGINES = [('auto', 'Otomatik (Tesseract > OCR modeli > görü modeli)'),
                ('tesseract', 'Tesseract (yerel)'),
                ('model', 'OCR modeli (LM Studio)'),
                ('vision', 'Görü modeli')]
-# Ceviri surerken degistirilemeyen ayarlar (calisan isin modeli/baglantisi).
-LOCKED_WHILE_RUNNING = ('base_url', 'provider', 'model', 'batch_cues', 'max_tokens', 'temperature', 'timeout_seconds',
+# Ceviri surerken degistirilemeyen ayarlar.
+# F238: model ve baglanti kilitli degil; degisince model sunucusunu kullanan isler durur (Bridge._llm_jobs_stop).
+LOCKED_WHILE_RUNNING = ('batch_cues', 'max_tokens', 'temperature', 'timeout_seconds',
                         'auto_retry_count', 'glossary_strict', 'analysis_chunk_chars', 'disable_thinking',
                         'source_language', 'target_language')
 
@@ -323,10 +324,36 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
         value['llm_profiles'] = [dict(item, **llm_provider.snapshot(value)) if item.get('id') == active else item
                                  for item in llm_provider.profiles(value)]
 
+    def _llm_job_list(self):
+        """F238: model sunucusunu kullanan arka plan isleri [{'id', 'label', 'resume'}]; model ya da baglanti
+        degisince durdurulur (arayuz once llm_jobs ile sorup kullaniciyi uyarir)."""
+        emotion = getattr(self, '_emotion_job', None)
+        return [job for job, running in (
+            ({'id': 'translate', 'label': 'Altyazı çevirisi', 'resume': False}, self._running()),
+            ({'id': 'book', 'label': 'Kitap çevirisi', 'resume': True}, self._book_running()),
+            ({'id': 'emotions', 'label': 'Duygu etiketleri', 'resume': True},
+             emotion is not None and emotion.is_alive() and getattr(self, '_emotion_method', '') == 'llm'),
+            ({'id': 'art', 'label': 'Kitap görselleri planı', 'resume': True}, self._art_planning()),
+            ({'id': 'library', 'label': 'Kütüphane hazırlığı', 'resume': False}, self._queue_running()),
+        ) if running]
+
+    def llm_jobs(self):
+        return self._llm_job_list()
+
+    def _llm_jobs_stop(self):
+        """F238: model sunucusunu kullanan isleri durdurur (yeni model eski isin ortasina karismasin)."""
+        stopped = self._llm_job_list()
+        actions = {'translate': self.cancel_translation, 'book': self.book_stop, 'emotions': self.tts_emotions_cancel,
+                   'art': self.art_cancel, 'library': self.queue_stop}
+        for job in stopped:
+            actions[job['id']]()
+        if stopped:
+            self._log('Model ayarı değişti; durdurulan işler: ' + ', '.join(job['label'] for job in stopped) + '.')
+        return stopped
+
     def _profile_change(self, change):
-        """config.json'u okur, change(value) ile degistirir, dogrulayip yazar; {'settings'} | {'error'}."""
-        if self._running() or self._book_running():
-            return _error('Çeviri sürerken bağlantı değiştirilemez.')
+        """config.json'u okur, change(value) ile degistirir, dogrulayip yazar; {'settings'} | {'error'}. Etkin
+        baglanti degisirse model sunucusunu kullanan isler durdurulur (F238; arayuz once uyarir)."""
         try:
             value = dict(DEFAULT_CONFIG)
             try:
@@ -337,6 +364,8 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
             self._sync_profile(value)
             key = change(value)   # yeni etkin anahtar (None = degismez); config yazilinca depoya konur
             validate_config(value)
+            if llm_provider.snapshot(value) != before[0]:   # ayni degerlerle yeni profil isi durdurmaz
+                self._llm_jobs_stop()
             save_json(APP_DIR / 'config.json', value)
             if key is not None:
                 llm_provider.set_api_key(key)
@@ -460,6 +489,8 @@ class Bridge(TranslateMixin, BookMixin, ReaderMixin, TtsMixin, PdfMixin, Library
             self._sync_profile(value)
             validate_config(value)
             self._book_merge_settings(value, dict(values or {}).get('book'))
+            if llm_provider.snapshot(current) != llm_provider.snapshot(value):
+                self._llm_jobs_stop()   # F238: arayuz once uyarir
             save_json(APP_DIR / 'config.json', value)
         except (RuntimeError, ValueError, OSError) as error:
             return {'error': 'Ayarlar kaydedilemedi: ' + str(error)}

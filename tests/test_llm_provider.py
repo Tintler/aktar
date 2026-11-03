@@ -213,6 +213,32 @@ class ProfileTests(unittest.TestCase):
         self.assertIn('error', self.api.llm_profile_use('yok'))
         self.assertIn('error', self.api.llm_profile_create('  '))
 
+    def test_model_change_stops_model_jobs(self):
+        """F238: model ya da baglanti degisince model sunucusunu kullanan isler durur (arayuz once uyarir)."""
+        import threading
+        release = threading.Event()
+        self.api._emotion_job = threading.Thread(target=release.wait)
+        self.api._emotion_job.start()
+        self.addCleanup(lambda: (release.set(), self.api._emotion_job.join()))
+        self.api._emotion_method = 'llm'
+        self.api._emotion_cancel = threading.Event()
+        self.assertEqual([job['id'] for job in self.api.llm_jobs()], ['emotions'])
+        self.api.llm_profile_create('Uzak')   # degerler ayni: is durmaz
+        self.assertFalse(self.api._emotion_cancel.is_set())
+        self.assertNotIn('error', self.api.save_settings(dict(self.config(), temperature=0.5)))
+        self.assertFalse(self.api._emotion_cancel.is_set())
+        self.assertNotIn('error', self.api.save_settings(dict(self.config(), model='baska')))
+        self.assertTrue(self.api._emotion_cancel.is_set())
+        self.api._emotion_cancel = threading.Event()
+        self.assertNotIn('error', self.api.llm_profile_use('lm-studio'))
+        self.assertTrue(self.api._emotion_cancel.is_set())
+        self.assertNotIn('model', self.api.get_settings()['locked'])
+
+    def test_remote(self):
+        self.assertTrue(llm_provider.remote({'base_url': 'https://openrouter.ai/api/v1'}))
+        self.assertFalse(llm_provider.remote({'base_url': 'http://10.70.238.67:5000/v1'}))
+        self.assertFalse(llm_provider.remote({'base_url': 'http://127.0.0.1:1234/v1'}))
+
     def test_validate_profiles(self):
         base = dict(app_core.DEFAULT_CONFIG)
         with self.assertRaises(ValueError):

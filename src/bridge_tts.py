@@ -23,6 +23,7 @@ import book_art
 import drama3_tags
 import emotion_tags
 import keep_awake
+import llm_provider
 import text_speech
 import voice_presets
 from app_core import APP_DIR, ROOT
@@ -38,6 +39,15 @@ PREPARE_POLL = 5
 
 def _error(error):
     return {'error': str(error)}
+
+
+def remote_llm():
+    """F238: ayarlardaki model sunucusu internette mi (OpenRouter vb.); okunamazsa yerel sayilir."""
+    from app_core import load_config
+    try:
+        return llm_provider.remote(load_config())
+    except Exception:  # ayar okunamadi: bellek paylasilir varsay (eski davranis)
+        return False
 
 
 class TtsMixin:
@@ -104,49 +114,87 @@ class TtsMixin:
         return {'info': info, 'engine': supported, 'enabled': self._emotion_enabled(), 'allowed': list(allowed),
                 'missing': missing}
 
-    def tts_emotions_create(self, book, sections, method='llm', title=''):
+    def _emotion_local(self):
+        """F238: duygu etiketlemesi bu bilgisayarin ya da yerel agin dil modeliyle suruyor mu (bellek paylasilir).
+        Internetteki sunucuyla (OpenRouter) calisan is baska islere engel olmaz."""
+        job = getattr(self, '_emotion_job', None)
+        return job is not None and job.is_alive() and not getattr(self, '_emotion_remote', False)
+
+    def tts_emotions_partials(self):
+        """F238: yarim kalan (surdurulebilir) etiketlemeler {kitap: {'done', 'total', 'method', 'updated'}}."""
+        try:
+            return self._emotion_store().partials()
+        except OSError:
+            return {}
+
+    def tts_emotions_create(self, book, sections, method='llm', title='', resume=False):
         """F170: butun kitabin etiketli surumunu arka planda olusturur (kitapligin sag tik menusu). `sections`:
         [{'sentences', 'breaks'}] okuyucunun bolmesiyle. Okurken etiketleme yapilmaz: ses motoru ile dil modeli
         ayni anda bellegi dolduruyordu; is basinda ses motoru durdurulur, model sunucusunda bu isin yukledigi
-        model sonunda bosaltilir. Ilerleme ve bitis 'tts_emotions' olayiyla."""
+        model sonunda bosaltilir (F238: model sunucusu internetteyse bunlar gerekmez). Ilerleme ve bitis
+        'tts_emotions' olayiyla. F238: is ara kayitla ilerler; `resume` yarim kalan isi kaldigi yerden surdurur
+        (yontem ara kayittaki; kitabin metni ya da etiket secimi degistiyse surdurulemez)."""
         if not hasattr(self, '_emotion_lock'):
             self._emotion_lock = threading.Lock()
+        store = self._emotion_store()
+        try:
+            store._path(book)
+        except ValueError as error:
+            return _error(error)
+        if resume:
+            saved = store.load_partial(book)
+            if not saved:
+                return _error('Sürdürülecek yarım etiketleme bulunamadı.')
+            method = saved.get('method')
         method = method if method in emotion_tags.METHODS else 'llm'
         allowed = self._emotion_allowed()
         style = self._emotion_style() if method == 'llm' else 'catalog'
         if not allowed and style == 'catalog':
             return _error("Ayarlar → Ses'te Drama 3 için en az bir duygu etiketi seçin.")
-        try:
-            self._emotion_store()._path(book)
-        except ValueError as error:
-            return _error(error)
         sections = [{'sentences': [' '.join(str(s).split()) for s in (part or {}).get('sentences') or ()],
                      'breaks': [int(b) for b in (part or {}).get('breaks') or ()]} for part in sections or ()]
         total = sum(len(part['sentences']) for part in sections)
         if not total:
             return _error('Kitapta etiketlenecek metin yok.')
+        key = emotion_tags.resume_key(method, sections, allowed, style)
+        partial = None
+        if resume:
+            partial = store.load_partial(book, key)
+            if partial is None:
+                return _error('Yarım kalan etiketleme sürdürülemiyor: kitabın metni, bölme ayarı ya da Ayarlar → '
+                              "Ses'teki etiket seçimi değişmiş. Baştan oluşturun.")
+        remote = method == 'llm' and remote_llm()
         with self._emotion_lock:
             job = getattr(self, '_emotion_job', None)
             if job is not None and job.is_alive():
                 return _error('Duygu etiketleri zaten oluşturuluyor.')
-            if getattr(self, '_art_planning', lambda: False)():
-                return _error('Kitap görselleri planlanırken duygu etiketi oluşturulamaz (ikisi de dil modelini kullanır).')
-            for name in ('_prepare_job', '_audiobook_job'):
+            if not remote and getattr(self, '_art_planning_local', lambda: False)():
+                return _error('Kitap görselleri planlanırken duygu etiketi oluşturulamaz (ikisi de bu bilgisayarın '
+                              'dil modelini kullanır; internetteki bir model sunucusuyla birlikte çalışabilir).')
+            for name in ('_prepare_job', '_audiobook_job') if not remote else ():
                 running = getattr(self, name, None)
                 if running is not None and running.is_alive():
                     return _error('Ses hazırlanırken ya da sesli kitap kaydedilirken duygu etiketi oluşturulamaz.')
+            if not resume:
+                store.clear_partial(book)   # yeni is: eski ara kayit gecersiz
             cancel = threading.Event()
-            self._emotion_cancel = cancel
+            self._emotion_cancel, self._emotion_remote, self._emotion_method = cancel, remote, method
 
             def progress(done, count):
                 self._emit('tts_emotions', {'book': book, 'title': title, 'done': done, 'total': count})
+
+            def checkpoint(state):
+                try:
+                    store.save_partial(book, key, state, total, method)
+                except OSError as error:
+                    self._log(f'UYARI: Duygu etiketlerinin ara kaydı yazılamadı: {error}')
 
             def work():
                 from app_core import Client, keep_loaded, load_config, unload_models
                 client, loaded = None, []
                 try:
                     engines = getattr(self, '_engines_cache', None)
-                    if engines is not None and engines.state != 'idle' and not engines._exporting:
+                    if not remote and engines is not None and engines.state != 'idle' and not engines._exporting:
                         engines.stop_worker()   # ses motoru bellegi bosalsin
                         engines._set('idle', '')
                     ask = None
@@ -156,12 +204,15 @@ class TtsMixin:
                         ask = lambda prompt: client.chat([{'role': 'user', 'content': prompt}], temperature=0,
                                                          max_tokens=3000 if style == 'free' else 1500)
                     progress(0, total)
-                    tags = emotion_tags.tag_book(sections, ask, cancel, progress, allowed, style)
-                    info = self._emotion_store().save(book, method, sections, tags, allowed, style)
+                    tags = emotion_tags.tag_book(sections, ask, cancel, progress, allowed, style, partial,
+                                                 checkpoint if method == 'llm' else None)
+                    info = store.save(book, method, sections, tags, allowed, style)
+                    store.clear_partial(book)
                     self._log(f'Duygu etiketleri: {info["tagged"]} konuşma etiketlendi ({title or book}).')
                     self._emit('tts_emotions', {'book': book, 'title': title, 'finished': True, 'info': info})
                 except emotion_tags.Cancelled:
-                    self._emit('tts_emotions', {'book': book, 'title': title, 'finished': True, 'cancelled': True})
+                    self._emit('tts_emotions', {'book': book, 'title': title, 'finished': True, 'cancelled': True,
+                                                'resumable': method == 'llm'})
                 except Exception as error:
                     self._log(f'UYARI: Duygu etiketleri oluşturulamadı: {error}')
                     self._emit('tts_emotions', {'book': book, 'title': title, 'finished': True, 'error': str(error)})
@@ -268,11 +319,10 @@ class TtsMixin:
     def tts_load(self, language=None, voice=None):
         """Kitap dili icin secilen motoru ve sesi (arka planda) hazirlar. `voice`: sayfanin kendi sesi
         (sohbet, dublaj): '' okuyucunun sesi, 'preset:<kimlik>' ses kaydi ya da '<motor>/<ses>'."""
-        job = getattr(self, '_emotion_job', None)
-        if job is not None and job.is_alive():   # F170: dil modeli calisirken ses motoru bellege yuklenmez
+        if self._emotion_local():   # F170: dil modeli calisirken ses motoru bellege yuklenmez (F238: yerel modelse)
             return {'state': 'error', 'message': 'Duygu etiketleri oluşturulurken ses motoru başlatılmaz; '
                     'bitmesini bekleyin ya da sağ üstteki işlerden durdurun.'}
-        if getattr(self, '_art_planning', lambda: False)():   # F197: dil modeli gorsel plani cikariyor
+        if getattr(self, '_art_planning_local', lambda: False)():   # F197: dil modeli gorsel plani cikariyor
             return {'state': 'error', 'message': 'Kitap görselleri planlanırken ses motoru başlatılmaz; '
                     'bitmesini bekleyin ya da sağ üstteki işlerden durdurun.'}
         device = self.ui_prefs().get('tts', {}).get('device', 'auto')

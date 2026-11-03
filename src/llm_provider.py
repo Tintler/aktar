@@ -64,6 +64,13 @@ def scope(url):
     return 'internet'
 
 
+def remote(cfg):
+    """F238: model sunucusu internette mi (OpenRouter, OpenAI). Oyleyse dil modeli bu bilgisayarin ya da yerel agin
+    bellegini kullanmaz: dil modeli isleri ayni anda calisabilir, ses motoru ve ComfyUI icin bosaltma gerekmez."""
+    url = str((cfg or {}).get('base_url') or '').strip()
+    return bool(url) and scope(url) == 'internet'
+
+
 def validate(cfg):
     url = str(cfg.get('base_url') or '').strip()
     parsed = urlparse(url)

@@ -298,7 +298,6 @@
   let readingRun = 0;
   async function startPlan(resume = false, openersOnly = false) {
     if (otherJob) { toast('Başka bir kitabın görselleri için iş sürüyor.'); return; }
-    if (app.emotionJob) { toast('Duygu etiketleri oluşturulurken görsel planı çıkarılamaz.'); return; }
     if (!resume && !openersOnly && plan?.complete) {
       const yes = await confirm({ title: 'Baştan planla', message: 'Mevcut plan ve üretilmiş görseller silinir. Devam edilsin mi?',
         ok: 'Baştan planla', cancel: 'Vazgeç', danger: true });

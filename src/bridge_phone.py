@@ -63,12 +63,13 @@ class PhoneMixin:
             return 'Aktar dublaj için sesi kullanıyor.'
         for name, reason in (('_audiobook_job', 'Aktar sesli kitap kaydediyor.'),
                              ('_speech_job', 'Aktar metinden ses kaydediyor.'),
-                             ('_prepare_job', 'Aktar okuyucu için ses hazırlıyor.'),
-                             ('_emotion_job', 'Aktar duygu etiketleri oluşturuyor.')):
+                             ('_prepare_job', 'Aktar okuyucu için ses hazırlıyor.')):
             job = getattr(self, name, None)
             if job is not None and job.is_alive():
                 return reason
-        if getattr(self, '_art_planning', lambda: False)():
+        if getattr(self, '_emotion_local', lambda: False)():   # F238: internetteki modelle engel degil
+            return 'Aktar duygu etiketleri oluşturuyor.'
+        if getattr(self, '_art_planning_local', lambda: False)():
             return 'Aktar kitap görselleri planlıyor.'
         awake = getattr(self, '_keep_awake', None)
         if awake is not None and awake.active:   # okuyucu sesli okuyor: baska sese gecilirse okuma bozulur

@@ -32,10 +32,40 @@
   // surumu kullanir. Kitaplikta tek kitap kalir, etiketler APP_DIR/duygu-etiketleri altinda saklanir.
   const tagged = (book) => app.emotionBooks.includes(book.id);
 
+  // F238: yarim kalan etiketleme ara kayittan surer (yontem ara kayittaki)
+  const partial = (book) => app.emotionPartials[book.id] ?? null;
+  const partialLabel = (p) => (p.total ? ` (%${Math.floor((100 * p.done) / p.total)})` : '');
+
+  async function startEmotions(book, method, resume = false) {
+    app.emotionJob = { book: book.id, title: book.title, done: 0, total: 0, reading: true };
+    let sections;
+    try {
+      sections = await bookSections(book.id, app.ttsPrefs.split ?? {});
+    } catch (error) {
+      app.emotionJob = null;
+      toast(String(error?.message ?? error), 'error');
+      return;
+    }
+    const result = await act('tts_emotions_create', book.id, sections, method, book.title, resume);
+    if (!result?.started) app.emotionJob = null;
+    else if (app.emotionJob?.reading) app.emotionJob = { book: book.id, title: book.title, done: 0, total: result.total };
+  }
+
+  function resumeEmotions(book) {
+    menu = null;
+    if (app.emotionJob) { toast('Başka bir kitabın duygu etiketleri oluşturuluyor.'); return; }
+    startEmotions(book, partial(book)?.method || 'llm', true);
+  }
+
   async function createEmotions(book) {
     menu = null;
     if (app.emotionJob) { toast('Başka bir kitabın duygu etiketleri oluşturuluyor.'); return; }
-    if (app.ttsPrepare || app.ttsAudiobook) { toast('Ses hazırlanırken ya da sesli kitap kaydedilirken duygu etiketi oluşturulamaz.'); return; }
+    if (partial(book)) {
+      const yes = await confirm({ title: 'Baştan etiketle',
+        message: `"${book.title}" için yarım kalan bir etiketleme var${partialLabel(partial(book))}. Baştan oluşturulursa ` +
+          'yarım kalan kısım silinir. Devam edilsin mi?', ok: 'Baştan oluştur', cancel: 'Vazgeç' });
+      if (!yes) return;
+    }
     const catalog = await act('tts_emotion_catalog');
     if (!catalog) return;
     // F187: serbest yonergede model katalogla sinirli degil; secili etiketler yalnizca kelime listesi icin
@@ -62,18 +92,7 @@
       ok: 'Oluştur',
     });
     if (!method) return;
-    app.emotionJob = { book: book.id, title: book.title, done: 0, total: 0, reading: true };
-    let sections;
-    try {
-      sections = await bookSections(book.id, app.ttsPrefs.split ?? {});
-    } catch (error) {
-      app.emotionJob = null;
-      toast(String(error?.message ?? error), 'error');
-      return;
-    }
-    const result = await act('tts_emotions_create', book.id, sections, method, book.title);
-    if (!result?.started) app.emotionJob = null;
-    else if (app.emotionJob?.reading) app.emotionJob = { book: book.id, title: book.title, done: 0, total: result.total };
+    await startEmotions(book, method);
   }
 
   async function removeEmotions(book) {
@@ -156,6 +175,10 @@
     {#if app.emotionJob?.book === menu.book.id}
       <button onclick={() => { menu = null; act('tts_emotions_cancel'); }}><Icon name="stop" size={15} />Duygu etiketlemeyi durdur</button>
     {:else}
+      {#if partial(menu.book)}
+        <button disabled={!menu.book.exists || Boolean(app.emotionJob)} onclick={() => resumeEmotions(menu.book)}>
+          <Icon name="play" size={15} />Duygu etiketlemeyi sürdür{partialLabel(partial(menu.book))}</button>
+      {/if}
       <button disabled={!menu.book.exists || Boolean(app.emotionJob)} onclick={() => createEmotions(menu.book)}>
         <Icon name="sparkles" size={15} />{tagged(menu.book) ? 'Duygu etiketlerini yeniden oluştur' : 'Duygu etiketleri oluştur'}</button>
     {/if}

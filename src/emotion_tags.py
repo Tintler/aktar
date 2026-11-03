@@ -26,6 +26,7 @@ drama3_tags.legacy_tag ile tek etiket olarak gider. 'catalog' bugunku davranis. 
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import threading
@@ -37,6 +38,7 @@ from drama3 import tagged
 
 METHODS = ('words', 'llm')
 STORE_DIR = 'duygu-etiketleri'
+PARTIAL_DIR = 'yarim'
 VERSION = 2
 
 # Anlatici ipuclari (Turkce kucuk harfle; drama3_tags katalogu). Yalnizca ucuncu kisi/zarf bicimleri: konusmanin
@@ -257,17 +259,22 @@ def parse_llm(raw, sentences, start, stop, allowed=None, style='catalog', speech
     return result
 
 
-def tag_with_llm(sentences, breaks, ask, cancel=None, progress=None, allowed=None, style='catalog'):
+def tag_with_llm(sentences, breaks, ask, cancel=None, progress=None, allowed=None, style='catalog', begin=0,
+                 tags=None, checkpoint=None):
     """Model sunucusuyla etiketleme: `ask(istem) -> yanit metni`. Donen: her cumle icin etiket ('' yok). Konusmalarin
     yarisindan fazlasini etiketleyen yanit (kucuk model istemi anlamamis: her seye [laughs]) yok sayilir; F187
     serbest kipte yalnizca bu etiketlerin yarisindan fazlasi ayni yonergeyse (gemma neredeyse her konusmaya ayri,
-    yerinde bir yonerge yaziyordu). `progress(islenen_cumle)` her parcadan sonra cagrilir."""
+    yerinde bir yonerge yaziyordu). `progress(islenen_cumle)` her parcadan sonra cagrilir. F238: `begin` + `tags`
+    yarim kalan isin kaldigi cumle ve o ana kadarki etiketleri; `checkpoint(sonraki_cumle, etiketler)` her parcadan
+    sonra (ara kayit)."""
     sentences = [str(s) for s in sentences]
     mask, continued = quote_context(sentences, breaks)
-    tags = [''] * len(sentences)
+    if tags is None or len(tags) != len(sentences):
+        tags, begin = [''] * len(sentences), 0   # ara kayit bu bolume uymuyor: bastan
+    tags = [str(tag or '') for tag in tags]
     prompt = llm_prompt(allowed, style)
     batch = LLM_FREE_BATCH if style == 'free' else LLM_BATCH
-    for start in range(0, len(sentences), batch):
+    for start in range(max(0, int(begin or 0)), len(sentences), batch):
         if cancel is not None and cancel.is_set():
             break
         stop = min(len(sentences), start + batch)
@@ -278,6 +285,8 @@ def tag_with_llm(sentences, breaks, ask, cancel=None, progress=None, allowed=Non
             if len(found) <= max(LLM_MAX_TAGGED, speech // 2) or (style == 'free' and not repetitive(found)):
                 for index, tag in found.items():
                     tags[index] = tag
+        if checkpoint:
+            checkpoint(stop, tags)
         if progress:
             progress(stop)
     return tags
@@ -296,29 +305,44 @@ class Cancelled(RuntimeError):
     """Kullanici etiketlemeyi durdurdu."""
 
 
-def tag_book(sections, ask=None, cancel=None, progress=None, allowed=None, style='catalog'):
+def tag_book(sections, ask=None, cancel=None, progress=None, allowed=None, style='catalog', partial=None,
+             checkpoint=None):
     """Butun kitabi etiketler (F170). `sections`: [{'sentences', 'breaks'}] okuyucunun bolmesiyle. `ask` verilirse
     model sunucusu da sorulur; modelin etiket vermedigi konusmada kelime listesininki kalir (anlaticidaki acik
     ipucu modelden daha guvenilir). Donen: bolum basina etiket listeleri. `progress(islenen, toplam)`;
     durdurulursa Cancelled. F187: `style` 'free' ise modelin etiketleri etiketli cumlelerdir; modelin bos biraktigi
     konusmayi kelime listesi yalnizca calistigi bilinen etiketlerle doldurur (73 etiketin denenmemis ipuclari modelin
-    notr birakma kararini yanlis etiketlerle eziyordu: 'Kahkahaları dondu' -> [laughs], [interrupting] ...)."""
+    notr birakma kararini yanlis etiketlerle eziyordu: 'Kahkahaları dondu' -> [laughs], [interrupting] ...).
+    F238 sürdürme: `checkpoint(durum)` her model parcasindan ve bolumden sonra {'sections': biten bolumlerin
+    etiketleri, 'llm': suren bolumde modelin etiketleri, 'next': suren bolumde siradaki cumle} ile cagrilir; ayni
+    durum `partial` olarak verilince is kaldigi yerden surer."""
     total = sum(len(section['sentences']) for section in sections)
     fill = allowed
     if ask is not None and style == 'free':
         fill = [tag for tag in drama3_tags.allowed(allowed) if tag in drama3_tags.DEFAULT_TAGS]
-    result, done = [], 0
-    for section in sections:
+    partial = partial or {}
+    result = [list(tags) for tags in partial.get('sections') or ()][:len(sections)]
+    done = sum(len(section['sentences']) for section in sections[:len(result)])
+    if progress and done:
+        progress(done, total)
+    for number in range(len(result), len(sections)):
         if cancel is not None and cancel.is_set():
             raise Cancelled('Duygu etiketleme durduruldu.')
-        sentences, breaks = section['sentences'], section.get('breaks') or ()
+        sentences, breaks = sections[number]['sentences'], sections[number].get('breaks') or ()
         tags = tag_sentences(sentences, breaks, fill)
         if ask is not None:
             step = (lambda count, base=done: progress(base + count, total)) if progress else None
-            found = tag_with_llm(sentences, breaks, ask, cancel, step, allowed, style)
+            begin, found = (partial.get('next', 0), partial.get('llm')) if number == len(partial.get('sections') or ()) \
+                else (0, None)
+            save = (lambda stop, llm: checkpoint({'sections': result, 'llm': llm, 'next': stop})) if checkpoint else None
+            found = tag_with_llm(sentences, breaks, ask, cancel, step, allowed, style, begin, found, save)
+            if cancel is not None and cancel.is_set():   # yarim bolum biten sayilmaz (ara kayitta kaldigi yer var)
+                raise Cancelled('Duygu etiketleme durduruldu.')
             tags = [llm or words for llm, words in zip(found, tags)]
         result.append(tags)
         done += len(sentences)
+        if checkpoint:
+            checkpoint({'sections': result, 'llm': [], 'next': 0})
         if progress:
             progress(done, total)
     if cancel is not None and cancel.is_set():
@@ -428,3 +452,58 @@ class Store:
             for path in targets:
                 path.unlink(missing_ok=True)
                 path.with_suffix('.txt').unlink(missing_ok=True)
+            for path in [self._partial_path(book)] if book else list((self.directory / PARTIAL_DIR).glob('*.json')):
+                path.unlink(missing_ok=True)
+
+    # F238: yarim kalan etiketlemenin ara kaydi (duygu-etiketleri/yarim/<kitap>.json); is bitince silinir.
+    def _partial_path(self, book):
+        return self._path(book).parent / PARTIAL_DIR / f'{book}.json'
+
+    def save_partial(self, book, key, state, total, method):
+        data = {'version': VERSION, 'key': key, 'method': method, 'total': int(total),
+                'updated': datetime.now().isoformat(timespec='seconds'),
+                'sections': state.get('sections') or [], 'llm': state.get('llm') or [], 'next': int(state.get('next') or 0)}
+        with self._lock:
+            path = self._partial_path(book)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            partial = path.with_name(path.name + '.part')
+            partial.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+            partial.replace(path)
+
+    def load_partial(self, book, key=None):
+        """Ara kayit ({'sections', 'llm', 'next', 'total', 'method', 'key'}); yoksa ya da `key` uymuyorsa None."""
+        try:
+            data = json.loads(self._partial_path(book).read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            return None
+        if not isinstance(data, dict) or data.get('version') != VERSION or not isinstance(data.get('sections'), list):
+            return None
+        return data if key is None or data.get('key') == key else None
+
+    def clear_partial(self, book):
+        with self._lock:
+            self._partial_path(book).unlink(missing_ok=True)
+
+    def partials(self):
+        """Yarim kalan kitaplar: {kitap: {'done', 'total', 'method', 'updated'}} (kitaplikta 'surdur' icin)."""
+        result = {}
+        for path in (self.directory / PARTIAL_DIR).glob('*.json'):
+            try:
+                data = self.load_partial(path.stem)
+            except ValueError:
+                continue
+            if data:
+                done = sum(len(tags) for tags in data['sections']) + int(data.get('next') or 0)
+                result[path.stem] = {'done': done, 'total': data.get('total') or 0, 'method': data.get('method'),
+                                     'updated': data.get('updated')}
+        return result
+
+
+def resume_key(method, sections, allowed, style):
+    """F238: ara kaydin hangi isin oldugu: kitap metni (okuyucunun bolmesi), yontem ve etiket secimi ayniysa surer."""
+    digest = hashlib.sha1()
+    digest.update(json.dumps([method, list(drama3_tags.allowed(allowed)), drama3_tags.style(style)]).encode('utf-8'))
+    for section in sections:
+        digest.update(json.dumps([section['sentences'], list(section.get('breaks') or ())],
+                                 ensure_ascii=False).encode('utf-8'))
+    return digest.hexdigest()

@@ -43,6 +43,7 @@ export const app = $state({
   ttsAudiobook: null,         // F141: {book, title, done, total, chapter, chapters}: sesli kitap kaydedilirken
   emotionJob: null,           // F170: {book, title, done, total, reading}: kitabin duygu etiketleri olusturulurken
   emotionBooks: [],           // F170: etiketli surumu olan kitaplar (tts_emotions_books)
+  emotionPartials: {},        // F238: yarim kalan etiketlemeler {kitap: {done, total}} (tts_emotions_partials)
   // F197 kitap gorselleri: suren is {book, title, stage: 'plan'|'generate', done, total, current, reading},
   // plani olan kitaplar {kitap: {complete, scenes, images}} ve acik pencere {book} (BookArt.svelte).
   artJob: null,
@@ -146,8 +147,25 @@ export async function refreshArtBooks() {
 }
 
 export async function refreshEmotionBooks() {
-  const books = await call('tts_emotions_books').catch(() => null);
+  const [books, partials] = await Promise.all([call('tts_emotions_books').catch(() => null),
+    call('tts_emotions_partials').catch(() => null)]);
   if (Array.isArray(books)) app.emotionBooks = books;
+  if (partials && typeof partials === 'object' && !partials.error) app.emotionPartials = partials;
+}
+
+// F238: model ya da baglanti degisince model sunucusunu kullanan isler durur; once kullaniciya sorulur.
+export const MODEL_KEYS = ['provider', 'base_url', 'model', 'qa_model', 'vision_model', 'ocr_model', 'embedding_model'];
+export async function confirmModelChange() {
+  const jobs = await call('llm_jobs').catch(() => null);
+  if (!Array.isArray(jobs) || !jobs.length) return true;
+  const resumable = jobs.filter((job) => job.resume).map((job) => job.label);
+  return confirm({
+    title: 'Devam eden iş iptal edilecek',
+    message: `Model değiştirilirse devam eden ${jobs.length > 1 ? 'işler' : 'iş'} iptal edilecektir.`
+      + (resumable.length ? ` ${resumable.join(', ')} daha sonra kaldığı yerden sürdürülebilir.` : ''),
+    list: jobs.map((job) => job.label),
+    ok: 'Değiştir ve iptal et', cancel: 'Vazgeç', danger: true,
+  });
 }
 
 // Arka uc metodunu cagirir; {error} sonucunu bildirime cevirir ve null dondurur.
@@ -289,7 +307,8 @@ export async function init() {
     app.emotionJob = null;
     refreshEmotionBooks();
     if (data.error) toast('Duygu etiketleri oluşturulamadı: ' + data.error, 'error');
-    else if (data.cancelled) toast('Duygu etiketleme durduruldu.');
+    else if (data.cancelled) toast(data.resumable === false ? 'Duygu etiketleme durduruldu.'
+      : 'Duygu etiketleme durduruldu. Kitaplıkta sağ tıklayıp kaldığı yerden sürdürebilirsiniz.');
     else toast(`Duygu etiketleri hazır: ${data.title || 'kitap'} · ${data.info?.tagged ?? 0} konuşma etiketlendi.`, 'ok');
   });
   // F197: kitap gorselleri (plan ya da uretim); acik pencere ayrica dinler (sahne gorseli geldikce).

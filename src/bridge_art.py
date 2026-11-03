@@ -21,6 +21,7 @@ from pathlib import Path
 import book_art
 import comfy_client
 from app_core import APP_DIR
+from bridge_tts import remote_llm
 
 
 STOP_AFTER = 3   # uretimde art arda bu kadar hata: ComfyUI calismiyor, is durur
@@ -68,8 +69,13 @@ class ArtMixin:
         return job is not None and job.is_alive()
 
     def _art_planning(self):
-        """Dil modeli plan cikariyor mu (ses motoru bu sirada yuklenmez)."""
+        """Dil modeli plan cikariyor mu."""
         return self._art_running() and getattr(self, '_art_stage', '') == 'plan'
+
+    def _art_planning_local(self):
+        """F238: plan bu bilgisayarin ya da yerel agin dil modeliyle mi cikariliyor (ses motoru bu sirada yuklenmez,
+        duygu etiketlemesi baslamaz). Internetteki sunucuyla (OpenRouter) cikan plan bunlara engel olmaz."""
+        return self._art_planning() and not getattr(self, '_art_remote', False)
 
     def _art_load(self, book):
         """Plan; eski (bolumleri bos bolumler atlanarak numaralanmis) plan kitabin metniyle bir kez onarilir."""
@@ -290,16 +296,17 @@ class ArtMixin:
             plan = book_art.new_plan(note, preset, density, size, title, identity, modifiers or (), options)
         if not hasattr(self, '_art_lock'):
             self._art_lock = threading.Lock()
+        remote = remote_llm()
         with self._art_lock:
             if self._art_running():
                 return _error('Kitap görselleri için bir iş zaten sürüyor.')
-            emotion = getattr(self, '_emotion_job', None)
-            if emotion is not None and emotion.is_alive():
-                return _error('Duygu etiketleri oluşturulurken görsel planı çıkarılamaz (ikisi de dil modelini kullanır).')
+            if not remote and getattr(self, '_emotion_local', lambda: False)():
+                return _error('Duygu etiketleri oluşturulurken görsel planı çıkarılamaz (ikisi de bu bilgisayarın dil '
+                              'modelini kullanır; internetteki bir model sunucusuyla birlikte çalışabilir).')
             if not resume and not openers_only and old:
                 store.stash(book)   # eski plan yeni plan kaydedilene kadar yedekte (basarisizsa geri gelir)
             cancel = threading.Event()
-            self._art_cancel_event, self._art_stage = cancel, 'plan'
+            self._art_cancel_event, self._art_stage, self._art_remote = cancel, 'plan', remote
 
             def progress(done, count):
                 self._emit('art', {'book': book, 'title': title, 'stage': 'plan', 'done': done, 'total': count})
@@ -310,12 +317,13 @@ class ArtMixin:
                 try:
                     self._log(f'Kitap görselleri: plan başlıyor ({total} cümle, {title or book}).')
                     engines = getattr(self, '_engines_cache', None)
-                    if engines is not None and engines.state != 'idle' and not engines._exporting:
+                    if not remote and engines is not None and engines.state != 'idle' and not engines._exporting:
                         self._log('Kitap görselleri: ses motoru durduruluyor…')
                         engines.stop_worker()   # ses motoru bellegi bosalsin
                         engines._set('idle', '')
-                    self._log('Kitap görselleri: ComfyUI belleği boşaltılıyor…')
-                    comfy_client.free(self._art_url())   # ComfyUI ayni GPU'daki modelini birakir
+                    if not remote:   # F238: internetteki dil modeli GPU paylasmaz
+                        self._log('Kitap görselleri: ComfyUI belleği boşaltılıyor…')
+                        comfy_client.free(self._art_url())   # ComfyUI ayni GPU'daki modelini birakir
                     client = Client(load_config(), log=self._log)
                     loaded = keep_loaded(client, [client.cfg.get('model')], self._log)
                     self._log(f'Kitap görselleri: dil modeline ilk istek gönderiliyor ({client.cfg.get("model") or "seçili model"}).')

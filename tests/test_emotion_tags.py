@@ -265,6 +265,106 @@ class BridgeTests(unittest.TestCase):
             release.set()
             self.bridge._emotion_job.join()
 
+    def test_stopped_model_tagging_resumes(self):
+        """F238: durdurulan etiketleme ara kayittan surer; biten bolumler yeniden sorulmaz."""
+        asked = []
+
+        class FakeClient:
+            def __init__(self, cfg, log=None):
+                self.cfg = {'model': 'sohbet'}
+
+            def chat(self, messages, temperature=None, max_tokens=None):
+                asked.append(messages[0]['content'])
+                if len(asked) == 2:
+                    self_bridge.tts_emotions_cancel()   # ikinci bolumun yaniti gelince durdurulur
+                return '{"1": "[sighs]"}' if 'Peki' in messages[0]['content'] else '{"2": "[fısıldar]"}'
+
+        self_bridge = self.bridge
+        self.bridge.prefs['emotion_style'] = 'catalog'
+        with patch('app_core.Client', FakeClient), patch('app_core.load_config', return_value={}), \
+                patch('app_core.keep_loaded', return_value=[]), patch('app_core.unload_models'):
+            self.assertIn('error', self.bridge.tts_emotions_create(BOOK, BookTaggingTests.SECTIONS, 'llm', resume=True))
+            self.bridge.tts_emotions_create(BOOK, BookTaggingTests.SECTIONS, 'llm')
+            done = self.finish()
+            self.assertTrue(done['cancelled'] and done['resumable'])
+            self.assertEqual(self.bridge.tts_emotions_books(), [])
+            self.assertEqual(self.bridge.tts_emotions_partials()[BOOK]['done'], 5)
+            # metin degisince surdurulemez
+            changed = [BookTaggingTests.SECTIONS[0], {'sentences': ['Başka.'], 'breaks': [0]}]
+            self.assertIn('error', self.bridge.tts_emotions_create(BOOK, changed, 'llm', resume=True))
+            self.assertEqual(self.bridge.tts_emotions_create(BOOK, BookTaggingTests.SECTIONS, 'words', resume=True),
+                             {'started': True, 'total': 5})   # yontem ara kayittan (llm)
+            done = self.finish()
+        self.assertEqual(len(asked), 2)
+        self.assertEqual(done['info']['method'], 'llm')
+        self.assertEqual(self.bridge._emotion_tag(BOOK, '— Sus.'), '[fısıldar]')
+        self.assertEqual(self.bridge.tts_emotions_partials(), {})
+
+    def test_remote_model_does_not_block(self):
+        """F238: internetteki model sunucusuyla etiketleme ses hazirlamaya ve gorsel planina engel olmaz."""
+        release = threading.Event()
+        self.bridge._prepare_job = threading.Thread(target=release.wait)
+        self.bridge._prepare_job.start()
+        self.bridge._art_planning_local = lambda: True
+        self.addCleanup(lambda: (release.set(), self.bridge._prepare_job.join()))
+
+        class FakeClient:
+            def __init__(self, cfg, log=None):
+                self.cfg = {'model': 'sohbet', 'base_url': 'https://openrouter.ai/api/v1'}
+
+            def chat(self, messages, temperature=None, max_tokens=None):
+                return '{}'
+
+        with patch('app_core.load_config', return_value={'base_url': 'http://127.0.0.1:1234/v1'}):
+            self.assertIn('error', self.bridge.tts_emotions_create(BOOK, BookTaggingTests.SECTIONS, 'llm'))
+        with patch('app_core.Client', FakeClient), patch('app_core.keep_loaded', return_value=[]), \
+                patch('app_core.load_config', return_value={'base_url': 'https://openrouter.ai/api/v1'}):
+            self.assertEqual(self.bridge.tts_emotions_create(BOOK, BookTaggingTests.SECTIONS, 'llm')['started'], True)
+            self.assertFalse(self.bridge._emotion_local())
+            self.finish()
+
+
+class ResumeTests(unittest.TestCase):
+    """F238: tag_book ara kayitla ilerler ve kaldigi yerden surer."""
+
+    def test_resume_gives_the_same_result(self):
+        cancel, states, asked = threading.Event(), [], []
+
+        def ask(prompt):
+            asked.append(prompt)
+            if len(asked) == 2:
+                cancel.set()
+            return json.dumps({'1': '[sighs]'} if 'Peki' in prompt else {'2': '[fısıldar]'})
+
+        whole = emotion_tags.tag_book(BookTaggingTests.SECTIONS, ask)
+        cancel.clear()
+        asked.clear()
+        with self.assertRaises(emotion_tags.Cancelled):
+            emotion_tags.tag_book(BookTaggingTests.SECTIONS, ask, cancel,
+                                  checkpoint=lambda state: states.append(json.loads(json.dumps(state))))
+        self.assertEqual(states[-1]['sections'], [whole[0]])
+        self.assertEqual(states[-1]['next'], 3)
+        asked.clear()
+        seen = []
+        self.assertEqual(emotion_tags.tag_book(BookTaggingTests.SECTIONS, ask, partial=states[-1],
+                                               progress=lambda done, total: seen.append(done)), whole)
+        self.assertEqual(asked, [])
+        self.assertEqual(seen[0], 2)
+
+    def test_store_partial(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = emotion_tags.Store(folder)
+            key = emotion_tags.resume_key('llm', BookTaggingTests.SECTIONS, None, 'free')
+            self.assertNotEqual(key, emotion_tags.resume_key('llm', BookTaggingTests.SECTIONS, None, 'catalog'))
+            store.save_partial(BOOK, key, {'sections': [['', '']], 'llm': ['', '', ''], 'next': 1}, 5, 'llm')
+            self.assertEqual(store.load_partial(BOOK, key)['next'], 1)
+            self.assertIsNone(store.load_partial(BOOK, 'baska'))
+            self.assertEqual(store.partials(), {BOOK: {'done': 3, 'total': 5, 'method': 'llm',
+                                                       'updated': store.load_partial(BOOK)['updated']}})
+            self.assertEqual(store.books(), [])
+            store.clear(BOOK)
+            self.assertEqual(store.partials(), {})
+
 
 class CatalogTests(unittest.TestCase):
     """F171: Drama 3 etiket katalogu; yalnizca Ayarlar'da secilenler kullanilir."""

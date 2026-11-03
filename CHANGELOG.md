@@ -2,6 +2,15 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.56.0 — 2026-11-03
+
+### Eklenen
+- **Duygu etiketlemesini sürdürme:** Dil modeliyle duygu etiketlemesi ilerledikçe ara kayıt tutar. Durdurulan ya da yarıda kalan iş, kitaplıkta sağ tıklayıp "Duygu etiketlemeyi sürdür" ile kaldığı yerden devam eder; bitmiş kısımlar modele yeniden sorulmaz. Kitabın metni ya da etiket seçimi değiştiyse baştan oluşturulur.
+- **Model değişince uyarı:** Model ya da bağlantı değiştirilirken model sunucusunu kullanan bir iş (altyazı/kitap çevirisi, duygu etiketleri, görsel planı, kütüphane hazırlığı) sürüyorsa iptal edileceği sorulur; onaylanınca işler durur. Çeviri sürerken model ve bağlantı alanları artık kilitli değil.
+
+### Değişen
+- **İnternetteki model sunucusunda eşzamanlı işler:** Model sunucusu internetteyse (OpenRouter, OpenAI) kitap görselleri planı ile duygu etiketlemesi aynı anda çalışabilir; ses motoru durdurulmaz, ComfyUI belleği boşaltılmaz. Yerel sunucularda bellek sınırı yüzünden eski kısıt sürer.
+
 ## 2.55.0 — 2026-11-03
 
 ### Eklenen

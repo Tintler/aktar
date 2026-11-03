@@ -7,7 +7,7 @@
   import FoldHead from '../components/FoldHead.svelte';
   import ModelPicker from '../components/ModelPicker.svelte';
   import { isOpen } from '../lib/folds.js';
-  import { app, act, savePref, setTheme, reloadThemes, toast } from '../lib/state.svelte.js';
+  import { app, act, savePref, setTheme, reloadThemes, toast, confirmModelChange, MODEL_KEYS } from '../lib/state.svelte.js';
   import { resolveTheme } from '../lib/theme.js';
   import { call, on } from '../lib/api.js';
   import { confirm, prompt } from '../lib/confirm.svelte.js';
@@ -92,6 +92,7 @@
   }
   async function useProfile(id) {
     if (id === cfg.llm_profile) return;
+    if (!(await confirmModelChange())) return;
     if (await profileAction('llm_profile_use', id)) toast(`${profiles.find((p) => p.id === id)?.name} bağlantısına geçildi.`, 'ok');
   }
   async function newProfile() {
@@ -111,6 +112,7 @@
     if (!current || !(await confirm({ title: 'Bağlantıyı sil', danger: true, ok: 'Sil',
       message: `"${current.name}" bağlantısı ve kayıtlı API anahtarı silinir. `
         + (next ? `"${next.name}" bağlantısına geçilir.` : 'Ayarlar şu anki değerleriyle kalır.') }))) return;
+    if (next && !(await confirmModelChange())) return;
     await profileAction('llm_profile_delete', current.id);
   }
   const offProfile = on('llm_profile', () => {   // model panelinden gecis: sayfa yeni degerlerle yenilenir
@@ -172,6 +174,8 @@
   }
 
   async function save() {
+    const before = JSON.parse(saved || '{}');
+    if (MODEL_KEYS.some((key) => (before[key] ?? '') !== (cfg[key] ?? '')) && !(await confirmModelChange())) return false;
     saving = true;
     const result = await act('save_settings', $state.snapshot(cfg));
     saving = false;
@@ -313,7 +317,7 @@
         {#if searching}<div class="cat-label">{CATS.find((c) => c.id === 'models').label}</div>{/if}
           <section>
             <h2>Model sunucusu</h2>
-            {#if info.locked.length}<div class="warn"><Icon name="alert" size={16} />Çeviri sürerken model ve bağlantı ayarları değiştirilemez.</div>{/if}
+            {#if info.locked.length}<div class="warn"><Icon name="alert" size={16} />Çeviri sürerken çeviri ayarları değiştirilemez. Model ya da bağlantı değişirse çeviri iptal edilir.</div>{/if}
             <div class="fr">
               <div class="l">Bağlantı<small>{profiles.length ? 'Kayıtlı bağlantılar arasında geçiş yapın. Aşağıdaki ayarlar (adres, tür, anahtar, modeller) seçili bağlantıya kaydedilir.'
                 : 'Yeni bağlantı eklerseniz şu anki ayarlar kendi adıyla saklanır; ikisi arasında buradan ya da sol alttaki model panelinden geçebilirsiniz.'}</small></div>
