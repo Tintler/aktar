@@ -3,25 +3,36 @@
   // ekranin alt kenari) kadarki kisim modele gider. Bitmis bolumlerin ozetleri saklanir; Guncelle yalnizca yeni
   // okunani ozetler. Metindeki (s.N) atfi kitabi N. bolume goturur.
   import Icon from '../lib/Icon.svelte';
-  import { app, act } from '../lib/state.svelte.js';
+  import { on } from '../lib/api.js';
+  import { act } from '../lib/state.svelte.js';
 
   let { book, section = 0, fraction = 1, ongo } = $props();
 
-  const state = $derived(app.bookRecap?.book === book.id ? app.bookRecap : null);
+  let state = $state(null);
   const recap = $derived(state?.recap ?? null);
   let tab = $state('story');
 
-  act('reader_recap_get', book.id).then((value) => {
-    if (value && !value.error) app.bookRecap = value;
+  $effect(() => {
+    const bookId = book.id;
+    state = null;
+    let active = true;
+    const unsubscribe = on('reader_recap', (value) => {
+      if (value.book === bookId) state = value;
+    });
+    act('reader_recap_get', bookId).then((value) => {
+      if (active && !state && value) state = value;
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   });
 
   // Ozet okunan yerin gerisinde mi (okuma ilerledi)?
   const behind = $derived(!!recap && (recap.until < section || (recap.until === section && recap.fraction + 0.02 < fraction)));
 
-  async function run() {
-    const value = await act('reader_recap_run', book.id, section, fraction);
-    if (value?.error && !value.book) app.bookRecap = { ...(state ?? { book: book.id }), error: value.error };
-    else if (value) app.bookRecap = value;
+  function run() {
+    return act('reader_recap_run', book.id, section, fraction);
   }
 
   function where(item) {
@@ -54,7 +65,7 @@
       <div class="note"><Icon name="loader" size={13} spin />{state.note || 'Hazırlanıyor…'}</div>
       {#if state.total}<div class="bar"><span style:width={`${Math.round((100 * state.done) / state.total)}%`}></span></div>{/if}
     {/if}
-    {#if state?.error}<div class="error">{state.error}</div>{/if}
+    {#if state?.job_error}<div class="error">{state.job_error}</div>{/if}
     {#if !state?.running && state?.note}<div class="note">{state.note}</div>{/if}
 
     {#if recap}

@@ -2,6 +2,11 @@
 
 Sürümler [Anlamsal Sürümleme](https://semver.org/lang/tr/) düzenindedir: yeni özellik ikinci, yalnızca düzeltme üçüncü sayıyı artırır. Ayrıntılı geçmiş `git log` içindeki `F<numara>` commit'lerindedir.
 
+## 2.58.1 — 2026-11-11
+
+### Düzeltilen
+- **Kitap özeti:** Özet sekmesi açıldığında boş hata bildirimi gösterilmiyor. Kayıtlı özet açılışta, özet hazırlanırken oluşan hatalar panelde görünüyor.
+
 ## 2.58.0 — 2026-11-04
 
 ### Eklenen

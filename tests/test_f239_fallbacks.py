@@ -16,6 +16,7 @@ import book_recap  # noqa: E402
 import llm_provider  # noqa: E402
 import search_index  # noqa: E402
 from app_core import DEFAULT_CONFIG, Client  # noqa: E402
+from bridge_reader import ReaderMixin  # noqa: E402
 
 QUIET = (lambda _message: None)
 
@@ -115,6 +116,23 @@ class RecapTests(unittest.TestCase):
         patcher = mock.patch('book_search.section_texts', lambda book: iter(texts))
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    def test_saved_recap_is_returned_with_job_status(self):
+        reader = ReaderMixin()
+        book_id = 'kitap1'
+        recap = {'text': 'Ali yola çıktı.'}
+        with mock.patch('bridge_reader.book_core.APP_DIR', self.temp.name):
+            empty = reader.reader_recap_get(book_id)
+            self.assertIsNone(empty['recap'])
+            self.assertNotIn('error', empty)
+            store = book_recap.Store(book_id, self.temp.name)
+            store.save(dict(store.load(), recap=recap))
+            reader._recap_job = {'book': book_id, 'finished': True, 'error': 'Model sunucusu yanıt vermedi.',
+                                 'done': 0, 'total': 1, 'note': ''}
+            state = reader.reader_recap_get(book_id)
+        self.assertNotIn('error', state)
+        self.assertEqual(state['job_error'], 'Model sunucusu yanıt vermedi.')
+        self.assertEqual(state['recap'], recap)
 
     def test_build_stops_at_reading_point_and_caches(self):
         store = book_recap.Store('kitap1', self.temp.name)

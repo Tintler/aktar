@@ -227,9 +227,9 @@ class ReaderMixin:
     def _recap_state(self, book_id):
         job = getattr(self, '_recap_job', None)
         running = job is not None and job['book'] == book_id and not job['finished']
-        state = {'book': book_id, 'running': running, 'recap': None, 'error': '', 'done': 0, 'total': 0, 'note': ''}
+        state = {'book': book_id, 'running': running, 'recap': None, 'job_error': '', 'done': 0, 'total': 0, 'note': ''}
         if job is not None and job['book'] == book_id:
-            state.update(error=job['error'], done=job['done'], total=job['total'], note=job['note'])
+            state.update(job_error=job['error'], done=job['done'], total=job['total'], note=job['note'])
         try:
             import book_recap
             state['recap'] = book_recap.Store(book_id, book_core.APP_DIR).load().get('recap')
@@ -287,8 +287,9 @@ class ReaderMixin:
 
         job['thread'] = threading.Thread(target=work, name='aktar-recap', daemon=True)
         self._recap_job = job
+        push()
         job['thread'].start()
-        return self._recap_state(book_id)
+        return True
 
     def _recap_running(self):
         job = getattr(self, '_recap_job', None)

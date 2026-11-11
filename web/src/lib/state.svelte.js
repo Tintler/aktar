@@ -29,7 +29,6 @@ export const app = $state({
   reading: { book: null, section: 0, offset: 0, percent: 0 },
   reader: { size: 19, font: 'serif', leading: 1.75, width: 680, paper: 'theme' },
   bookChat: null,             // F146: okuyucudaki kitap sohbeti {book, chat} (bridge_reader.reader_chat_open)
-  bookRecap: null,            // F239: okuyucuda 'Simdiye kadar' ozeti (bridge_reader.reader_recap_get)
   // PDF'den kitap (bridge_pdf): acik pencere ve calisan is (pencere kapansa da is surer).
   pdfImport: null,            // {open, info, title, author, target, running, progress, result}
   setup: false,               // F154: bilesen denetimi penceresi acik
@@ -418,9 +417,6 @@ export async function init() {
   on('reader_chat', ({ book, chat }) => {
     // Kitap, reader_chat_open cevabi gelmeden hazirlanmis olabilir: olay o zaman da saklanir (at: ne zaman geldi).
     if (!app.bookChat || app.bookChat.book === book) app.bookChat = { book, chat, at: Date.now() };
-  });
-  on('reader_recap', (state) => {
-    if (!app.bookRecap || app.bookRecap.book === state.book) app.bookRecap = state;
   });
   on('player', (state) => {
     if (state && app.player?.path === state.path) app.player = state;
